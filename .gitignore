@@ -63,3 +63,6 @@ node_modules/
 *.tar.gz
 *.zip
 *.xlsx
+
+# Private working notes
+DOCS/实验日记.md
