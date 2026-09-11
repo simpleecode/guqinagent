@@ -1,0 +1,30 @@
+{
+  "schema_version": "pitch-eligible-trajectory-export-1.0",
+  "selection": {
+    "included_phase_classes": [
+      "parseable_and_at_least_one_match"
+    ],
+    "pairing": "both_fingering_and_guqinizer_must_be_eligible",
+    "excluded_class": "parseable_but_no_match"
+  },
+  "inputs": {
+    "messages": null,
+    "stats": null,
+    "inferred_dir": "ABC_J\\agent_training\\inferred_gqs_v12",
+    "splits": [
+      "train"
+    ]
+  },
+  "counts": {
+    "source_message_rows": 4691,
+    "exported_message_rows": 0,
+    "source_phrase_count": 4691,
+    "exported_phrase_count": 3927,
+    "exported_fingering_count": 0,
+    "exported_guqinizer_count": 0
+  },
+  "files": {
+    "messages": null,
+    "phrase_ids": "pitch_eligible_phrase_ids.txt"
+  }
+}

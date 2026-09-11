@@ -1,0 +1,22 @@
+﻿{
+    "device":  "d90c52bf M2011K2C",
+    "version":  "2.3.0(2132)",
+    "apk":  "artifacts/original/sitongli-2.3.0-2132.apk",
+    "findings":  [
+                     "Flutter app",
+                     "API strings: https://s.sitongli.net, /scores/:key, /scores, /scores/search/count",
+                     "score fields: score_id, score_key, score_title, sections, notes, jians, jian, lyric1, lyric2",
+                     "external app dir contains only files/fvv/.dk Java serialized char[]: 1xkt78395mwuc1d05wp49094ye2n14gd1e2ng927",
+                     "run-as denied: package not debuggable",
+                     "Frida attach/spawn denied on jailed Android; needs Gadget/root/frida-server"
+                 ],
+    "sha256":  "E04B4C00AE5D9814C8AE3A0545FBC69A39E075D2B5AD57337264E7AC3307F223",
+    "objective":  "Extract authorized Guanshanyue Sitongli score structured data",
+    "package":  "com.sitongli.app",
+    "runtime_after_open":  [
+                               "PID 29907 active",
+                               "logcat shows reqwest connections to https://s.sitongli.net at 14:49:25 and 14:49:38 after page interaction",
+                               "Frida PID attach failed: remote frida-server closed",
+                               "external app dir unchanged: only files/fvv/.dk"
+                           ]
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "古琴减字谱音高映射"
+  short_description: "在指定调弦下双向映射减字谱与音高，并给出可审计验证信号"
+  default_prompt: "Use $guqin-pitch-mapper to map or validate guqin jianzipu pitches under the specified tuning."

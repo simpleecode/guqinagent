@@ -1,0 +1,46 @@
+{
+  "schema_version": "split-inventories-1.0",
+  "sources": {
+    "groups_csv": "D:\\sitongli\\sitongli-guanshanyue\\ABC_J\\results\\dataset_split_groups.csv",
+    "splits_csv": "D:\\sitongli\\sitongli-guanshanyue\\ABC_J\\results\\agent_dataset_splits.csv",
+    "metrics_csv": "D:\\sitongli\\sitongli-guanshanyue\\ABC_J\\results\\agent_metric_baseline.csv",
+    "phrases": "D:\\sitongli\\sitongli-guanshanyue\\ABC_J\\agent_training\\inferred_v3"
+  },
+  "counts": {
+    "scores_total": 241,
+    "scores_by_split": {
+      "train": 176,
+      "validation": 21,
+      "test": 44
+    },
+    "phrases_by_split": {
+      "train": 3410,
+      "validation": 489,
+      "test": 1003
+    },
+    "pitch_pass_over_40": 223,
+    "pitch_fail_over_40": 18
+  },
+  "pitch_pass_by_split": {
+    "train": {
+      "pass": 163,
+      "total": 176
+    },
+    "validation": {
+      "pass": 19,
+      "total": 21
+    },
+    "test": {
+      "pass": 41,
+      "total": 44
+    }
+  },
+  "pitch_rate_range": {
+    "min": 0.0,
+    "max": 1.0
+  },
+  "leakage_groups": 104,
+  "consistency_problems": [],
+  "data_quality_notes": [],
+  "all_checks_passed": true
+}

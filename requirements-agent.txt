@@ -1,0 +1,5 @@
+# Isolated runtime for the ABC-to-jianzipu orchestration layer.
+# Install this in the `guqin-agent` environment, not the legacy `guqin` env.
+langgraph==1.2.10
+anthropic>=0.74,<1
+python-dotenv>=1.1,<2

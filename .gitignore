@@ -1,0 +1,65 @@
+# Local secrets and OS/editor noise
+.env
+.env.*
+!.env.example
+.DS_Store
+.idea/
+.vscode/
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+
+# Local logs, process markers and temporary exports
+*.log
+*.pid
+*.tmp
+*.bak
+*.partial.jsonl
+
+# Large raw-score collection and intermediate/review artifacts
+ABC_J/final/
+ABC_J/round2/
+ABC_J/candidates/
+ABC_J/results/*
+!ABC_J/results/split_inventories/
+!ABC_J/results/split_inventories/**
+
+# Keep only the frozen, split phrase input and the independent test set.
+ABC_J/agent_training/*
+!ABC_J/agent_training/pitch_eligible_gqs_v12_train/
+!ABC_J/agent_training/pitch_eligible_gqs_v12_train/**
+# 455MB frozen source stays local; keep the split phrase IDs and manifest in Git.
+ABC_J/agent_training/pitch_eligible_gqs_v12_train/inferred_trajectories_train.jsonl
+!ABC_J/agent_training/evaluation_text_protocol_v2/
+ABC_J/agent_training/evaluation_text_protocol_v2/*
+!ABC_J/agent_training/evaluation_text_protocol_v2/evaluation_pairs_test.jsonl
+
+# Training/runtime data and generated evaluation outputs
+train/data/
+train/runtime/
+train/eval_outputs_v3_two_stage/
+train/eval_inputs_v2_text_protocol/*
+!train/eval_inputs_v2_text_protocol/test.jsonl
+
+# Front-end dependencies generated for the lineage workbook
+ABC_J/results/unified_lineage/workbook_build/node_modules/
+node_modules/
+
+# Common large model/data artifacts
+*.ckpt
+*.safetensors
+*.pt
+*.pth
+*.onnx
+*.bin
+*.tar
+*.tar.gz
+*.zip
+*.xlsx
