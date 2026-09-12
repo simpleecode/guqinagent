@@ -21,12 +21,15 @@ def main() -> int:
     parser.add_argument("--replacement", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--exclude-trajectory", action="append", default=[])
+    parser.add_argument("--exclude-sample-id", action="append", default=[],
+                        help="drop an exact stage sample while retaining its paired stage")
     args = parser.parse_args()
     excluded = {value for value in args.exclude_trajectory}
-    excluded_ids = {
+    excluded_ids = set(args.exclude_sample_id)
+    excluded_ids.update({
         f"{value}-{stage}-teacher-tools"
         for value in excluded for stage in ("fingering_agent", "guqinization")
-    }
+    })
     base_messages = read(args.base / "messages_train.jsonl")
     base_audits = {row["sample_id"]: row for row in read(args.base / "teacher_trajectory_audit.jsonl")}
     replacements = {row["sample_id"]: row for row in read(args.replacement / "messages_train.jsonl")}
@@ -61,6 +64,7 @@ def main() -> int:
         "base_rows": len(base_messages), "replacement_rows": len(replacements),
         "replaced_rows": len(replacements), "excluded_trajectory_count": len(excluded),
         "excluded_trajectories": sorted(excluded), "output_rows": len(merged_messages),
+        "excluded_sample_ids": sorted(set(args.exclude_sample_id)),
         "by_stage": {}, "public_private_ids_match": {"messages": len(merged_messages), "audits": len(merged_audits)},
         "redaction_audit_rows": len(merged_redaction),
     }

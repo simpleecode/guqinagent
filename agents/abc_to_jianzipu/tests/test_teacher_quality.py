@@ -167,6 +167,34 @@ class EditableProtocolTests(unittest.TestCase):
         self.assertEqual(result["result"]["unchanged_event_indices"], [25])
         self.assertIn("未变更｜25｜提交值与当前减字相同", result["result"]["text"])
 
+    def test_edit_plan_omits_empty_unchanged_event_indices(self) -> None:
+        item = {
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "notes_without_jianzi": [{
+                    "index": 25, "event_index": 25,
+                    "jianpu": "3", "abc": "E",
+                }],
+            },
+            "baseline_plan": {"actions": []},
+            "reference_plan": {"actions": []},
+        }
+        runtime = RealToolRuntime(item, {}, toward_reference=True)
+        result = runtime.invoke(
+            "edit_plan", {"jianzi_rows": [[25, "名指九徽勾五弦"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertNotIn("unchanged_event_indices", result["result"])
+
+    def test_private_prompt_teaches_canonical_jianzi_field_order(self) -> None:
+        source = Path(
+            "ABC_J/scripts/generate_teacher_tool_trajectories.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("名指九徽勾六弦", source)
+        self.assertIn("泛音名指七徽勾四弦", source)
+        self.assertIn("绰名指十徽八分勾三弦", source)
+        self.assertIn("名指九徽打三弦", source)
+
     def test_pitch_warning_uses_normalized_score_tuning_and_does_not_block(self) -> None:
         open_strings = [
             {"string": index + 1, "pitch": pitch, "octave": octave}

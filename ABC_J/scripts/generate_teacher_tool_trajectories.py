@@ -994,10 +994,10 @@ class RealToolRuntime:
                 preview_text = render_edit_preview(
                     replay.actions, cumulative or patches, preview_valid,
                     preview_errors, self.item, preview_warnings)
-                if unchanged_sources:
-                    unchanged_events = sorted({
-                        self._source_to_event(index) for index in unchanged_sources
-                    })
+                unchanged_events = sorted({
+                    self._source_to_event(index) for index in unchanged_sources
+                })
+                if unchanged_events:
                     preview_text += "\n未变更｜" + "、".join(
                         str(index) for index in unchanged_events
                     ) + "｜提交值与当前减字相同"
@@ -1011,10 +1011,9 @@ class RealToolRuntime:
                 result = {
                     "valid": preview_valid,
                     "text": preview_text,
-                    "unchanged_event_indices": sorted({
-                        self._source_to_event(index) for index in unchanged_sources
-                    }),
                 }
+                if unchanged_events:
+                    result["unchanged_event_indices"] = unchanged_events
             else:
                 raise ValueError(f"unknown tool: {name}")
             envelope = {"ok": True, "result": result}
@@ -1629,8 +1628,21 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         "最终结束前每个演奏事件必须得到字符串；一次 edit_plan 可以只提交已决定修改的部分行，未提交的行保留现状。空字符串的直接语义是将该行 jianzi_text 置空；不会删除声音或演奏状态。若前一减字已覆盖多个动作，后续行可用空字符串表示不重复显示。",
         "音高工具只在减字与简谱都可可靠解析时给出警告；复杂技法或未解析动作不算失败。",
     ])
+    # Keep the surface order explicit in the teacher-only prompt.  The model
+    # otherwise sometimes copies the semantic field order (finger/string/hui)
+    # into prose-like strings that are not conventional jianzipu notation.
+    jianzi_field_order_rule = (
+        "【减字字段次序】先在心中按固定模板组织，再写入 edit_plan：前置技法→取音状态（如泛音）"
+        "→左手按指→徽位→右手指法→起音弦。成对例子：名指九徽勾六弦（不是名指六弦九徽勾）；"
+        "泛音名指七徽勾四弦（不是泛音四弦七徽勾四弦）；"
+        "名指九徽打三弦（不是名指三弦九徽打）；"
+        "绰名指十徽八分勾三弦（不是绰名指三弦十徽八分勾）。"
+        "除撮、泼、剌等明确的多弦复合写法外，一个起音的弦序只写在该音右手指法之后；"
+        "完成前逐项比对这四组正例，修正任何把弦序写到徽位之前的行。"
+    )
     if basic:
         private_instruction["rules"] = [
+            jianzi_field_order_rule,
             "首次查询音高时，若当前段有4个或以上可解析的发音事件，尽量把至少4个（最好全部）音序放在同一次 get_pitch_candidates 的 event_indices 中；候选会按目标音高自动去重。只有后续确需核查某个单音时才逐音查询，不要把首次查询拆成逐音调用。",
             "参考 GQS 提供最终方向；不要逐行照抄其中的复杂走手、复合技法或空显示范围。",
             "Fingering 初稿只使用泛音、按音、散音和右手抹、挑、勾、剔、擘、托、打、摘、撮；绰上、注下、吟、猱、走手及其他复杂技法留给 Guqinizer。",
@@ -1642,6 +1654,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         ] + private_reference_semantics_rules(stage) + private_instruction["rules"]
     elif not review_noop:
         private_instruction["rules"] = [
+            jianzi_field_order_rule,
             "休止和延音行没有新音高，但若要表达走猱、猱、吟、泛止等延续动作，可以提交减字。",
             "给出的 GQS 参考是改进方向，不要求逐字复制；请结合基础初稿、上下文和专业判断适度加入高级指法。",
             "必须从头到尾按音序审阅完整个当前段：可以逐音分析，也可以每次按一小组相邻音分析，但不能只讨论少数差异音便结束。私有标注用于提示值得关注的位置和方向，不要求逐字照抄；公开 reasoning 应说明各音或各小组为何保留或修改，以及相关的音高、技法和减字取舍，不要说“因为标注/参考这样写”。edit_plan.jianzi_rows 只填写实际决定改写的音，不必重发保留项。",

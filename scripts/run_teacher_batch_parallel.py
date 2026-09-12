@@ -96,6 +96,8 @@ def main() -> int:
     parser.add_argument("--include-guqinizer-no-op", action="store_true")
     parser.add_argument("--score-shard-count", type=int,
                         help="partition source rows by stable score hash so workers do not each load the full corpus")
+    parser.add_argument("--shard-by-trajectory-id", action="store_true",
+                        help="balance selected IDs across workers while every worker retains full score context")
     args = parser.parse_args()
     if args.workers < 1:
         raise SystemExit("--workers must be positive")
@@ -121,15 +123,16 @@ def main() -> int:
 
     parallel_root = args.output_dir / ".parallel_workers"
     parallel_root.mkdir(parents=True, exist_ok=True)
-    def score_bucket(score_key: str) -> int:
-        digest = hashlib.blake2b(str(score_key).encode("utf-8"), digest_size=8).digest()
+    def bucket(value: str) -> int:
+        digest = hashlib.blake2b(str(value).encode("utf-8"), digest_size=8).digest()
         return int.from_bytes(digest, "big") % score_shard_count
 
     source_by_id = {str(row["trajectory_id"]): row for row in source_rows}
     shards: list[list[str]] = [[] for _ in range(args.workers)]
     for trajectory_id in remaining:
-        bucket = score_bucket(source_by_id[trajectory_id].get("score_key", ""))
-        shards[bucket].append(trajectory_id)
+        shard_index = bucket(trajectory_id if args.shard_by_trajectory_id else
+                             source_by_id[trajectory_id].get("score_key", ""))
+        shards[shard_index].append(trajectory_id)
 
     processes: list[tuple[int, subprocess.Popen, Path]] = []
     for index, ids in enumerate(shards):
@@ -150,9 +153,10 @@ def main() -> int:
                    "--max-tool-rounds", str(args.max_tool_rounds),
                    "--max-attempts", str(args.max_attempts),
                    "--min-interval", str(args.min_interval),
-                   "--score-shard-count", str(score_shard_count),
-                   "--score-shard-index", str(index),
                    "--resume"]
+        if not args.shard_by_trajectory_id:
+            command.extend(("--score-shard-count", str(score_shard_count),
+                            "--score-shard-index", str(index)))
         if args.allow_private_reasoning_leakage:
             command.append("--allow-private-reasoning-leakage")
         if args.stage:

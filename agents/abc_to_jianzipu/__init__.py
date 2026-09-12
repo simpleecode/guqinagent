@@ -1,16 +1,6 @@
-"""ABC-to-jianzipu agent framework.
+"""Deterministic ABC-to-jianzipu utilities and teacher-trajectory support.
 
-The package keeps deterministic music logic separate from model-backed agents.
-The public entry point is :class:`orchestrator.AbcToJianzipuOrchestrator`.
+The retired model-backed CLI/orchestrator has been removed. Current training
+and evaluation use the two-stage teacher trajectory pipeline in
+``ABC_J/scripts/generate_teacher_tool_trajectories.py``.
 """
-
-__all__ = ["AbcToJianzipuOrchestrator"]
-
-
-def __getattr__(name):
-    # Deterministic parsers/renderers are also used in lightweight evaluation
-    # environments where LangGraph is intentionally not installed.
-    if name == "AbcToJianzipuOrchestrator":
-        from .orchestrator import AbcToJianzipuOrchestrator
-        return AbcToJianzipuOrchestrator
-    raise AttributeError(name)
