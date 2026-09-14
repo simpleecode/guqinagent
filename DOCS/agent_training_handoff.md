@@ -1893,3 +1893,30 @@ Guqinizer。
 - 授权网络重启后的 `messages_gqs_v12_pitch_eligible_full_parallel8_v6` 已实际生成 Base 482 条、
   Guqinizer 469 条（共 951 条阶段记录），随后因 D 盘可用空间降为 0 而全部 worker 退出。
 - 该目录中的部分 checkpoint 和阶段结果保留；磁盘清理前不得重启或合并。清理任何旧数据前必须先确认具体目录并取得明确授权。
+
+## 7.159 音高资格与异常连续空减字筛选链路复核（2026-09-14）
+
+- “标注减字有可解析音高、但所有可解析音均不匹配”这一类 phrase 现由
+  `ABC_J/scripts/filter_training_data.py pitch-select` 筛选。它动态调用
+  `scripts/audit_training_phase_pitch_parse_stats.py` 的 `build_pitch_audit()` / `classify()`，后者使用
+  `scripts/audit_jianpu_jianzi_pitch.py` 的解析与审计逻辑；`--require-match` 仅保留
+  `parseable_and_at_least_one_match`，剔除 `parseable_but_no_match`。两阶段按 phrase 成对选取，避免留下单阶段数据。
+- 调弦双重偏移修复后，以 train 的 4,691 条 `inferred_gqs_v12` 和
+  `inferred_gqs_v12_tuningfix_20260914` 重新执行同一 `--require-match` 口径：均为 3,969 条，新增 0、移除 0。
+  因此修复确实影响带调弦 phrase 的音高数值/提示构造，但在“至少存在一个解析且命中音”的粗资格门槛下没有改变合格集合；不能据此把 993 条调弦重跑视为无效。
+- “普通单发减字后至少连续 5 个未标注发音事件”的历史清理结果保存于
+  `ABC_J/agent_training/exclusions/basic_attack_followed_by_5plus_blank_events_20260912.txt`（56 个 phrase）。
+  该清单在 `pitch_eligible_gqs_v12_train/selection_manifest.json` 中作为 `quality_exclusions` 留痕；仓库中未找到当时生成该 5+ 连续空规则的独立脚本，说明该次检测代码没有持久化，未来不能假设它会自动随新源数据复扫。
+- 相关空减字规则现由统一入口的 `source-audit`、`apply-source-audit` 与 `filter-corpus` 应用；
+  `scripts/audit_blank_reference_targets.py` 仍仅负责审计全空/显式空目标。它们均不等价于上面的“基础单发 + 5 连空”规则。
+
+## 7.160 训练数据筛选器统一入口（2026-09-14）
+
+- 原有的音高资格、源谱覆盖率/连续空尾、全空 phrase 及按 ID 删除脚本已统一为
+  `ABC_J/scripts/filter_training_data.py`：`pitch-select`、`source-audit`、`apply-source-audit`、
+  `basic-blank-audit`、`filter-corpus` 五个子命令共享 JSONL、phrase ID 和报告格式。
+- 删除旧入口 `export_pitch_eligible_trajectories.py`、`audit_mapped_jianzi_quality.py`、
+  `merge_quality_filter_minimal.py`、`prune_all_empty_trajectory_phrases.py` 与
+  `filter_teacher_trajectories_by_source_ids.py`；评估集构建脚本已改为从统一入口加载源谱审计函数。
+- 新增的 `basic-blank-audit` 是保守的候选检测：跳过小节线、休止、再作省略和已知复合/延续技法，输出候选报告而不自动删数据。
+  旧 56 条排除清单保留为人工审阅后的历史基线，不能与自动候选集混同。

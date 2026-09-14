@@ -97,7 +97,7 @@ def render_public_prompt(item: dict) -> str:
 
 
 def load_audit_module():
-    path = ROOT / "scripts" / "audit_mapped_jianzi_quality.py"
+    path = ROOT / "ABC_J" / "scripts" / "filter_training_data.py"
     spec = importlib.util.spec_from_file_location("mapped_quality", path)
     if spec is None or spec.loader is None:
         raise RuntimeError(path)
@@ -177,7 +177,7 @@ def main() -> int:
     for split in ("validation", "test"):
         source = args.input_dir / f"inferred_trajectories_{split}.jsonl"
         rows = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines() if line.strip()]
-        quality = {key: audit.audit_file(audit.mapped_path(key)) for key in sorted({r["score_key"] for r in rows})}
+        quality = {key: audit.mapped_score_record(audit.mapped_path(key)) for key in sorted({r["score_key"] for r in rows})}
         sealed_path = args.sealed_output_dir / f"evaluation_pairs_{split}.jsonl"
         public_path = args.public_output_dir / f"{split}.jsonl"
         counts = Counter(source_phrases=len(rows))
