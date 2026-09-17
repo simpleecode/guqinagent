@@ -16,8 +16,9 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(Path(__file__).resolve().parent) not in sys.path:
-    sys.path.insert(0, str(Path(__file__).resolve().parent))
+GENERATOR_DIR = ROOT / "ABC_J" / "scripts"
+if str(GENERATOR_DIR) not in sys.path:
+    sys.path.insert(0, str(GENERATOR_DIR))
 
 import generate_teacher_tool_trajectories as generator
 
@@ -89,6 +90,10 @@ def main() -> int:
     )
     (args.output_dir / "guqinizer_retry_ids.txt").write_text(
         "".join(trajectory_id + "\n" for trajectory_id in actionable),
+        encoding="utf-8",
+    )
+    (args.output_dir / "guqinizer_noop_ids.txt").write_text(
+        "".join(trajectory_id + "\n" for trajectory_id in no_op),
         encoding="utf-8",
     )
     (args.output_dir / "selection_report.json").write_text(

@@ -446,9 +446,10 @@ def main() -> int:
                     "annotation_empty" if value and not ann else "different")
             rows.append(row)
         guqin = group["stages"].get("guqinization") or {}
-        group["no_op"] = (
-            guqin.get("objective") == "review_noop" or guqin.get("termination") == "no_changes"
-        )
+        # ``no_changes`` only describes the final response. A trajectory may
+        # reach it after many real edits, so only the explicit review_noop
+        # objective earns the no-op label.
+        group["no_op"] = guqin.get("objective") == "review_noop"
         group["rows"] = rows
         records.append(group)
 
@@ -463,7 +464,7 @@ def main() -> int:
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>全部训练轨迹｜分层复核</title>
 <style>
-:root{{--bg:#f6f7f9;--fg:#20242a;--muted:#667085;--line:#d9dee7;--card:#fff;--green:#e7f6ec;--greenfg:#146c35;--red:#fff0f0;--redfg:#a12929;--amber:#fff5dc;--amberfg:#805b00;--gray:#f0f2f5;--blue:#315dbb}}
+:root{{--bg:#101216;--fg:#e8ecf1;--muted:#a6b0bd;--line:#303741;--card:#181c22;--green:#173b2a;--greenfg:#9ae6b4;--red:#481f25;--redfg:#ffb4bd;--amber:#4c3914;--amberfg:#ffdc8c;--gray:#252b33;--blue:#8bb7ff}}
 *{{box-sizing:border-box}}body{{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif}}
 main{{max-width:1380px;margin:0 auto;padding:22px 18px 50px}}h1{{font-size:22px;margin:0 0 5px}}.sub{{color:var(--muted);margin:0 0 14px}}
 .stats{{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0 16px}}.stat{{background:var(--card);border:1px solid var(--line);padding:8px 13px;min-width:125px;border-radius:7px}}.stat b{{display:block;font-size:19px}}.stat span{{font-size:12px;color:var(--muted)}}
@@ -472,7 +473,8 @@ details.score,details.phrase{{background:var(--card);border:1px solid var(--line
 .body{{padding:0 11px 13px}}.meta{{color:var(--muted);font-size:12px;margin:0 0 8px}}.stage-summary{{display:flex;gap:8px;flex-wrap:wrap;margin:5px 0 10px}}.stage-summary span{{border:1px solid var(--line);padding:4px 7px;border-radius:5px;background:#fafbfc;font-size:12px}}.stage-summary b{{font-weight:600}}
 .reasoning{{white-space:pre-wrap;word-break:break-word;background:#fafbfc;border-left:3px solid var(--blue);padding:8px 10px;margin:8px 0;font-size:13px;max-height:240px;overflow:auto}}.table-wrap{{overflow:auto;max-height:65vh;border:1px solid var(--line);border-radius:5px}}table{{width:100%;border-collapse:collapse;background:var(--card);font-size:12px}}th,td{{padding:6px 8px;border-bottom:1px solid #edf0f3;text-align:left;vertical-align:top;white-space:pre-wrap;word-break:break-word}}th{{position:sticky;top:0;background:#f1f3f6;color:var(--muted);font-weight:600;z-index:1}}td.idx{{width:66px;color:var(--muted)}}td.jp{{width:100px}}td.jz{{min-width:170px}}td.match{{background:var(--green);color:var(--greenfg)}}td.different{{background:var(--red);color:var(--redfg)}}td.annotation_empty{{background:var(--amber);color:var(--amberfg)}}td.both_empty{{background:var(--gray);color:var(--muted)}}
 .trajectory{{margin:9px 0}}.turn{{border-top:1px solid var(--line);padding:9px 4px}}.turn:first-child{{border-top:0}}.turn-head{{display:flex;gap:8px;align-items:center;margin-bottom:5px;color:var(--muted);font-size:12px}}.role{{font-weight:600;color:var(--fg)}}.turn-content,.tool-call{{white-space:pre-wrap;word-break:break-word;margin:0;font:13px/1.55 ui-monospace,SFMono-Regular,Consolas,"Microsoft YaHei",monospace}}.tool-call{{margin-top:7px;padding:7px 9px;background:#f3f5f8;border-left:3px solid var(--blue)}}
-.legend{{color:var(--muted);font-size:12px;margin:8px 0}}.legend i{{display:inline-block;width:11px;height:11px;margin:0 3px 0 10px;vertical-align:-1px;border:1px solid var(--line)}}.legend i:first-child{{margin-left:0;background:var(--green)}}.legend i:nth-child(2){{background:var(--red)}}.legend i:nth-child(3){{background:var(--amber)}}.legend i:nth-child(4){{background:var(--gray)}}.pitch{{font-size:18px;font-weight:700;text-align:center;width:78px}}.pitch.match{{color:var(--greenfg);background:var(--green)}}.pitch.mismatch{{color:var(--redfg);background:var(--red)}}.pitch.unresolved{{color:var(--muted);background:var(--gray)}}.structure td{{font-weight:600;color:var(--muted);background:#eef1f5;text-align:center}}.section-row td{{color:#315dbb;background:#eaf0ff}}.empty{{color:var(--muted);padding:20px 4px}}
+.legend{{color:var(--muted);font-size:12px;margin:8px 0}}.legend i{{display:inline-block;width:11px;height:11px;margin:0 3px 0 10px;vertical-align:-1px;border:1px solid var(--line)}}.legend i:first-child{{margin-left:0;background:var(--green)}}.legend i:nth-child(2){{background:var(--red)}}.legend i:nth-child(3){{background:var(--amber)}}.legend i:nth-child(4){{background:var(--gray)}}.pitch{{font-size:18px;font-weight:700;text-align:center;width:78px}}.pitch.match{{color:var(--greenfg);background:var(--green)}}.pitch.mismatch{{color:var(--redfg);background:var(--red)}}.pitch.unresolved{{color:var(--muted);background:var(--gray)}}.structure td{{font-weight:600;color:var(--muted);background:#252c35;text-align:center}}.section-row td{{color:#b9d2ff;background:#182d4d}}.empty{{color:var(--muted);padding:20px 4px}}
+.chip{{background:#263447;color:#bdd2ef}}.chip.noop{{background:#342551;color:#d4c1ff}}.stage-summary span,.reasoning,.tool-call{{background:#20262e}}th{{background:#252c35}}th,td{{border-bottom-color:#2b323b}}
 </style></head><body><main>
 <h1>全部训练轨迹｜曲谱 → phrase 分层复核</h1>
 <p class="sub">曲谱 ID 和 phrase ID 两级展开；phrase 内同时查看 Fingering、Guqinizer 与标注。绿色＝文字归一化后一致，红色＝双方都有文字但不同，黄色＝只有一方有文字，灰色＝双方均为空。</p>

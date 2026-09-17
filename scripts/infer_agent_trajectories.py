@@ -231,6 +231,8 @@ def main() -> int:
                         help="expand 再作 repeat instructions into sounding notes "
                              "flagged notation_omitted")
     parser.add_argument("--score-key", action="append", help="limit to one or more score keys")
+    parser.add_argument("--score-key-file", type=Path,
+                        help="newline-delimited score keys; combines with --score-key")
     args = parser.parse_args()
     with args.manifest.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
@@ -246,8 +248,12 @@ def main() -> int:
     }]
     if missing_split:
         raise ValueError(f"scores missing a valid split: {missing_split[:10]}")
-    if args.score_key:
-        wanted = set(args.score_key)
+    if args.score_key or args.score_key_file:
+        wanted = set(args.score_key or [])
+        if args.score_key_file:
+            wanted.update(line.strip() for line in
+                          args.score_key_file.read_text(encoding="utf-8").splitlines()
+                          if line.strip())
         rows = [row for row in rows if row["score_key"] in wanted]
     args.output_dir.mkdir(parents=True, exist_ok=True)
     handles = {

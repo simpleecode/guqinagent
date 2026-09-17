@@ -18,6 +18,18 @@ class AuditPitchTests(unittest.TestCase):
         self.assertIsNone(reason)
         self.assertAlmostEqual(pitches[0], 64.01955, places=4)
 
+    def test_hui_outside_positions_have_project_defined_pitches(self):
+        base, _ = MODULE.position_pitch(5, 12.3, self.opens)
+        outer, reason = MODULE.position_pitch(5, "徽外", self.opens)
+        outer_half, half_reason = MODULE.position_pitch(5, "徽外半", self.opens)
+        self.assertIsNone(reason)
+        self.assertIsNone(half_reason)
+        self.assertAlmostEqual(outer, base - 1.0)
+        self.assertAlmostEqual(outer_half, base - 2.0)
+        pitches, reason = MODULE.parse_jianzi("名指徽外半勾5弦", self.opens)
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(pitches[0], outer_half)
+
     def test_compound_has_two_unordered_pitches(self):
         text = "撮（大指七徽九分6弦按音＋3弦散音）"
         pitches, reason = MODULE.parse_jianzi(text, self.opens)
@@ -48,6 +60,79 @@ class AuditPitchTests(unittest.TestCase):
         pitches, reason = MODULE.parse_jianzi("散托七弦", self.opens)
         self.assertIsNone(reason)
         self.assertEqual(pitches, [62])
+
+    def test_explicit_stopped_note_overrides_harmonic_scope_for_one_event(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("泛起食指七徽勾一弦", self.opens, context)
+        stopped, reason = MODULE.parse_jianzi(
+            "按音大指九徽勾七弦", self.opens, context
+        )
+        expected, _ = MODULE.position_pitch(7, 9.0, self.opens, "stopped")
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(stopped[0], expected)
+        self.assertTrue(context["harmonic_scope"])
+        # The following unmarked note returns to inherited harmonic mode;
+        # only 泛止 ends the region.
+        harmonic, reason = MODULE.parse_jianzi("大指七徽挑五弦", self.opens, context)
+        self.assertIsNone(reason)
+        self.assertEqual(harmonic, [69])
+
+    def test_standalone_fanqi_opens_harmonic_scope(self):
+        context = MODULE.new_context()
+        pitches, reason = MODULE.parse_jianzi("泛起", self.opens, context)
+        self.assertEqual(pitches, [])
+        self.assertEqual(reason, "ornament_or_control")
+        self.assertTrue(context["harmonic_scope"])
+        harmonic, reason = MODULE.parse_jianzi(
+            "名指九徽挑四弦", self.opens, context
+        )
+        expected, _ = MODULE.position_pitch(4, 9.0, self.opens, "harmonic")
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(harmonic[0], expected)
+
+    def test_explicit_fanyin_marks_current_note_harmonic(self):
+        pitches, reason = MODULE.parse_jianzi("泛音名指九徽挑四弦", self.opens)
+        expected, _ = MODULE.position_pitch(4, 9.0, self.opens, "harmonic")
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(pitches[0], expected)
+
+    def test_prefix_fanzhi_ends_harmonic_before_current_note_and_preserves_position(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("泛起食指七徽勾一弦", self.opens, context)
+        stopped, reason = MODULE.parse_jianzi(
+            "泛止名指九徽勾五弦", self.opens, context
+        )
+        expected, _ = MODULE.position_pitch(5, 9.0, self.opens, "stopped")
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(stopped[0], expected)
+        self.assertFalse(context["harmonic_scope"])
+        inherited, reason = MODULE.parse_jianzi("剔五弦", self.opens, context)
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(inherited[0], expected)
+
+    def test_suffix_fanzhi_keeps_current_note_harmonic_then_ends_region(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("泛起食指七徽勾一弦", self.opens, context)
+        harmonic, reason = MODULE.parse_jianzi(
+            "名指九徽勾五弦泛止", self.opens, context
+        )
+        expected, _ = MODULE.position_pitch(5, 9.0, self.opens, "harmonic")
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(harmonic[0], expected)
+        self.assertFalse(context["harmonic_scope"])
+
+    def test_open_midi_does_not_double_apply_tuning_offset(self):
+        metadata = {"tuning": {"open_strings": [
+            {"string": 1, "pitch": "C", "octave": 3, "semitone_offset": 0},
+            {"string": 2, "pitch": "D", "octave": 3, "semitone_offset": 0},
+            {"string": 3, "pitch": "F", "octave": 3, "semitone_offset": 0},
+            {"string": 4, "pitch": "G", "octave": 3, "semitone_offset": 0},
+            # 紧五弦：pitch/octave 已表示实际 B-flat 3；+1 仅保留为调弦溯源。
+            {"string": 5, "pitch": "B♭", "octave": 3, "semitone_offset": 1},
+            {"string": 6, "pitch": "C", "octave": 4, "semitone_offset": 0},
+            {"string": 7, "pitch": "D", "octave": 4, "semitone_offset": 0},
+        ]}}
+        self.assertEqual(MODULE.parse_open_midi(metadata), [48, 50, 53, 55, 58, 60, 62])
 
     def test_zhuaqi_releases_previous_thumb_stopped_string_to_open_pitch(self):
         context = MODULE.new_context()
@@ -80,6 +165,32 @@ class AuditPitchTests(unittest.TestCase):
             pitches, reason = MODULE.parse_jianzi(text, self.opens)
             self.assertIsNone(reason)
             self.assertEqual(pitches, [55, 53])
+
+    def test_li_inherits_harmonic_scope_and_hui(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("泛起七徽挑7弦", self.opens, context)
+        pitches, reason = MODULE.parse_jianzi("历7六弦", self.opens, context)
+        self.assertIsNone(reason)
+        self.assertEqual(pitches, [74, 72])
+        self.assertEqual(context["right_hand"], "历")
+
+    def test_li_explicit_hui_applies_to_every_swept_string(self):
+        pitches, reason = MODULE.parse_jianzi("食指七徽历3二弦", self.opens)
+        self.assertIsNone(reason)
+        self.assertEqual(pitches, [65, 62])
+
+    def test_marks_harmonic_scope_warning_when_stopped_reading_is_exact(self):
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=C", "tonic_degree1_midi": 60},
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "2̇", "jianzi": "泛起七徽挑7弦"},
+                {"index": 2, "jianpu": "6̣", "jianzi": "中指九徽勾2弦"},
+            ],
+        }, 50.0)
+        detail = report["details"][1]
+        self.assertEqual(detail["status"], "mismatched")
+        self.assertTrue(detail["possible_harmonic_state_mismatch"])
 
     def test_li_spans_two_consecutive_score_events(self):
         report = MODULE.audit({

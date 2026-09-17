@@ -34,8 +34,9 @@ def tuning_context(item: dict) -> dict:
         if int(row.get("string", expected)) != expected:
             raise ValueError("unordered tuning strings")
         pitch = str(row["pitch"]).upper().replace("♯", "#").replace("♭", "B")
-        open_midi.append(12 * (int(row["octave"]) + 1) + note_pc[pitch]
-                         + float(row.get("semitone_offset", 0)))
+        # These fields already encode the sounding open-string pitch.  The
+        # offset is descriptive provenance, not another transposition to add.
+        open_midi.append(12 * (int(row["octave"]) + 1) + note_pc[pitch])
     payload = json.dumps(open_midi, separators=(",", ":"))
     return {"name": str((metadata.get("tuning") or {}).get("name") or ""),
             "open_midi": open_midi,

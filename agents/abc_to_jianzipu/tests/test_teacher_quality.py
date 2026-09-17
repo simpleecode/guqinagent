@@ -98,7 +98,7 @@ class EditableProtocolTests(unittest.TestCase):
         patches = infer_jianzi_text_patches(baseline, references)["patches"]
         self.assertEqual(patches[0]["after"]["jianzi_text"], "")
 
-    def test_empty_tool_turn_cannot_bypass_surface_targets(self) -> None:
+    def test_empty_tool_turn_can_retain_a_complete_plan_despite_surface_targets(self) -> None:
         item = {
             "baseline_plan": {"actions": [{
                 "source_index": 7, "jianzi_text": "名指九徽勾4弦",
@@ -107,11 +107,31 @@ class EditableProtocolTests(unittest.TestCase):
                 {"index": 7, "jianpu": "2", "abc": "D"},
             ]},
         }
-        targets = [{"source_index": 7, "after": {
-            "jianzi_text": "无（由于是再作部分，省略）",
-        }}]
-        self.assertFalse(can_accept_empty_tool_turn(item, targets))
-        self.assertTrue(can_accept_empty_tool_turn(item, []))
+        self.assertTrue(can_accept_empty_tool_turn(item))
+
+    def test_empty_tool_turn_rejects_an_incomplete_fingering_plan(self) -> None:
+        item = {
+            "baseline_plan": {"actions": [{
+                "source_index": 7, "jianzi_text": None,
+            }]},
+            "input": {"metadata": {"tonic": "1=C"}, "notes_without_jianzi": [
+                {"index": 7, "jianpu": "2", "abc": "D"},
+            ]},
+        }
+        self.assertFalse(can_accept_empty_tool_turn(item))
+
+    def test_empty_tool_turn_accepts_runtime_completed_fingering_plan(self) -> None:
+        item = {
+            "baseline_plan": {"actions": [{
+                "source_index": 7, "jianzi_text": None,
+            }]},
+            "input": {"notes_without_jianzi": [
+                {"index": 7, "jianpu": "2", "abc": "D"},
+            ]},
+        }
+        patches = [{"patch_type": "SET_JIANZI_TEXT", "source_index": 7,
+                    "after": {"jianzi_text": "名指九徽勾4弦"}}]
+        self.assertTrue(can_accept_empty_tool_turn(item, patches))
 
     def test_edit_preview_uses_plain_filled_label(self) -> None:
         item = {"input": {"notes_without_jianzi": [
@@ -164,7 +184,7 @@ class EditableProtocolTests(unittest.TestCase):
             "edit_plan", {"jianzi_rows": [[25, "名指九徽勾五弦"]]}
         )
         self.assertTrue(result["result"]["valid"])
-        self.assertEqual(result["result"]["unchanged_event_indices"], [25])
+        self.assertNotIn("unchanged_event_indices", result["result"])
         self.assertIn("未变更｜25｜提交值与当前减字相同", result["result"]["text"])
 
     def test_edit_plan_omits_empty_unchanged_event_indices(self) -> None:
@@ -388,8 +408,31 @@ class EditableProtocolTests(unittest.TestCase):
         }
         from ABC_J.scripts.generate_teacher_tool_trajectories import pitch_audit_notes
         rows = pitch_audit_notes(item, {2: {"jianzi_text": "勾二弦六徽"}})
-        self.assertEqual(rows[0]["jianzi"], "泛起勾一弦六徽")
+        self.assertEqual(rows[0]["jianzi"], "泛起勾1弦六徽")
         self.assertEqual(rows[-1]["jianzi"], "勾二弦六徽")
+
+    def test_harmonic_audit_keeps_mode_across_rest_and_inherited_hui(self) -> None:
+        report = AUDIT.audit({
+            "metadata": {},
+            "open_midi": [48.0, 50.0, 53.0, 55.0, 57.0, 60.0, 62.0],
+            "notes": [
+                {"index": -1, "jianpu": None, "jianzi": "泛起勾1弦九徽"},
+                {"index": 1, "jianpu": "0（休止）", "jianzi": ""},
+                {"index": 2, "jianpu": "5", "jianzi": "名指九徽勾1弦"},
+            ],
+        }, 50.0)
+        detail = next(row for row in report["details"] if row["index"] == 2)
+        self.assertEqual(detail["status"], "matched")
+        self.assertEqual(detail["pairs"][0]["jianzi_midi"], 67.0)
+
+    def test_harmonic_audit_accepts_chinese_or_arabic_string_surface(self) -> None:
+        open_midi = [48.0, 50.0, 53.0, 55.0, 57.0, 60.0, 62.0]
+        for text in ("名指九徽勾1弦", "名指九徽勾一弦"):
+            context = AUDIT.new_context()
+            AUDIT.parse_jianzi("泛起勾1弦九徽", open_midi, context)
+            pitches, reason = AUDIT.parse_jianzi(text, open_midi, context)
+            self.assertIsNone(reason)
+            self.assertEqual(pitches, [67.0])
 
     def test_text_only_intermediate_is_visible_without_structural_fields(self) -> None:
         table = _render_phrase_lines(
@@ -526,11 +569,13 @@ class EditableProtocolTests(unittest.TestCase):
         self.assertIn("可通过 edit_plan.jianzi_rows 直接填写", fingering)
         self.assertIn("沿用再作动作继承的减字", fingering)
         self.assertIn("不等于把该音置为空字符串", fingering)
+        self.assertIn("大指七徽挑七弦”等同于“泛音大指七徽挑七弦", fingering)
         self.assertIn('":warning:音高不匹配"', fingering)
         self.assertIn("尽量核对该行的取音与减字并修正", fingering)
         self.assertIn("[空]是确定的谱面空显示目标", guqinizer)
         self.assertIn("设为空字符串", guqinizer)
         self.assertIn("不删除声音或演奏状态", guqinizer)
+        self.assertIn("显式“散”只覆盖当前音", guqinizer)
         self.assertIn('":warning:音高不匹配"', guqinizer)
 
     def test_guqinizer_prompt_preserves_repeat_omission_marker(self) -> None:

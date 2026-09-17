@@ -23,6 +23,8 @@ def main() -> int:
     parser.add_argument("--exclude-trajectory", action="append", default=[])
     parser.add_argument("--exclude-sample-id", action="append", default=[],
                         help="drop an exact stage sample while retaining its paired stage")
+    parser.add_argument("--allow-new-sample", action="store_true",
+                        help="permit replacement samples absent from the base, for completing a missing stage")
     args = parser.parse_args()
     excluded = {value for value in args.exclude_trajectory}
     excluded_ids = set(args.exclude_sample_id)
@@ -37,7 +39,7 @@ def main() -> int:
     if set(replacements) != set(replacement_audits):
         raise SystemExit("replacement public/private IDs differ")
     unknown = set(replacements) - set(base_audits)
-    if unknown:
+    if unknown and not args.allow_new_sample:
         raise SystemExit(f"replacement IDs absent from base: {sorted(unknown)[:3]}")
     merged_messages = []
     for row in base_messages:
@@ -45,12 +47,18 @@ def main() -> int:
         if sid in excluded_ids:
             continue
         merged_messages.append(replacements.get(sid, row))
+    for sid in sorted(unknown):
+        if sid not in excluded_ids:
+            merged_messages.append(replacements[sid])
     merged_audits = []
     for row in read(args.base / "teacher_trajectory_audit.jsonl"):
         sid = row["sample_id"]
         if sid in excluded_ids:
             continue
         merged_audits.append(replacement_audits.get(sid, row))
+    for sid in sorted(unknown):
+        if sid not in excluded_ids:
+            merged_audits.append(replacement_audits[sid])
     base_redaction = read(args.base / "reasoning_redaction_audit.jsonl") if (args.base / "reasoning_redaction_audit.jsonl").exists() else []
     repl_redaction = read(args.replacement / "reasoning_redaction_audit.jsonl") if (args.replacement / "reasoning_redaction_audit.jsonl").exists() else []
     merged_redaction = [row for row in base_redaction if row.get("sample_id") not in replacements and row.get("sample_id") not in excluded_ids]
@@ -62,7 +70,8 @@ def main() -> int:
     report = {
         "schema_version": "teacher-repaired-merge-1.0",
         "base_rows": len(base_messages), "replacement_rows": len(replacements),
-        "replaced_rows": len(replacements), "excluded_trajectory_count": len(excluded),
+        "replaced_rows": len(set(replacements) - unknown), "added_rows": len(unknown),
+        "excluded_trajectory_count": len(excluded),
         "excluded_trajectories": sorted(excluded), "output_rows": len(merged_messages),
         "excluded_sample_ids": sorted(set(args.exclude_sample_id)),
         "by_stage": {}, "public_private_ids_match": {"messages": len(merged_messages), "audits": len(merged_audits)},

@@ -30,6 +30,13 @@ MODE_ALIASES = {
     "泛音": "harmonic",
 }
 
+# These traditional positions lie outside the regular 1–13-hui grid.  The
+# project convention anchors them to 十二徽三分: 徽外 is about 1 semitone
+# lower, and 徽外半 another 1 semitone lower.  ``12.3`` remains the numeric
+# anchor in serialized candidates; ``hui_label`` preserves the actual name.
+OUTSIDE_HUI_POSITIONS = (("徽外", 1.0), ("徽外半", 2.0))
+OUTSIDE_HUI_ANCHOR = 12.3
+
 
 def normalize_modes(modes: tuple[str, ...]) -> tuple[str, ...]:
     """Normalize public Chinese labels and reject unknown pitch modes."""
@@ -131,6 +138,27 @@ def candidates_for_event(event: ScoreEvent, open_midi: list[float], *,
                     tone_region_cost=_tone_region_cost(hui, mode),
                     confidence="exact" if abs(cents) <= 10 else "approximate",
                 ))
+            if mode == "stopped":
+                anchor_pitch = _pitch(opened, OUTSIDE_HUI_ANCHOR, mode)
+                for label, semitone_drop in OUTSIDE_HUI_POSITIONS:
+                    sounding = anchor_pitch - semitone_drop
+                    cents = (sounding - target) * 100
+                    if abs(cents) > tolerance_cents:
+                        continue
+                    sequence += 1
+                    raw.append(PositionCandidate(
+                        candidate_id=f"{event.id}-c{sequence:03d}",
+                        event_id=event.id,
+                        target_midi=target,
+                        mode=mode,
+                        string=string,
+                        hui=OUTSIDE_HUI_ANCHOR,
+                        hui_label=label,
+                        sounding_midi=round(sounding, 6),
+                        cents_error=round(cents, 3),
+                        tone_region_cost=_tone_region_cost(OUTSIDE_HUI_ANCHOR, mode),
+                        confidence="exact" if abs(cents) <= 10 else "approximate",
+                    ))
     raw.sort(key=lambda item: (
         round(abs(item.cents_error), 3),
         # 音分差相同时散音优先：空弦最省事且无按弦噪声。

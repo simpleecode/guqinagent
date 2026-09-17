@@ -19,12 +19,13 @@
     "source_message_rows": 4691,
     "exported_message_rows": 0,
     "source_phrase_count": 4691,
-    "exported_phrase_count": 3927,
+    "exported_phrase_count": 3871,
     "exported_fingering_count": 0,
     "exported_guqinizer_count": 0
   },
   "files": {
     "messages": null,
-    "phrase_ids": "pitch_eligible_phrase_ids.txt"
+    "phrase_ids": "pitch_eligible_phrase_ids.txt",
+    "quality_exclusions": "../exclusions/basic_attack_followed_by_5plus_blank_events_20260912.txt"
   }
 }

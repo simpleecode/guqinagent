@@ -66,3 +66,11 @@ node_modules/
 
 # Private working notes
 DOCS/实验日记.md
+
+# Local reverse-engineering workspace, environments, captures and raw score data
+/work/
+/work.rar
+/.conda/
+/captures/
+/tools/platform-tools/
+ABC_J/modern/

@@ -93,11 +93,17 @@ def stage_trace(stage: dict | None, title: str, prompt_html: str = "") -> str:
         calls = item.get("tool_calls") or []
         results = item.get("tool_results") or []
         raw = item.get("raw_output") or ""
+        suffix = "｜输出被截断" if item.get("truncated") else ""
         sections.append(
-            f"<details><summary>第 {esc(round_no)} 轮｜工具调用 {len(calls)} 个</summary>"
-            f"<h4>模型原始输出</h4><pre>{esc(raw)}</pre>"
-            f"<h4>解析后的 tool_calls</h4><pre>{esc(pretty(calls))}</pre>"
-            f"<h4>工具结果</h4><pre>{esc(pretty(results))}</pre></details>"
+            "<article class='round'>"
+            f"<h4>第 {esc(round_no)} 轮<span>assistant → tool{esc(suffix)}</span></h4>"
+            "<div class='round-step'><b>① 模型输出</b>"
+            f"<pre>{esc(raw)}</pre></div>"
+            "<div class='round-step'><b>② 解析出的工具调用</b>"
+            f"<pre>{esc(pretty(calls))}</pre></div>"
+            "<div class='round-step'><b>③ 工具返回（下一轮模型输入）</b>"
+            f"<pre>{esc(pretty(results))}</pre></div>"
+            "</article>"
         )
     status = "成功" if stage.get("ok") else "失败"
     if stage.get("no_op"):
@@ -215,7 +221,53 @@ def compare_table(source: dict, base: dict | None, guqinizer: dict | None, annot
         "<th>序号</th><th>简谱</th><th>ABC</th><th>时值</th>"
             "<th>Base/Fingering 最终</th><th>Guqinizer 当前最终</th><th>标注</th>"
             "<th>Fingering 音高</th><th>Guqinizer 音高</th>"
-            "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>"
+        "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>"
+    )
+
+
+def notation_overview(source_rows: list[dict], predictions: dict[str, dict]) -> str:
+    """Render each phrase with its jianpu above the model's final jianzi."""
+    lines = []
+    for source in source_rows:
+        sample_id = str(source.get("sample_id"))
+        runtime = source.get("runtime_item") or source
+        notes = ((runtime.get("input") or {}).get("notes_without_jianzi") or [])
+        prediction = predictions.get(sample_id) or {}
+        final_stage = prediction.get("guqinizer") or {}
+        label = "Guqinizer"
+        if not isinstance(final_stage.get("plan"), dict):
+            final_stage = prediction.get("base") or {}
+            label = "Base" if sample_id in predictions else "待生成"
+        actions = actions_by_index(final_stage)
+        jianpu_cells, jianzi_cells = [], []
+        for note in notes:
+            if note.get("index") is None:
+                continue
+            index = int(note["index"])
+            jianpu = str(note.get("jianpu") or note.get("jianpu_alt") or "—")
+            if str(note.get("abc") or "").strip() == "|":
+                jianpu = "｜"
+            jianzi = actions.get(index)
+            jianpu_cells.append(
+                f"<div class='notation-cell'><small>{index}</small>{esc(jianpu)}</div>"
+            )
+            jianzi_cells.append(
+                f"<div class='notation-cell jianzi'>{esc(jianzi if jianzi else '·')}</div>"
+            )
+        phrase_id = runtime.get("phrase_id") or source.get("phrase_id") or sample_id
+        lines.append(
+            "<section class='notation-line'>"
+            f"<header><code>{esc(phrase_id)}</code><span>{esc(label)}</span></header>"
+            "<div class='notation-scroll'><div class='notation-grid' "
+            f"style='--note-count:{len(jianpu_cells)}'>"
+            "<div class='notation-label'>简谱</div>" + "".join(jianpu_cells)
+            + "<div class='notation-label'>减字</div>" + "".join(jianzi_cells)
+            + "</div></div></section>"
+        )
+    return (
+        "<section class='notation-overview'><h2>曲谱总览</h2>"
+        "<p>每段上为简谱，下为当前模型最终减字；“·”表示尚未提交或该行为空。</p>"
+        + "".join(lines) + "</section>"
     )
 
 
@@ -313,13 +365,17 @@ def main() -> int:
                     )),
                     "actions": deepcopy(final_stage.get("actions") or []),
                 }
+    overview = notation_overview(source_rows, predictions)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     page = f"""<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>{esc(args.score)}｜运行中评估</title><style>
 :root{{--bg:#f5f2eb;--fg:#28251f;--line:#d9d2c4;--surface:#fffdf8;--muted:#756d61;--accent:#e8f1f4;--same:#dff2df;--diff:#fff0e8}}
 *{{box-sizing:border-box}}body{{max-width:1380px;margin:24px auto;padding:0 16px;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,'Microsoft YaHei',sans-serif}}h1{{font-size:23px;margin:0 0 8px}}h2,h3,h4{{font-weight:500;margin:14px 0 8px}}p{{color:var(--muted)}}details{{border:1px solid var(--line);border-radius:8px;margin:8px 0;background:var(--surface);overflow:hidden}}summary{{cursor:pointer;padding:9px 12px;font-weight:500;background:var(--accent)}}.phrase>summary{{background:#f2eee5}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:12px;background:#fff;font:12px/1.45 ui-monospace,'Cascadia Code',monospace}}.table-wrap{{overflow:auto;margin:8px 0 12px}}table{{border-collapse:collapse;width:100%;min-width:1080px;background:var(--surface)}}th,td{{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}}thead th{{font-weight:500;background:#eee9df;position:sticky;top:0}}tbody th{{font-weight:500;white-space:nowrap}}code{{font-family:ui-monospace,'Cascadia Code',monospace}}.status{{padding:10px 12px;background:#fff8dc;border:1px solid #e6d9a8;border-radius:8px}}.pitch{{width:82px;text-align:center;font-size:18px;font-weight:700}}.pitch.matched{{color:#146c35;background:#dff2df}}.pitch.mismatched{{color:#a12929;background:#fff0e8}}.pitch.unresolved{{color:var(--muted);background:#f0eee9}}
+</style><style>
+.notation-overview{{margin:20px 0}}.notation-line{{margin:10px 0;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}}.notation-line header{{display:flex;gap:10px;justify-content:space-between;padding:7px 10px;background:#eee9df;color:var(--muted)}}.notation-scroll{{overflow-x:auto}}.notation-grid{{display:grid;grid-template-columns:64px repeat(var(--note-count),minmax(78px,max-content));width:max-content;min-width:100%}}.notation-label{{padding:8px;background:var(--accent);font-weight:500;position:sticky;left:0;z-index:1;border-bottom:1px solid var(--line)}}.notation-cell{{min-height:42px;padding:5px 7px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere}}.notation-cell small{{display:block;color:var(--muted);font:11px ui-monospace,monospace}}.notation-cell.jianzi{{min-height:50px;background:#fff}}.round{{margin:12px 0;border:1px solid var(--line);border-radius:8px;overflow:hidden}}.round h4{{display:flex;justify-content:space-between;gap:12px;margin:0;padding:8px 10px;background:#f2eee5}}.round h4 span{{color:var(--muted);font-weight:400}}.round-step{{border-top:1px solid var(--line)}}.round-step b{{display:block;padding:6px 10px;background:var(--accent);font-weight:500}}
 </style></head><body><h1>{esc(args.score)}｜{esc(title)}｜当前评估状态</h1>
 <div class='status'>已拉取远端结果：{completed} / {len(ordered_ids)} 个 phrase。重新运行本脚本即可刷新；表格包含本地标注，仅用于检查，不会发送到服务器。</div>
+{overview}
 {''.join(blocks)}
 </body></html>"""
     args.output.write_text(page, encoding="utf-8", newline="\n")

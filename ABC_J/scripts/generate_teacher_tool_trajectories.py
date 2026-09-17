@@ -16,6 +16,12 @@ from pathlib import Path
 from typing import Any
 
 try:
+    from tqdm import tqdm
+except ImportError:  # Keep the generator usable in minimal inference envs.
+    def tqdm(iterable, **_kwargs):
+        return iterable
+
+try:
     from dotenv import load_dotenv
 except ImportError:  # Evaluation/runtime-only environments do not need .env loading.
     def load_dotenv(*_args, **_kwargs):
@@ -268,7 +274,7 @@ def render_pitch_candidate_table(target: float, candidates: list[dict],
         mode = mode_names.get(candidate.get("mode"), str(candidate.get("mode") or "未知"))
         position = f'{candidate.get("string")}弦'
         if candidate.get("mode") not in {"open"} and candidate.get("hui") is not None:
-            position += hui_label(candidate.get("hui"))
+            position += candidate.get("hui_label") or hui_label(candidate.get("hui"))
         confidence = "精确" if candidate.get("confidence") == "exact" else "近似"
         lines.append(
             f'{rank}｜{mode}｜{position}｜{float(candidate.get("sounding_midi")):.1f}｜{confidence}'
@@ -523,16 +529,23 @@ def render_teacher_system(instruction: dict, reference_gqs: str | None = None) -
 
 def private_reference_semantics_rules(stage: str) -> list[str]:
     """Explain private reference display markers without leaking them publicly."""
+    harmonic_scope_rule = (
+        "泛起至泛止构成泛音区间：区间内未显式写“散”或“按音”的起音默认按泛音解释，"
+        "不必每音重复写“泛音”。例如“大指七徽挑七弦”等同于“泛音大指七徽挑七弦”。"
+        "显式“散”只覆盖当前音，不结束后续泛音区间；只有“泛止”才结束该区间。"
+    )
     warning_rule = (
         '工具在已填写的减字后标注":warning:音高不匹配"时，应尽量核对该行的取音与减字并修正；'
         '这是非阻塞警告，处理该行后继续完成其他合法编辑。'
     )
     if stage == "fingering_agent":
         return [
+            harmonic_scope_rule,
             f'私有参考表中的"{OMITTED_PLACEHOLDER}"表示再作谱面省略，不是空标注，也不是未知值；该音仍有演奏语义，不得仅因该标记删除声音；该标记本身也是允许提交的减字文字，可通过 edit_plan.jianzi_rows 直接填写"{OMITTED_PLACEHOLDER}"；这表示沿用再作动作继承的减字（前一段或标记处），不等于把该音置为空字符串。',
             warning_rule,
         ]
     return [
+        harmonic_scope_rule,
         "私有参考表中的[空]是确定的谱面空显示目标，不表示缺少资料。"
         "若当前初稿在该行有减字，而前一吟、猱、走手或复合多声减字已覆盖该动作，"
         "应在 edit_plan.jianzi_rows 中把该行减字设为空字符串；置空只隐藏本行减字，不删除声音或演奏状态。",
@@ -647,7 +660,11 @@ def pitch_audit_notes(
             "jianpu": None,
             "abc": "",
             "duration": "",
-            "jianzi": f"泛起勾一弦{hui_label(seed_hui)}",
+            # The pitch auditor parses numeric string designators.  Keep this
+            # synthetic state seed in the same surface form as normal tool
+            # input, otherwise “一弦” is treated as having no string and the
+            # harmonic mode is never activated.
+            "jianzi": f"泛起勾1弦{hui_label(seed_hui)}",
         })
     for notes, actions in prefix_phrases:
         action_map = {
@@ -673,7 +690,7 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
     lines = [f'预览｜{"可应用" if valid else "不可应用"}｜变更{len(changed)}音',
              "序号｜简谱｜减字显示｜谱面减字"]
     pitch_warnings = {
-        int(warning["source_index"])
+        int(warning["source_index"]): warning
         for warning in (warnings or [])
         if warning.get("code") == "jianzi_pitch_mismatch"
         and warning.get("source_index") is not None
@@ -707,7 +724,12 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         display = ("待填写" if explicit is None else
                    ("已置空" if explicit == "" else "已填写"))
         jianpu = pitch_label(item, index) if item is not None else ""
-        warning_suffix = ":warning:音高不匹配" if index in pitch_warnings else ""
+        warning = pitch_warnings.get(index)
+        warning_suffix = (
+            ":warning:音高不匹配（当前可能仍处于泛音状态；若此音应为按音，请明确写“按音”或先泛止）"
+            if warning and warning.get("possible_harmonic_state_mismatch")
+            else ":warning:音高不匹配" if warning else ""
+        )
         lines.append(
             f'{visible_index}｜{jianpu}｜{display}｜{surface}{warning_suffix}'
         )
@@ -1012,8 +1034,6 @@ class RealToolRuntime:
                     "valid": preview_valid,
                     "text": preview_text,
                 }
-                if unchanged_events:
-                    result["unchanged_event_indices"] = unchanged_events
             else:
                 raise ValueError(f"unknown tool: {name}")
             envelope = {"ok": True, "result": result}
@@ -1522,6 +1542,9 @@ def validate_jianzi_only(
                     "source_index": detail.get("index"),
                     "code": "jianzi_pitch_mismatch",
                     "pairs": detail.get("pairs") or [],
+                    "possible_harmonic_state_mismatch": bool(
+                        detail.get("possible_harmonic_state_mismatch")
+                    ),
                 })
     except Exception as exc:
         # Tool/parser availability never blocks creative notation generation.
@@ -1567,18 +1590,19 @@ def validate_jianzi_only(
     }
 
 
-def can_accept_empty_tool_turn(item: dict, targets: list[dict]) -> bool:
+def can_accept_empty_tool_turn(
+    item: dict, patches: list[dict] | None = None, *, historical: dict | None = None
+) -> bool:
     """Return whether an empty tool call can legitimately finish a stage.
 
-    A Guqinizer stage with inferred surface-text targets must not be accepted
-    as a no-op merely because the Base plan is complete.  The target list is
-    computed before the model call and is the authoritative signal that a
-    second-stage edit is required.  True no-op reviews pass an empty target
-    list and are still checked against the complete baseline below.
+    ``target_patches`` are private reference guidance, not a compulsory edit
+    contract.  Once the current plan is complete, the teacher may reasonably
+    retain it after public musical analysis even if a private target exists.
+    An incomplete Fingering scaffold, however, cannot become a no-op.
     """
-    if targets:
-        return False
-    return validate_jianzi_only(item, [], toward_reference=False)[0]
+    return validate_jianzi_only(
+        item, patches or [], toward_reference=False, historical=historical
+    )[0]
 
 
 def generate_one(client, model: str, item: dict, stage: str, targets: list[dict],
@@ -1679,6 +1703,8 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             "每次工具调用前必须填写 decision_summary；把一个或多个调用写入 tool_calls。",
             "若分析后确定无需调用工具，也必须填写有音乐学内容的 decision_summary，并令 tool_calls=[]。",
             "工具 Schema 已在 tools 字段中给出；不得编造工具名或参数。",
+            "每个 tool_calls 元素必须严格写成 {\"name\":\"工具名\",\"arguments\":{...}}；不得把参数直接放在元素内，不得使用 d/t/n/a 等缩写字段，也不得遗漏任何 JSON 括号。",
+            "只有可见工具回执实际含有 :warning:音高不匹配 时，decision_summary 才能称其为音高警告；未出现该回执时只能描述候选核查或音乐判断。",
         ],
         "forbidden": (
             "decision_summary 不得提及 GQS、reference、teacher、target、教师提示、系统提示、提示词、教师私有参考、最终标注、标注答案或私有答案，"
@@ -1820,25 +1846,40 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
                     preview_matches = validate_jianzi_only(
                         item, accumulated, toward_reference=False,
                         require_complete=False, historical=historical)[0]
-                if pending_pitch_warning_events:
+                # A pitch warning is advisory.  It blocks acceptance only
+                # until the teacher has inspected candidates and attempted a
+                # later candidate-informed edit for that event.  Some
+                # musically valid techniques cannot be represented by the
+                # simple pitch parser, so requiring every warning to vanish
+                # causes an unproductive correction loop.
+                unresolved_pitch_warning_events = (
+                    pending_pitch_warning_events - pitch_repair_attempted
+                )
+                if unresolved_pitch_warning_events:
                     accepted_preview = None
                 elif preview_matches:
                     accepted_preview = normalize_patches(accumulated)
         public_assistant = {"role": "assistant", "content": visible_summary}
         if public_calls:
             public_assistant["tool_calls"] = public_calls
-        public_messages.append(public_assistant)
-        public_messages.extend(public_results)
         if not teacher_calls:
             # An empty call list is a legitimate no-op only when the current
             # baseline is already complete (or the phrase has no editable
             # sounding events).  A blank fingering scaffold remains invalid,
             # so the model gets another turn instead of silently accepting it.
-            if can_accept_empty_tool_turn(item, targets):
+            if can_accept_empty_tool_turn(
+                item, runtime.accumulated_patches, historical=historical
+            ):
+                public_messages.append(public_assistant)
                 accepted_preview = []
                 no_edit_accepted = True
                 final_payload = {"patches": []}
                 break
+            # This assistant turn incorrectly attempted to terminate an
+            # incomplete plan.  It remains in the private API/audit trace so
+            # the next response receives the correction, but is not a public
+            # training turn: otherwise public messages contain adjacent,
+            # contradictory assistant roles with no intervening observation.
             api_messages.append({
                 "role": "user",
                 "content": json.dumps({
@@ -1850,6 +1891,8 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
                 }, ensure_ascii=False),
             })
             continue
+        public_messages.append(public_assistant)
+        public_messages.extend(public_results)
         if accepted_preview is not None:
             final_payload = {"patches": accepted_preview}
             public_messages.append({
@@ -1860,8 +1903,11 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
                 ),
             })
             break
-        if pending_pitch_warning_events:
-            warning_indices = sorted(pending_pitch_warning_events)
+        unresolved_pitch_warning_events = (
+            pending_pitch_warning_events - pitch_repair_attempted
+        )
+        if unresolved_pitch_warning_events:
+            warning_indices = sorted(unresolved_pitch_warning_events)
             queried = all(
                 index in pitch_candidate_round
                 for index in warning_indices
@@ -2202,7 +2248,16 @@ def main() -> int:
           output_paths["private"].open(file_mode, encoding="utf-8", newline="\n") as priv,
           output_paths["intermediates"].open(file_mode, encoding="utf-8", newline="\n") as intermediates,
           output_paths["checkpoint"].open(checkpoint_mode, encoding="utf-8", newline="\n") as checkpoint):
-        for item_number, item in enumerate(selected, 1):
+        progress = tqdm(
+            enumerate(selected, 1),
+            total=len(selected),
+            desc=f"{args.stage} trajectories",
+            unit="phrase",
+            dynamic_ncols=False,
+            file=sys.stdout,
+        )
+        for item_number, item in progress:
+            progress.set_postfix_str(str(item["trajectory_id"]), refresh=False)
             print(f"phrase {item_number}/{len(selected)}: {item['trajectory_id']}", flush=True)
             def flush_outputs() -> None:
                 pub.flush()

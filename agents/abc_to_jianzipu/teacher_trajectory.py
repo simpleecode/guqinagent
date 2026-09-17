@@ -268,7 +268,7 @@ def render_public_prompt(item: dict, stage: str) -> str:
         f'谱名｜{metadata.get("title") or metadata.get("score_title") or item.get("score_key", "未命名")}',
         f'调弦｜{tuning.get("name") or "未知"}｜{tuning.get("open_midi") or []}',
         f'当前段｜{context.get("current_phrase_id")}',
-        ('泛音区间｜段首已处于泛音区间（无需重复添加“泛起”）'
+        ('泛音区间｜此段开始时仍然处于泛音区间；无须在段首重复添加泛起；要结束泛音区间，使用泛止'
          if item.get("harmonic_region_at_start") else
          '泛音区间｜段首未处于泛音区间'),
         "泛音区间提示｜常规写法：进入泛音区间时在减字开头添加“泛起”；结束时可在当前减字末尾添加“泛止”，也常在随后的延音行单独填写“泛止”，不要强行合并。",

@@ -25,15 +25,17 @@ BANNED_PUBLIC_TERMS = (
     "gqs", "reference", "teacher", "target", "teacher-only", "private answer",
     "reference plan", "reference action", "标注", "答案", "教师提示", "系统提示",
     "提示词", "教师私有", "私有参考", "最终标注", "参考谱面", "参考谱", "参考建议",
-    "参考中", "按参考", "根据参考", "与参考一致", "参考使用",
+    "参考中", "参考方向", "参考显示", "参考中的", "按参考", "根据参考", "与参考一致", "参考使用",
 )
 REDACTION_REPLACEMENTS = (
     ("参考谱面", "当前谱面"), ("参考谱", "当前谱面"), ("参考建议", "演奏判断"),
     ("参考答案", "演奏判断"), ("标注答案", "演奏判断"),
     ("与参考一致", "与前后音连贯"), ("根据参考", "根据音高与指法"),
-    ("参考中", "谱面中"), ("按参考", "按音高与指法"),
+    ("参考方向", "演奏判断"), ("参考显示", "谱面显示"),
+    ("参考中的", "谱面中的"), ("参考中", "谱面中"), ("按参考", "按音高与指法"),
     ("参考使用", "采用"), ("教师提示", "演奏要求"),
     ("教师私有", "内部信息"), ("私有参考", "内部信息"),
+    ("系统提示", "当前状态"),
     ("最终标注", "最终谱面"), ("参考", "谱面"), ("标注", "谱面"),
     ("答案", "判断依据"), ("GQS", "谱面"),
     ("reference", "谱面"), ("teacher-only", "演奏"),
@@ -170,7 +172,7 @@ def rewrite_prompt(item: dict, summaries: list[dict], retry_note: str = "") -> s
             "保留每个修改音的序号、实际编辑内容，以及能由当前谱面、前文或工具结果支持的音乐学依据"
             "（音高、时值、前后音连接、指法可演奏性、走手方向等）。"
             "不得改变原摘要已有的弦、徽、音高、数值或减字事实，不得新增原摘要没有的具体数值；"
-            "删除私有来源和隐藏答案痕迹：不得提及 GQS、标注、参考谱面、参考谱、教师提示、参考答案、"
+            "删除私有来源和隐藏答案痕迹：不得提及 GQS、标注、参考谱面、参考谱、参考方向、参考显示、教师提示、参考答案、"
             "私有参考或 target。"
             "如果原文以私有来源作为理由，请把它改写成直接的音乐学分析；不要新增输入中不存在的事实。"
             "下面每个请求只对应一条原始摘要，只返回一个 JSON 对象 {\"summary\":字符串}；不要按音符拆成多条。"
@@ -298,11 +300,13 @@ def main() -> int:
         except ValueError:
             pass
         error = None
-        last_raw = ""
         for _ in range(max(1, args.max_attempts)):
             try:
                 retry_note = (
-                    "上一次输出未通过脱敏校验；这次只返回不含任何私有来源词的 summary。"
+                    "上一次输出未通过校验：" + error + "。"
+                    "这次只返回不含任何私有来源词的 summary；"
+                    "只能使用本轮原摘要中已经出现的弦、徽、分、音高或 MIDI 数值，"
+                    "绝不能从其他轮、工具输出或上下文补入任何新的数值事实。"
                     if error else ""
                 )
                 options = {
@@ -325,18 +329,9 @@ def main() -> int:
                         raw = legacy[0]
                 if not isinstance(raw, str):
                     raise ValueError("single summary field required")
-                last_raw = raw
                 return validate_rewritten_summary(raw, private, factual_source)
             except Exception as exc:  # retry the single turn, then fail closed
                 error = f"{type(exc).__name__}: {exc}"
-        if last_raw:
-            try:
-                return validate_rewritten_summary(
-                    sanitize_fallback_summary(last_raw, private),
-                    private, factual_source
-                )
-            except ValueError:
-                pass
         raise ValueError(error or "reasoning rewrite failed")
 
     for item in selected:

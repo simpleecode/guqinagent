@@ -84,6 +84,9 @@ class PositionCandidate:
     cents_error: float
     tone_region_cost: float
     confidence: str
+    # A non-numeric traditional position name (currently 徽外 / 徽外半).
+    # ``hui`` remains a numeric anchor for compatibility with route code.
+    hui_label: str | None = None
     diagnostics: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:

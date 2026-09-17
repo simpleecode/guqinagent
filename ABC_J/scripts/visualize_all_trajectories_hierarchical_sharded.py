@@ -83,7 +83,7 @@ def main() -> int:
     )
     index = f'''<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>古琴 Agent 全量轨迹索引</title>
-<style>body{{margin:0;background:#f6f7f9;color:#202124;font:15px/1.55 system-ui,-apple-system,"PingFang SC",sans-serif}}main{{max-width:920px;margin:auto;padding:28px}}h1{{font-size:24px}}p{{color:#666}}ul{{list-style:none;padding:0;background:#fff;border-radius:10px;overflow:hidden}}li{{display:flex;justify-content:space-between;gap:16px;padding:10px 14px;border-bottom:1px solid #eee}}li:last-child{{border:0}}a{{color:#175cd3;text-decoration:none}}span{{color:#777;white-space:nowrap}}@media(prefers-color-scheme:dark){{body{{background:#17191c;color:#eee}}p,span{{color:#aaa}}ul{{background:#22252a}}li{{border-color:#34383e}}a{{color:#83b4ff}}}}</style></head><body><main><h1>古琴 Agent 全量轨迹</h1>
+<style>body{{margin:0;background:#101216;color:#e8ecf1;font:15px/1.55 system-ui,-apple-system,"PingFang SC",sans-serif}}main{{max-width:920px;margin:auto;padding:28px}}h1{{font-size:24px}}p{{color:#a6b0bd}}ul{{list-style:none;padding:0;background:#181c22;border:1px solid #303741;border-radius:10px;overflow:hidden}}li{{display:flex;justify-content:space-between;gap:16px;padding:10px 14px;border-bottom:1px solid #303741}}li:last-child{{border:0}}a{{color:#8bb7ff;text-decoration:none}}span{{color:#a6b0bd;white-space:nowrap}}</style></head><body><main><h1>古琴 Agent 全量轨迹</h1>
 <p>{len(entries)} 首曲目；按曲目打开，避免一次加载全量轨迹。</p><ul>{links}</ul></main></body></html>'''
     (args.output_dir / "index.html").write_text(index, encoding="utf-8")
     print(json.dumps({"output": str(args.output_dir / "index.html"), "scores": len(entries)}, ensure_ascii=False))

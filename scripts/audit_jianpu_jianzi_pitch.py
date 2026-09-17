@@ -89,7 +89,7 @@ def string_number(token: str) -> int:
 
 
 def parse_li_string_sequence(text: str) -> list[int]:
-    """Return the ordered open strings sounded by 历/歷/厉.
+    """Return the ordered strings sounded by 历/歷/厉.
 
     历 is a sequential index-finger sweep, not a simultaneous chord.  Corpus
     surfaces occur both compactly (历四三) and with separators/弦 (历四、三弦).
@@ -107,6 +107,10 @@ def new_context() -> dict:
     return {
         "sound_mode": None,
         "harmonic": False,
+        # Persistent span state.  Unlike ``sound_mode``, an explicit open
+        # string inside 泛起…泛止 is a per-note override and must not end the
+        # harmonic region for later notes.
+        "harmonic_scope": False,
         "harmonic_hui": None,
         "stopped_string": None,
         "stopped_hui": None,
@@ -128,6 +132,9 @@ def normalize_context(context: dict | None) -> dict:
         context.setdefault(key, value)
     if context["harmonic"]:
         context["sound_mode"] = "harmonic"
+    context["harmonic_scope"] = bool(
+        context.get("harmonic_scope") or context["harmonic"]
+    )
     return context
 
 
@@ -175,8 +182,12 @@ def parse_open_midi(metadata: dict) -> list[float]:
         if pitch not in NOTE_PC:
             raise ValueError(f"unrecognized open-string pitch: {pitch}")
         octave = int(row["octave"])
-        result.append(12 * (octave + 1) + NOTE_PC[pitch]
-                      + float(row.get("semitone_offset", 0)))
+        # ``open_strings.pitch`` / ``octave`` are the *sounding* open-string
+        # pitch emitted by ``interpret_tuning``.  ``semitone_offset`` remains
+        # alongside them solely as provenance for the named tuning; adding it
+        # here would apply every non-zero tuning adjustment twice (for example
+        # 紧五弦 A3 -> B♭3 would incorrectly become B3).
+        result.append(12 * (octave + 1) + NOTE_PC[pitch])
     return result
 
 
@@ -195,9 +206,16 @@ def parse_jianpu(text: str | None, tonic_midi: float) -> float | None:
     return tonic_midi + MAJOR[degree - 1] + 12 * octave + accidental
 
 
-def parse_hui(text: str) -> float | None:
+OUTSIDE_HUI_SEMITONE_DROPS = {"徽外": 1.0, "徽外半": 2.0}
+OUTSIDE_HUI_ANCHOR = 12.3
+
+
+def parse_hui(text: str) -> float | str | None:
+    # Check the longer spelling first: 徽外 is a substring of 徽外半.
+    if "徽外半" in text:
+        return "徽外半"
     if "徽外" in text:
-        return None
+        return "徽外"
     match = re.search(
         r"(十三|十二|十一|十|九|八|七|六|五|四|三|二|一)徽"
         r"(?:(一|二|三|四|五|六|七|八|九)分)?",
@@ -212,13 +230,23 @@ def parse_hui(text: str) -> float | None:
 
 
 def position_pitch(
-    string: int, hui: float | None, open_midi: list[float],
+    string: int, hui: float | str | None, open_midi: list[float],
     mode: str = "stopped",
 ) -> tuple[float | None, str | None]:
     if not 1 <= string <= 7:
         return None, "string_out_of_range"
     if hui is None:
         return open_midi[string - 1], None
+    if isinstance(hui, str):
+        if mode == "harmonic":
+            return None, "hui_outside_not_valid_for_harmonic"
+        semitone_drop = OUTSIDE_HUI_SEMITONE_DROPS.get(hui)
+        if semitone_drop is None:
+            return None, "unknown_hui_label"
+        coordinate = MAPPER.hui_coordinate(OUTSIDE_HUI_ANCHOR)
+        value = (open_midi[string - 1] + 12 * math.log2(1 / coordinate)
+                 - semitone_drop)
+        return value, None
     try:
         coordinate = MAPPER.hui_coordinate(hui)
     except ValueError as exc:
@@ -236,14 +264,6 @@ def parse_jianzi(
     context = normalize_context(context)
     if not text:
         return [], "empty_jianzi"
-
-    li_strings = parse_li_string_sequence(text)
-    if li_strings:
-        context["right_hand"] = "历"
-        context["sound_mode"] = "open"
-        context["active_left_string"] = None
-        context["active_left_hui"] = None
-        return [open_midi[string - 1] for string in li_strings], None
 
     # Multi-sound gestures are meaningful, but a scalar pitch check cannot
     # represent them.  Stop before substring parsing mistakes 掐撮/掐拨剌 for
@@ -281,8 +301,41 @@ def parse_jianzi(
         return pitches, None
 
     ends_harmonic = "泛止" in text
+    # The placement of 泛止 is meaningful.  A prefix closes the harmonic
+    # region before this note (泛止名指九徽勾五弦); a suffix closes it after
+    # this note (名指九徽勾五弦泛止).  A standalone 泛止 remains a control
+    # marker handled below.
+    compact_text = text.strip()
+    ends_harmonic_before_note = (
+        compact_text.startswith("泛止") and compact_text != "泛止"
+    )
+    ends_harmonic_after_note = ends_harmonic and not ends_harmonic_before_note
+    if ends_harmonic_before_note:
+        context["harmonic"] = False
+        context["harmonic_scope"] = False
+        context["harmonic_hui"] = None
+        context["sound_mode"] = None
 
-    strings = parse_string_numbers(text)
+    # 历 is an ordered sweep, not a simultaneous chord. It still needs the
+    # normal pitch-state resolution: an explicit left-hand position, or a
+    # surrounding 泛起…泛止 state, applies to each declared string. The former
+    # early-return branch incorrectly forced every 历 into open-string mode.
+    li_strings = parse_li_string_sequence(text)
+    strings = li_strings or parse_string_numbers(text)
+    starts_harmonic = text.startswith("泛起")
+    # 泛起 may be a standalone control glyph.  It still opens a persistent
+    # harmonic span for the notes that follow, even though this glyph itself
+    # names no string and therefore produces no scalar pitch.
+    if starts_harmonic and not strings:
+        context["harmonic"] = True
+        context["harmonic_scope"] = True
+        context["sound_mode"] = "harmonic"
+        hui = parse_hui(text)
+        if hui is not None:
+            context["harmonic_hui"] = hui
+        context["active_left_string"] = None
+        context["active_left_hui"] = None
+        return [], "ornament_or_control"
     # ``至X弦`` is a transition/control glyph, not an instruction to pluck
     # X as an open string.  Treating it as a new pitch creates a false
     # mismatch in an otherwise continuous phrase.
@@ -322,6 +375,7 @@ def parse_jianzi(
         return [], reason
     if text == "泛止":
         context["harmonic"] = False
+        context["harmonic_scope"] = False
         context["harmonic_hui"] = None
         context["sound_mode"] = None
         return [], "ornament_or_control"
@@ -329,14 +383,14 @@ def parse_jianzi(
     compound = re.search(
         r"[撮泼剌]\（?（?[^）]*?"
         r"(?P<hui>(?:十三|十二|十一|十|九|八|七|六|五|四|三|二|一)徽"
-        r"(?:(?:一|二|三|四|五|六|七|八|九)分)?|徽外)"
+        r"(?:(?:一|二|三|四|五|六|七|八|九)分)?|徽外半|徽外)"
         r"(?P<stopped>[一二三四五六七1-7])弦按音[＋+](?P<open>[一二三四五六七1-7])弦散音",
         text,
     )
     if compound:
         hui = parse_hui(compound.group("hui"))
         if hui is None:
-            return [], "hui_outside_has_no_fixed_pitch"
+            return [], "missing_hui"
         stopped, error = position_pitch(
             string_number(compound.group("stopped")), hui, open_midi
         )
@@ -355,14 +409,12 @@ def parse_jianzi(
     if not strings:
         return [], "no_explicit_string"
     hui = parse_hui(text)
-    if "徽外" in text:
-        return [], "hui_outside_has_no_fixed_pitch"
     # A hui plus several strings outside an explicit compound is ambiguous.
-    if hui is not None and len(strings) != 1:
+    if hui is not None and len(strings) != 1 and not li_strings:
         return [], "ambiguous_multiple_strings"
-    starts_harmonic = text.startswith("泛起")
     if starts_harmonic:
         context["harmonic"] = True
+        context["harmonic_scope"] = True
         context["sound_mode"] = "harmonic"
         # Harmonics are produced after releasing the stopped-string state.
         context["active_left_string"] = None
@@ -381,10 +433,9 @@ def parse_jianzi(
     if left_finger is not None:
         context["left_finger"] = left_finger
 
-    # An explicit 散音 is a per-note override even inside a 泛起…泛止 span.
-    # Keep the surrounding harmonic region active for following notes, but
-    # audit this sounding event against the open string rather than the
-    # inherited harmonic hui.
+    # Explicit 散音 / 按音 are per-note overrides even inside a 泛起…泛止
+    # span.  Keep the surrounding harmonic region active for following
+    # notes: neither spelling is a substitute for 泛止.
     if explicit_open:
         mode = "open"
         context["sound_mode"] = "open"
@@ -393,7 +444,10 @@ def parse_jianzi(
         # an obsolete hui.
         context["active_left_string"] = None
         context["active_left_hui"] = None
-    elif context["harmonic"]:
+    elif "按音" in text:
+        mode = "stopped"
+        context["sound_mode"] = "stopped"
+    elif "泛音" in text or context["harmonic_scope"]:
         mode = "harmonic"
     elif explicit_left or uses_current_position:
         mode = "stopped"
@@ -430,8 +484,9 @@ def parse_jianzi(
             context["stopped_hui"] = effective_hui
             context["active_left_string"] = string
             context["active_left_hui"] = effective_hui
-    if ends_harmonic:
+    if ends_harmonic_after_note:
         context["harmonic"] = False
+        context["harmonic_scope"] = False
         context["harmonic_hui"] = None
         context["sound_mode"] = None
     return pitches, None
@@ -479,6 +534,7 @@ def audit(data: dict, tolerance_cents: float) -> dict:
 
     notes = list(data.get("notes", []))
     for note_position, note in enumerate(notes):
+        context_before_note = dict(context)
         expected = [
             value for value in (
                 parse_jianpu(note.get("jianpu"), tonic_midi),
@@ -550,15 +606,49 @@ def audit(data: dict, tolerance_cents: float) -> dict:
                     sum(pair["absolute_cents"] for pair in pairs) / len(pairs), 3
                 ),
             )
+            # A candidate lookup can legitimately offer a stopped-string
+            # position even while the score is inside 泛起…泛止.  If the
+            # submitted shorthand inherits that harmonic state but the same
+            # surface becomes exact after explicitly leaving it, expose this
+            # narrow diagnostic to the editing tool rather than a bare,
+            # misleading pitch warning.
+            inherited_harmonic = bool(
+                context_before_note.get("harmonic_scope")
+                or context_before_note.get("harmonic")
+            )
+            explicit_mode = any(token in text for token in ("按音", "散", "泛起", "泛止"))
+            if not matched and inherited_harmonic and not explicit_mode:
+                stopped_context = dict(context_before_note)
+                stopped_context.update({
+                    "harmonic": False,
+                    "harmonic_scope": False,
+                    "harmonic_hui": None,
+                    "sound_mode": None,
+                })
+                stopped_actual, stopped_reason = parse_jianzi(
+                    text, open_midi, stopped_context
+                )
+                if stopped_reason is None and len(stopped_actual) == len(expected):
+                    stopped_pairs = best_pairing(expected, stopped_actual)
+                    if all(pair["absolute_cents"] <= tolerance_cents
+                           for pair in stopped_pairs):
+                        row["possible_harmonic_state_mismatch"] = True
             pair_errors.extend(pair["absolute_cents"] for pair in pairs)
         counts[row["status"]] += 1
         details.append(row)
         if "休止" in str(note.get("jianpu", "")) and not note.get("jianzi"):
-            # A bare rest releases sustained context.  A rest carrying a
-            # setup glyph such as 泛起 establishes the following phrase and
-            # must retain that state.
+            # A bare rest releases stopped/open-string hand positions, but it
+            # does not end 泛起…泛止.  Preserve the harmonic span and its hui;
+            # only an explicit 泛止 may close it.
+            harmonic_scope = bool(context.get("harmonic_scope") or context.get("harmonic"))
+            harmonic_hui = context.get("harmonic_hui")
             context.clear()
             context.update(new_context())
+            if harmonic_scope:
+                context["harmonic"] = True
+                context["harmonic_scope"] = True
+                context["sound_mode"] = "harmonic"
+                context["harmonic_hui"] = harmonic_hui
 
     compared = counts["matched"] + counts["mismatched"]
     return {
