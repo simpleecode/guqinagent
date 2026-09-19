@@ -399,9 +399,14 @@ def parse_jianzi(
         opened, error = position_pitch(
             string_number(compound.group("open")), None, open_midi, "open"
         )
-        context["stopped_string"] = int(compound.group("stopped"))
+        # Compound surfaces in the corpus use both Arabic and Chinese string
+        # designators.  Reuse the same normalizer as the pitch calculation;
+        # calling ``int("五")`` here previously aborted the *entire* phrase
+        # audit and silently suppressed every edit-plan warning in that batch.
+        stopped_string = string_number(compound.group("stopped"))
+        context["stopped_string"] = stopped_string
         context["stopped_hui"] = hui
-        context["active_left_string"] = int(compound.group("stopped"))
+        context["active_left_string"] = stopped_string
         context["active_left_hui"] = hui
         context["sound_mode"] = None
         return ([stopped, opened] if error is None else []), error
@@ -565,15 +570,16 @@ def audit(data: dict, tolerance_cents: float) -> dict:
             # parse_jianzi has already updated position context, but its one
             # endpoint must not be presented as a complete pitch proof.
             actual, reason = [], "context_dependent_pre_attack_technique"
-        elif right is None and text.startswith(
-            ("绰", "注", "淌", "浒", "引上", "上", "下", "进", "退")
-        ):
-            # A standalone left-hand movement continues an existing sounding
-            # string. Its written destination updates performance context, but
-            # octave/register conventions and the full contour are not safely
-            # reducible to one aligned MIDI value. Keep the symbolic action as
-            # supervision and make scalar pitch evidence advisory only.
-            actual, reason = [], "context_dependent_slide"
+        elif (right is None
+              and text.startswith(("绰", "注", "淌", "浒", "引上", "上", "下", "进", "退"))
+              and not actual):
+            # Without an inherited stopped string or an explicit endpoint,
+            # this is still only a symbolic movement.  Conversely,
+            # ``parse_jianzi`` returns an endpoint pitch for forms such as
+            # “注下七徽三分” and “绰上七徽” once the preceding stopped string
+            # is known.  Preserve that deterministic result for both the
+            # offline audit and edit_plan warnings.
+            reason = reason or "context_dependent_slide"
         row = {
             "index": note.get("index"),
             "jianpu": note.get("jianpu"),
@@ -588,12 +594,33 @@ def audit(data: dict, tolerance_cents: float) -> dict:
         elif reason:
             row.update(status="skipped", reason=reason)
         elif len(expected) != len(actual):
-            row.update(
-                status="mismatched",
-                reason="pitch_count_mismatch",
-                expected_pitch_count=len(expected),
-                actual_pitch_count=len(actual),
-            )
+            # Single-symbol rows whose jianzi sounds several strings are the
+            # corpus's "main note + implied partner" shorthand, not added
+            # voices: 83% of single-symbol 撮 annotations are unison
+            # doublings and most of the rest octaves.  The row passes when
+            # at least one sounded member matches the notated pitch; the
+            # reverse (two notated pitches, one sounded) stays a mismatch.
+            main_note_pairs = [
+                {"expected": expected[0], "actual": value,
+                 "delta_cents": round((value - expected[0]) * 100, 3),
+                 "absolute_cents": round(abs(value - expected[0]) * 100, 3)}
+                for value in actual
+            ]
+            best = min(main_note_pairs, key=lambda pair: pair["absolute_cents"])
+            if (len(expected) == 1 and len(actual) > 1
+                    and best["absolute_cents"] <= tolerance_cents):
+                row.update(
+                    status="matched",
+                    reason="single_symbol_multivoice_main_note",
+                    pairs=[best],
+                )
+            else:
+                row.update(
+                    status="mismatched",
+                    reason="pitch_count_mismatch",
+                    expected_pitch_count=len(expected),
+                    actual_pitch_count=len(actual),
+                )
         else:
             pairs = best_pairing(expected, actual)
             matched = all(

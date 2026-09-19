@@ -567,7 +567,9 @@ Guqinizer。
 - 为防止该阶段退化成逐字抄标注，恢复只读 `get_pitch_candidates`：Fingering 必须先把当前段全部演奏事件批量查询，工具按目标 MIDI 去重，再依据候选、简谱、ABC、上下文和专业判断生成基础减字。
 - 编辑面继续保持极简：唯一写工具仍是 `edit_plan.jianzi_rows`；候选工具不修改方案，也不恢复弦、徽、左右手等结构字段。
 - 阶段边界：Fingering 的每个演奏事件必须生成非空基础减字，不照抄最终标注中的复杂走手、复合技法或空显示范围；Guqinizer 再依据最终 GQS 加入复杂技法和显示为空的覆盖范围。
-- 公开/私有工具 schema 已统一，Fingering 均能看到 `get_pitch_candidates`；Guqinizer 不暴露该工具。
+- 公开/私有工具 schema 已统一，Fingering 均能看到 `get_pitch_candidates`。本节原记载
+  “Guqinizer 不暴露该工具”为当时状态；后来为配合音高警告修复，Guqinizer 阶段同样暴露该
+  只读工具（见 `public_tools_for` 注释与 §7.163）。
 - 旧占位符 `[取音与左右手待定]` 已改为与当前文本协议一致的 `[减字待填写]`。
 - 补充规则：两个阶段都不得向 `jianzi_rows` 提交小节线、延音或休止。
 - 回归：agents 80/80、scripts 37/37，总计 117/117；`py_compile` 通过。
@@ -585,7 +587,8 @@ Guqinizer。
 
 - 从 Fingering、Guqinizer 的公开角色提示及教师私有规则中删除“不要输出或维护弦、徽、左右手、attack、technique 或结构 patch”等冗余负面说明。
 - 活动写接口本来已经只包含 `edit_plan.jianzi_rows`，无上述结构字段，故不再向模型介绍不存在的编辑概念。
-- Fingering 的只读 `get_pitch_candidates` 仍返回方式、弦和徽位，因为这些是候选取音证据，不是可维护状态；Guqinizer 不暴露该工具。
+- 只读 `get_pitch_candidates` 返回方式、弦和徽位，因为这些是候选取音证据，不是可维护状态；
+  该工具两个阶段均可见（Guqinizer 用于修复音高警告，2026-09 修正，见 §7.163）。
 - 内部 typed patch/replay 继续作为确定性审计实现细节保留，不出现在活动工具 schema 或角色提示中。
 - 回归测试 117/117 通过。
 
@@ -1920,3 +1923,139 @@ Guqinizer。
   `filter_teacher_trajectories_by_source_ids.py`；评估集构建脚本已改为从统一入口加载源谱审计函数。
 - 新增的 `basic-blank-audit` 是保守的候选检测：跳过小节线、休止、再作省略和已知复合/延续技法，输出候选报告而不自动删数据。
   旧 56 条排除清单保留为人工审阅后的历史基线，不能与自动候选集混同。
+
+## 7.161 继承弦位走手音高复核与 Guqinizer 重跑（2026-09-18）
+
+- `scripts/audit_jianpu_jianzi_pitch.py` 现允许在已继承弦位时审计独立走手减字的明确徽位终点；没有可用继承弦位/有效终点时仍跳过，不猜弦。走手终点使用当前 phrase 的简谱音高比较。
+- 新增 `scripts/audit_guqinizer_walk_pitch.py`，从源 phrase、历史 accepted Guqinizer plan 与 `pitch_audit_notes()` 回放每首曲子的历史状态，审计新增可计算终点的无右手取声走手行，并输出模式审核页及待处理 trajectory ID 清单。
+- 初次统计的 2,020 个不匹配 phrase 是错误结果：历史回放音行被重复归入每个后续 phrase。脚本现按当前 phrase 的 `notes_without_jianzi.index` 过滤审计明细。初次修正后的基线为 7,434 个可核验行、455 个不匹配行、315 个完整 trajectory；`ShSCyERN-p0026` 单独复核使用正调 `open_midi=[48,50,53,55,57,60,62]`，其 `注下七徽` 与 C5 匹配，不在不匹配清单。
+- 对上述 315 个完整 trajectory 仅重跑 Guqinizer，原 Finger 中间结果保留。GLM-5.3 8 路首轮接受 312 条；3 条因教师响应格式无效失败，随后单独重试均成功。最终接受 315/315，分片任务无失败。
+- 新轨迹经 8 个 GLM-5.3 脱敏分片处理，315/315 脱敏成功、0 失败。合并替换后的完整数据目录为
+  `ABC_J/agent_training/messages_glm_full_two_stage_harmonicstatefix_lipitchfix_p0063harmonicwarning_statewarning38_harmonicparsefix_walkpitchfix_20260918/`；报告显示替换 315 条、总计 7,694 条（Fingering 3,847、Guqinizer 3,847），公开/私有 sample ID 对齐。原版本保留未覆盖。
+- 新版全量复审为 7,282 个可核验走手行，其中匹配 7,173、不匹配 109，涉及 71 个完整 trajectory。对本次重跑的 315 条子集，走手不匹配由 455 行/315 个 phrase 降至 107 行/69 个 phrase。新版审核页：
+  `ABC_J/agent_training/guqinizer_walk_pitch_postaudit_20260918/review.html`；前版候选审核页及统计保留于
+  `ABC_J/agent_training/guqinizer_walk_pitch_audit_20260918/`。审计口径仍只是标量音高筛查，复合动作及无明确终点的走手动作不据此判错。
+
+## 7.162 四卡 A100 Qwen3.5-9B 训练产物归档（2026-09-17）
+
+- 本地完整产物归档目录：`train/artifacts/qwen35_9b_lora_4xa100_bs2_acc1_ctx8192_20260917/`（约 103 MB）。训练使用服务器数据快照
+  `/data/guqin-agent/data/guqin_agent_sft_glm_final_harmonicparsefix_20260915`，共 7,694 条样本；该快照早于 §7.161 的 315 条 Guqinizer 更新。
+- 配置：Qwen3.5-9B，4 张 A100，4-bit QLoRA，Liger，bf16，`cutoff_len=8192`，每卡 batch 2，梯度累积 1，3 epochs；实际有效 batch 为 `4 × 2 × 1 = 8`。两份 YAML 均已归档于 `configs/`，其中注释“1 × 8 × 4 = 32”是过时内容，不能当作本次实际 batch 配置。
+- 训练从 `checkpoint-1900` 续跑，最终 `global_step=2886`、epoch 3。最终报告 `train_loss=0.12697`；完成日志报告本次续跑 `train_runtime=15,833 秒（4:23:53）`，这是续跑进程所报运行时间，不代表含前段及暂停时间的总墙钟耗时。未配置 eval，因此没有 `eval_loss`。
+- 主要产物：`final_adapter/adapter_model.safetensors`（约 83 MB，LoRA adapter）、`training_loss.png`、`trainer_state.json`、`trainer_log.jsonl`、`train_results.json`、`all_results.json`、`training_args.bin`；初次运行与从 step 1900 续跑的配置、日志均在 `configs/`、`logs/`。最终日志确认 2,886/2,886 步和 checkpoint 保存完成。
+- 本段记录的是 SFT 训练产物与 loss 指标，不包含 held-out 评估结论；后续以 §7.161 更新后的训练数据重新训练时，应另建产物目录并与此 adapter 区分。
+
+## 7.163 Guqinizer 走手徽位约束解码与实验室服务器代码同步（2026-09-18）
+
+- 推理复核确认 Guqinizer 的系统性缺陷：`SCf7VJzZ` p0001（A100 最终 adapter，2026-09-17 评估）把
+  `大指七徽三分挑六弦` 改写为 `注下七徽六分`（终点约 100 音分偏低）、`大指七徽挑四弦` 改为 `历五弦`、
+  `七徽三分` 整体漂移为 `七徽六分`；Base 阶段音高全部正确，错音全部由 Guqinizer 润色引入。
+  判断与用户一致：几千 token 的轨迹中徽位数字 token 在 SFT 中训练信号不足。
+- 新增 `scripts/guqinizer_walk_constraint.py`：Guqinizer edit_plan 走手终点约束解码。规则＝终点徽位与
+  Base 阶段相同，或在任意弦上（`string_scope=any`，可收紧为 `base`）音高正确（默认 ±50 音分，
+  与审计口径一致）。实现为 trie 式 token 白名单 LogitsProcessor：仅在模型自身输出
+  `<parameter=jianzi_rows>`/`"jianzi_rows"` 区域内激活（reasoning/`<think>` 不受限），检测
+  绰/注/进/退/上/下/浒/淌/引上＋可选左手指后的徽位数字；除 span 内 trie 掩码外，还有
+  trigger-pending 预掩码约束徽位整数本身，防止先写错整数再让 span 死锁。逐字符消费与逐 token
+  掩码判定同构，含跨 token 合并（如"三分挑"）、UTF-8 字节级增量解码、空掩码安全阀。
+  音高计算全部复用 `scripts/audit_jianpu_jianzi_pitch.py`（`parse_hui/position_pitch/parse_jianpu`
+  及继承 context 重放），与离线审计口径一致；约束键为 GQS 1.2 连续音序（模型实际书写的行号）。
+- `train/scripts/eval_two_stage_score.py` 新增 `--constrain-walk-hui`、`--walk-tolerance-cents`、
+  `--walk-string-scope`；仅 Guqinizer 阶段生效，逐轮把 `constraint.stats`（spans/mask_steps/
+  violations/fallbacks）与逐行允许集写入 trace 与 stdout 日志。本地测试
+  `scripts/test_guqinizer_walk_constraint.py` 17 项通过（真实 SCf7VJzZ p0001 允许集、状态机、
+  pending 掩码、合并 token、JSON 包络、安全阀）。
+- 实验室服务器（219.216.65.119，4×RTX 3090，卡 2）代码同步：r1 失败根因是服务器为"半新半旧"
+  快照——HEAD 版 `RealToolRuntime` 按音序解释行号，而旧版 `agents/abc_to_jianzipu/teacher_trajectory.py`
+  仍渲染 source 序号（含小节线空档），交叉映射产生 `duplicate jianzi source_index`，Base 16 轮全败。
+  已先备份（`~/guqin-agent-backup-20260918/`，210 文件）再将本地工作区的 `ABC_J/scripts/`、`scripts/`、
+  `agents/`（rsync --delete，清除 12 个本地已删旧模块，现 25 文件）、`train/scripts/` 全量同步；
+  顶层死代码 `~/guqin-agent/abc_to_jianzipu/` 移入备份。同步前服务器 `audit_jianpu_jianzi_pitch.py`
+  缺调弦 semitone_offset 双重偏移修复与 §7.161 走手审计，现已对齐本地工作区。
+- 卡 2 真实验证（r2，SCf7VJzZ 前 3 phrase，4-bit QLoRA adapter=`inference_artifacts/
+  qwen35_9b_lora_final_20260917`）：3/3 phrase 协议有效；约束统计 8 个走手 span 全部完成、
+  43 次掩码步、0 mid-token 违规、0 安全阀回退。`注下七徽六分` 类错误消失：p0001 第 2/17 音
+  改写为 `注下七徽三分`；用项目音高口径复核 8 个走手终点全部 ≤3.8 音分（A100 基线同类音约
+  100 音分）。`历五弦`（右手历弦换弦）与普通位置改写不在本约束范围，仍属已知缺口。
+- r3（整曲 21 phrase，any 弦并集版）完成：21/21 协议有效、113 个走手 span 全部完成、
+  571 次掩码步、0 违规 0 回退。但按 §7.161 的继承弦口径复核最终走手行：107 个可核验终点中
+  37 个在实际发声弦上超差——any 并集允许"在别的弦上音高正确"的终点（如 `绰上七徽九分`
+  在弦4 差 13 音分，但左手在弦5，实际差 213 音分），约束过松。
+- 依用户决定重设计（同日）：CLI 仅保留 `--constrain-walk-hui` 一个开关，启用即固定配置
+  （±50 音分）；允许集＝Base 位置锚点 ∪ **Base 弦**上音高正确 ∪ **当前有效弦**上音高正确。
+  当前有效弦来自"当前计划"（Base＋本阶段已应用编辑）按音序的全量重放快照
+  （`initial_live`），并在**同一工具调用内**、每行引号闭合时就地 `parse_jianzi` 重放更新
+  （`rows_replayed`），不等 edit_plan 真正执行——行号按模型实际书写的连续音序。
+  徽外/徽外半支持保留（允许集枚举标签、span 无数字入口、pending 掩码、外/半入终点字符集）。
+- r4（base∪live 收紧版）已完成：21/21 phrase 协议有效；104 个走手 span 全部完成、518 次掩码步、
+  0 违规 0 回退、187 行在工具调用内重放。双弦口径终验（独立走手按 base 自有弦∪继承弦、前置式按
+  文本自带弦）：106 个可核验走手中 77 个正确、23 个为 Base 阶段自身音高错误被"=Base"条款忠实保留、
+  6 个存疑中至少 3 个已查明为"写入时 live 弦正确、终稿重放弦漂移"（如 p0012 `进复六徽四分` 写入时
+  live=弦4 差 21 音分）或 Base 已错延续（p0009 两行 guqinizer 未改）。
+  对照 r3（any 并集）：真实改坏 12/113；基线（A100 无约束）为 `注下七徽六分` 系统性漂移。
+- 口径修正与复核（同日，用户质疑后重验）：早期"A100 base 干净（0 warning）vs 3090 base 116
+  warning"的对比不成立——warning 标记出自中间轮（终稿可能已自纠），且 A100 租赁机快照根本不产生
+  base 音高 warning。以同一项目审计对 base 终稿重打分：A100 前 7 phrase 16/117（13.7%）超差、
+  r3 同段 19/117、r4 同段 33/117——同一量级、A100 略优，不存在"0 错 vs 全错"；p0001 在全部
+  5 次有效运行（A100/r3/r4/repeat×3 中的 2 次+repeat3）终稿 0 超差。LoRA 加载排除嫌疑：
+  `load_adapter_checked` 逐张量严格校验（496 张量、248 lora_B 全非零）7 次运行全过，服务器
+  adapter 与本地 A100 训练归档 md5 逐字节一致。可复现性：r4 与 repeat_p1_1/2/3 四次运行
+  p0001 base 逐字一致（当前 3090+bnb4bit 环境下 greedy 确定）；r3 与 r4 的 6 行差异对应两轮间
+  eval 脚本更新，非随机噪声。错误集中在后段 phrase 与高音区（`3̇` 系统性写成七徽六分而非五徽
+  六分），级联上下文（模型自身前段输出）会放大尾部差距。结论：Base 音高错误的真因是"高置信
+  音高不匹配 warning 不阻塞提交"（§7.18 设计）在两个环境都存在，下一步应把它升级为必须修正的
+  反馈（复用 teacher runner 的 continue 机制）。
+  可视化（`scripts/visualize_running_eval_score.py --skip-pull`；标注源
+  `ABC_J/modern/SCf7VJzZ/mapped/jianpu_jianzi_readable.json` 按全局 index 对齐生成 references，
+  因既有 `reference_trajectories_test.jsonl` 与 `evaluation_pairs_test.jsonl` 均不含该曲）：
+  `train/eval_outputs_v3_two_stage/walk_constraint_debug/` 下 `SCf7VJzZ_baseline_a100_view.html`（7
+  phrase 无约束）、`SCf7VJzZ_r3_anyunion_view.html`、`SCf7VJzZ_r4_baseflive_view.html`（各 21
+  phrase）。剩余改进方向：Base 阶段高置信错音升级为阻塞反馈与跨轮 live 弦漂移（可把上一轮
+  文本并入 initial_live 重放，已部分由每轮重建 current_text 覆盖）。
+- 教师音高门槛移植进评估（同日，r5）：`eval_two_stage_score.py` 的 `run_stage` 原先"valid 即接受"，
+  丢失了教师运行器的 pitch gate（`jianzi_pitch_mismatch` 挂起阻塞接受、直到该事件在看到警告的
+  后续轮次被真实改写；教师版另要求先查过候选）。现已移植简化版：`pending_pitch`/`repaired_pitch`
+  挂起集合、警告轮不接受、模型停止调用即采纳最后 valid 预览、轮次耗尽回退并记录
+  `pitch_pending_at_stop`。更正一处旧记录：Guqinizer 阶段**有** `get_pitch_candidates`
+  （`public_tools_for` 明确为修复音高警告而开，§7.20 的"不暴露"是 2026-08-25 旧状态）。
+  r5（p0001–p0004，卡 2，同权重同环境）同口径终稿审计：r4 无门 base 13 错/guqinizer 14 错 →
+  r5 有门 **8 个阶段终稿全部 0 错**（p0004 重灾区 base 4 轮、guqinizer 4 轮修净；pitch_gate 触发
+  5 个警告轮，挂起全部清零后接受，无一靠回退收场；学生自发复现教师"警告→查候选→候选指导下改写"
+  的修复模式，如 p0004 行 60 和弦撮按候选改为 `撮（大指十二徽三分二弦按音＋六弦七徽九分）`）。
+  代价为轮次增加（约 2→4 轮/阶段）。待办：可把修复认定收紧为教师完整版"先查候选再改"；全曲
+  21 phrase 的有门+约束完整跑待做。
+- r6（整曲 21 phrase，音高门槛＋走手约束，卡 2）完成：21/21 协议有效。同口径终稿审计：
+  r4（无门）base 87/323 错、guqinizer 99/283 错 → **r6 base 38/325 错、guqinizer 18/290 错**
+  （走手约束同时统计：115 span 全部完成、535 次掩码步、0 违规 0 回退）。门槛活动：总 151 轮中
+  82 轮带警告，仅 6 个阶段轮次耗尽回退且挂起未清（其余全部修净后接受）。剩余错误集中在标量
+  解析器无法核验/修复的写法与高音区换弦重定位，后续可评估"候选指导下修复"认定收紧与 Base 侧
+  候选引导。可视化新增暗色风格（#181818 系）：`SCf7VJzZ_r6_pitchgate_full_view.html` 及
+  baseline/r3/r4/r5 各视图均已在 `train/eval_outputs_v3_two_stage/walk_constraint_debug/` 重生成。
+  交接文档同步修正 §7.20/§7.22 的"Guqinizer 不暴露 get_pitch_candidates"旧记载。
+- 约束的徽外支持（同日补充）：语料扫描确认 `徽外` 常见（train 1,169 处 / 561 phrase，
+  test 537、validation 128），且存在 `注下徽外` 走手终点写法；`徽外半` 语料 0 处但解析支持。
+  审计侧（本地工作区 `parse_hui` 字符串分支＋`position_pitch` 以 12.3 锚点减 1/2 半音，
+  徽外=开弦+190 音分、徽外半=+90）已随全量同步上服务器。约束白名单侧新增：允许集枚举
+  `徽外/徽外半` 标签、=Base 条款认标签锚点（`own_position` 返回 `str` 型徽位）、
+  span 增加无数字入口（触发词后直接"徽"且允许集含徽外标签即进入）、pending 掩码要求
+  "徽"开头 token 必须前缀匹配允许标签、"外/半"纳入终点字符集（防"徽外半"借退出子句偷渡、
+  数字终点后的"半"本属畸形写法一并封禁）。测试 22/22 通过，已同步服务器。
+- 允许集口径演进：初版 any 弦并集（每音 15–30 面）在 r3 上被证明过松（见上）；
+  现为 base 弦 ∪ 当前有效弦（典型每弦 2–4 面）。弦位不写进谱面、且 guqinizer 可能已改写
+  前文弦位，故不硬绑单一弦。
+
+## 7.164 单谱字撮的"主音＋隐含伙伴"审计规则（2026-09-19）
+
+- 实测推翻 §5 的旧印象"和弦音符 100% 双值"：train 标注撮 2,286 个中 813 个（35.6%）为单谱字；
+  可解析的 615 个中 513 个同音加厚、45 个八度、仅 26 个主音不匹配——单谱字撮是"主音＋隐含
+  伙伴"的合法省略记谱，而非"乱加声部"。
+- `scripts/audit_jianpu_jianzi_pitch.py` 的 `audit()` 规则修改：`expected=1（单谱字）且
+  actual>1` 时，任一发声成员与谱字 ≤50 音分即判 `matched`（reason=
+  `single_symbol_multivoice_main_note`，pairs 记最优成员）；双谱字仍维持 2v2 最优配对；
+  `expected>1 且 actual=1`（丢失声部）仍判 `pitch_count_mismatch`。回归测试 42/42 通过
+  （含同音/八度/全不匹配/双谱字四例，均已同步服务器并复跑通过）。
+- 影响量化：eval 侧 r6 终稿重审为 base 41 / guqinizer 21 错（本曲单谱字撮少，翻转仅 1 行）；
+  训练筛选口径按用户决定放行——`filter_training_data.py pitch-select --require-match` 对
+  `inferred_gqs_v12_tuningfix_20260914` train 重跑：**3,969 → 4,022（+53 phrase）**，
+  新清单 `/tmp/pitch_select_newrule/pitch_eligible_phrase_ids.txt`（尚未用于任何教师生成或
+  训练导出；正式采用时应写入 agent_training 固定目录并记录冻结口径变更）。

@@ -995,13 +995,15 @@ class RealToolRuntime:
                         require_complete=False, historical=self.historical)
                     preview_errors = list(basic_report["problems"])
                     preview_warnings.extend(basic_report.get("warnings") or [])
-                elif preview_valid and self.toward_reference:
-                    # Public tool feedback must never compare against the
-                    # teacher-only reference.  The teacher already has the
-                    # private GQS for planning; exposing expected text here
-                    # would copy the answer into the student trajectory.
+                elif preview_valid:
+                    # Pitch validation is public and must run for every
+                    # Guqinizer invocation, including inference where
+                    # ``toward_reference`` is false.  The optional private
+                    # reference comparison inside validate_jianzi_only stays
+                    # disabled in that case, so no sealed target text can
+                    # leak into the tool observation.
                     preview_valid, quality_report = validate_jianzi_only(
-                        self.item, cumulative, toward_reference=False,
+                        self.item, cumulative, toward_reference=self.toward_reference,
                         require_complete=False, historical=self.historical)
                     preview_errors = list(quality_report["problems"])
                     preview_warnings.extend(quality_report.get("warnings") or [])

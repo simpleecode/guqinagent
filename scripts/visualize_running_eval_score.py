@@ -94,6 +94,14 @@ def stage_trace(stage: dict | None, title: str, prompt_html: str = "") -> str:
         results = item.get("tool_results") or []
         raw = item.get("raw_output") or ""
         suffix = "｜输出被截断" if item.get("truncated") else ""
+        # ③ must show exactly what the model receives next round: the tool
+        # RESULT only.  The record's name/arguments are audit provenance and
+        # already visible in ②; echoing them here mislabels the input.
+        result_blocks = "".join(
+            f"<div class='round-step'><b>③ 工具返回（下一轮模型输入）｜{esc(entry.get('name') or '?')}</b>"
+            f"<pre>{esc(pretty(entry.get('result')))}</pre></div>"
+            for entry in results
+        ) or "<div class='round-step'><b>③ 工具返回（下一轮模型输入）</b><pre>（本轮无工具执行）</pre></div>"
         sections.append(
             "<article class='round'>"
             f"<h4>第 {esc(round_no)} 轮<span>assistant → tool{esc(suffix)}</span></h4>"
@@ -101,8 +109,7 @@ def stage_trace(stage: dict | None, title: str, prompt_html: str = "") -> str:
             f"<pre>{esc(raw)}</pre></div>"
             "<div class='round-step'><b>② 解析出的工具调用</b>"
             f"<pre>{esc(pretty(calls))}</pre></div>"
-            "<div class='round-step'><b>③ 工具返回（下一轮模型输入）</b>"
-            f"<pre>{esc(pretty(results))}</pre></div>"
+            + result_blocks +
             "</article>"
         )
     status = "成功" if stage.get("ok") else "失败"
@@ -193,6 +200,13 @@ def compare_table(source: dict, base: dict | None, guqinizer: dict | None, annot
     gq_map = actions_by_index(guqinizer)
     base_pitch = pitch_symbols(source, base_map)
     gq_pitch = pitch_symbols(source, gq_map)
+    # GQS 1.2: the model writes continuous 音序 (bars occupy no ordinal);
+    # internal bookkeeping stays on source indexes, display uses 音序 like
+    # visualize_all_trajectories_hierarchical.py.
+    event_of = {
+        int(note["index"]): note.get("event_index")
+        for note in notes if note.get("index") is not None
+    }
     indices = [int(note["index"]) for note in notes if note.get("index") is not None]
     indices = sorted(set(indices) | set(base_map) | set(gq_map))
     rows = []
@@ -201,6 +215,8 @@ def compare_table(source: dict, base: dict | None, guqinizer: dict | None, annot
         jianpu = note.get("jianpu") or ""
         abc = note.get("abc") or ""
         duration = note.get("duration") or ""
+        event = event_of.get(index)
+        ordinal = str(int(event)) if event is not None else "—"
         def shown(mapping: dict[int, str]) -> str:
             return mapping[index] if index in mapping and mapping[index] else "（空）"
         target = annotation.get(index, "") or "（空）"
@@ -210,7 +226,7 @@ def compare_table(source: dict, base: dict | None, guqinizer: dict | None, annot
         gq_class = "same" if gq_text == target else "diff"
         rows.append(
             "<tr>"
-            f"<th>{index}</th><td>{esc(jianpu)}</td><td>{esc(abc)}</td><td>{esc(duration)}</td>"
+            f"<th title='source index {index}'>{ordinal}</th><td>{esc(jianpu)}</td><td>{esc(abc)}</td><td>{esc(duration)}</td>"
             f"<td class='{base_class}'>{esc(base_text)}</td>"
             f"<td class='{gq_class}'>{esc(gq_text)}</td><td class='annotation'>{esc(target)}</td>"
             f"<td class='pitch {pitch_class(base_pitch.get(index, '○'))}' title='✓ 匹配｜✗ 不匹配｜○ 无法可靠解析'>{base_pitch.get(index, '○')}</td>"
@@ -226,7 +242,13 @@ def compare_table(source: dict, base: dict | None, guqinizer: dict | None, annot
 
 
 def notation_overview(source_rows: list[dict], predictions: dict[str, dict]) -> str:
-    """Render each phrase with its jianpu above the model's final jianzi."""
+    """Render each phrase in wrapped jianpu/jianzi pairs.
+
+    A complete phrase can contain enough verbose jianzi that a single
+    horizontal grid becomes impractical to inspect.  Keep the two notation
+    rows aligned, but split every phrase into small, self-contained strips.
+    """
+    notes_per_strip = 8
     lines = []
     for source in source_rows:
         sample_id = str(source.get("sample_id"))
@@ -239,7 +261,7 @@ def notation_overview(source_rows: list[dict], predictions: dict[str, dict]) -> 
             final_stage = prediction.get("base") or {}
             label = "Base" if sample_id in predictions else "待生成"
         actions = actions_by_index(final_stage)
-        jianpu_cells, jianzi_cells = [], []
+        cells: list[tuple[str, str]] = []
         for note in notes:
             if note.get("index") is None:
                 continue
@@ -248,25 +270,35 @@ def notation_overview(source_rows: list[dict], predictions: dict[str, dict]) -> 
             if str(note.get("abc") or "").strip() == "|":
                 jianpu = "｜"
             jianzi = actions.get(index)
-            jianpu_cells.append(
-                f"<div class='notation-cell'><small>{index}</small>{esc(jianpu)}</div>"
-            )
-            jianzi_cells.append(
-                f"<div class='notation-cell jianzi'>{esc(jianzi if jianzi else '·')}</div>"
-            )
+            event = note.get("event_index")
+            ordinal = str(int(event)) if event is not None else "—"
+            cells.append((
+                f"<div class='notation-cell' title='source index {index}'><small>{ordinal}</small>{esc(jianpu)}</div>",
+                f"<div class='notation-cell jianzi'>{esc(jianzi if jianzi else '·')}</div>",
+            ))
         phrase_id = runtime.get("phrase_id") or source.get("phrase_id") or sample_id
-        lines.append(
-            "<section class='notation-line'>"
-            f"<header><code>{esc(phrase_id)}</code><span>{esc(label)}</span></header>"
-            "<div class='notation-scroll'><div class='notation-grid' "
-            f"style='--note-count:{len(jianpu_cells)}'>"
-            "<div class='notation-label'>简谱</div>" + "".join(jianpu_cells)
-            + "<div class='notation-label'>减字</div>" + "".join(jianzi_cells)
-            + "</div></div></section>"
-        )
+        strip_count = max(1, (len(cells) + notes_per_strip - 1) // notes_per_strip)
+        strips = []
+        for start in range(0, len(cells), notes_per_strip):
+            chunk = cells[start:start + notes_per_strip]
+            strip_index = start // notes_per_strip + 1
+            strip_label = (
+                f"{phrase_id}｜第 {strip_index}/{strip_count} 行"
+                if strip_count > 1 else str(phrase_id)
+            )
+            strips.append(
+                "<section class='notation-strip'>"
+                f"<header><code>{esc(strip_label)}</code><span>{esc(label)}</span></header>"
+                "<div class='notation-grid' "
+                f"style='--note-count:{len(chunk)}'>"
+                "<div class='notation-label'>简谱</div>" + "".join(item[0] for item in chunk)
+                + "<div class='notation-label'>减字</div>" + "".join(item[1] for item in chunk)
+                + "</div></section>"
+            )
+        lines.append("<section class='notation-line'>" + "".join(strips) + "</section>")
     return (
         "<section class='notation-overview'><h2>曲谱总览</h2>"
-        "<p>每段上为简谱，下为当前模型最终减字；“·”表示尚未提交或该行为空。</p>"
+        "<p>每段上为简谱，下为当前模型最终减字；较长段每 8 音自动换行；“·”表示尚未提交或该行为空。</p>"
         + "".join(lines) + "</section>"
     )
 
@@ -369,10 +401,10 @@ def main() -> int:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     page = f"""<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>{esc(args.score)}｜运行中评估</title><style>
-:root{{--bg:#f5f2eb;--fg:#28251f;--line:#d9d2c4;--surface:#fffdf8;--muted:#756d61;--accent:#e8f1f4;--same:#dff2df;--diff:#fff0e8}}
-*{{box-sizing:border-box}}body{{max-width:1380px;margin:24px auto;padding:0 16px;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,'Microsoft YaHei',sans-serif}}h1{{font-size:23px;margin:0 0 8px}}h2,h3,h4{{font-weight:500;margin:14px 0 8px}}p{{color:var(--muted)}}details{{border:1px solid var(--line);border-radius:8px;margin:8px 0;background:var(--surface);overflow:hidden}}summary{{cursor:pointer;padding:9px 12px;font-weight:500;background:var(--accent)}}.phrase>summary{{background:#f2eee5}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:12px;background:#fff;font:12px/1.45 ui-monospace,'Cascadia Code',monospace}}.table-wrap{{overflow:auto;margin:8px 0 12px}}table{{border-collapse:collapse;width:100%;min-width:1080px;background:var(--surface)}}th,td{{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}}thead th{{font-weight:500;background:#eee9df;position:sticky;top:0}}tbody th{{font-weight:500;white-space:nowrap}}code{{font-family:ui-monospace,'Cascadia Code',monospace}}.status{{padding:10px 12px;background:#fff8dc;border:1px solid #e6d9a8;border-radius:8px}}.pitch{{width:82px;text-align:center;font-size:18px;font-weight:700}}.pitch.matched{{color:#146c35;background:#dff2df}}.pitch.mismatched{{color:#a12929;background:#fff0e8}}.pitch.unresolved{{color:var(--muted);background:#f0eee9}}
+:root{{--bg:#181818;--fg:#e8e4dc;--line:#494949;--surface:#252525;--muted:#b9b3a8;--accent:#2f3a40;--same:#1e3a26;--diff:#40261e}}
+*{{box-sizing:border-box}}body{{max-width:1380px;margin:24px auto;padding:0 16px;background:var(--bg);color:var(--fg);font:15px/1.55 system-ui,'Microsoft YaHei',sans-serif}}h1{{font-size:23px;margin:0 0 8px}}h2,h3,h4{{font-weight:500;margin:14px 0 8px}}p{{color:var(--muted)}}details{{border:1px solid var(--line);border-radius:8px;margin:8px 0;background:var(--surface);overflow:hidden}}summary{{cursor:pointer;padding:9px 12px;font-weight:500;background:var(--accent);color:var(--fg)}}.phrase>summary{{background:#2c2c2c}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;margin:0;padding:12px;background:#1d1d1d;color:#e8e4dc;font:12px/1.45 ui-monospace,'Cascadia Code',monospace}}.table-wrap{{overflow:auto;margin:8px 0 12px}}table{{border-collapse:collapse;width:100%;min-width:1080px;background:var(--surface)}}th,td{{border-bottom:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top;white-space:pre-wrap;overflow-wrap:anywhere}}thead th{{font-weight:500;background:#303030;position:sticky;top:0}}tbody th{{font-weight:500;white-space:nowrap}}code{{font-family:ui-monospace,'Cascadia Code',monospace}}.status{{padding:10px 12px;background:#33301c;border:1px solid #6b6237;border-radius:8px;color:var(--fg)}}.pitch{{width:82px;text-align:center;font-size:18px;font-weight:700}}.pitch.matched{{color:#7dd87d;background:#1e3a26}}.pitch.mismatched{{color:#ef8a7a;background:#40261e}}.pitch.unresolved{{color:var(--muted);background:#2e2c29}}
 </style><style>
-.notation-overview{{margin:20px 0}}.notation-line{{margin:10px 0;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}}.notation-line header{{display:flex;gap:10px;justify-content:space-between;padding:7px 10px;background:#eee9df;color:var(--muted)}}.notation-scroll{{overflow-x:auto}}.notation-grid{{display:grid;grid-template-columns:64px repeat(var(--note-count),minmax(78px,max-content));width:max-content;min-width:100%}}.notation-label{{padding:8px;background:var(--accent);font-weight:500;position:sticky;left:0;z-index:1;border-bottom:1px solid var(--line)}}.notation-cell{{min-height:42px;padding:5px 7px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere}}.notation-cell small{{display:block;color:var(--muted);font:11px ui-monospace,monospace}}.notation-cell.jianzi{{min-height:50px;background:#fff}}.round{{margin:12px 0;border:1px solid var(--line);border-radius:8px;overflow:hidden}}.round h4{{display:flex;justify-content:space-between;gap:12px;margin:0;padding:8px 10px;background:#f2eee5}}.round h4 span{{color:var(--muted);font-weight:400}}.round-step{{border-top:1px solid var(--line)}}.round-step b{{display:block;padding:6px 10px;background:var(--accent);font-weight:500}}
+.notation-overview{{margin:20px 0}}.notation-line{{margin:10px 0;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}}.notation-strip+.notation-strip{{border-top:2px solid var(--line)}}.notation-strip header{{display:flex;gap:10px;justify-content:space-between;padding:7px 10px;background:#303030;color:var(--muted)}}.notation-grid{{display:grid;grid-template-columns:60px repeat(var(--note-count),minmax(0,1fr));width:100%}}.notation-label{{padding:8px;background:var(--accent);font-weight:500;border-bottom:1px solid var(--line)}}.notation-cell{{min-width:0;min-height:42px;padding:5px 7px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere}}.notation-cell small{{display:block;color:var(--muted);font:11px ui-monospace,monospace}}.notation-cell.jianzi{{min-height:50px;background:#202020}}.round{{margin:12px 0;border:1px solid var(--line);border-radius:8px;overflow:hidden}}.round h4{{display:flex;justify-content:space-between;gap:12px;margin:0;padding:8px 10px;background:#2c2c2c}}.round h4 span{{color:var(--muted);font-weight:400}}.round-step{{border-top:1px solid var(--line)}}.round-step b{{display:block;padding:6px 10px;background:var(--accent);font-weight:500}}
 </style></head><body><h1>{esc(args.score)}｜{esc(title)}｜当前评估状态</h1>
 <div class='status'>已拉取远端结果：{completed} / {len(ordered_ids)} 个 phrase。重新运行本脚本即可刷新；表格包含本地标注，仅用于检查，不会发送到服务器。</div>
 {overview}

@@ -137,6 +137,11 @@ def main() -> int:
         "--disable-thinking", action="store_true",
         help="render Qwen3.5 generation prompts with enable_thinking=False",
     )
+    parser.add_argument(
+        "--constrain-walk-hui", action="store_true",
+        help="constrain Guqinizer walk endpoints (edit_plan.jianzi_rows) to the"
+             " Base stage's hui or pitch-correct positions via token masking",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args()
@@ -148,7 +153,11 @@ def main() -> int:
         public_system_for, public_tools_for, render_public_prompt,
         validate_jianzi_only,
     )
+    from agents.abc_to_jianzipu.trajectory_replay import replay_patches
     from scripts.adapter_loading import load_adapter_checked
+    from scripts.guqinizer_walk_constraint import (
+        WalkHuiConstraintProcessor, build_id_texts, build_walk_constraints,
+    )
     from scripts.qwen35_generation import qwen35_eos_token_ids, trim_qwen35_assistant_turn
 
     source = [json.loads(line) for line in args.input.read_text(encoding="utf-8").splitlines() if line.strip()]
@@ -193,14 +202,27 @@ def main() -> int:
     )
     model = load_adapter_checked(model, args.adapter)
     generation_eos_ids = qwen35_eos_token_ids(tokenizer)
+    id_texts_cache: dict[int, str] | None = None
 
-    def generate(messages: list[dict], tools: list[dict], sampled: bool) -> tuple[str, bool, int]:
+    def generate(
+        messages: list[dict], tools: list[dict], sampled: bool,
+        constraint_table=None,
+    ):
+        nonlocal id_texts_cache
         encoded = tokenizer.apply_chat_template(
             messages, tools=openai_tools(tools), add_generation_prompt=True,
             enable_thinking=not args.disable_thinking,
             return_tensors="pt", return_dict=True,
         )
         encoded = {key: value.to(model.device) for key, value in encoded.items()}
+        processor = None
+        if constraint_table is not None:
+            if id_texts_cache is None:
+                id_texts_cache = build_id_texts(tokenizer)
+            processor = WalkHuiConstraintProcessor(
+                id_texts_cache, constraint_table,
+                int(encoded["input_ids"].shape[-1]),
+            )
         options = {
             "max_new_tokens": args.max_new_tokens,
             "do_sample": sampled,
@@ -208,6 +230,8 @@ def main() -> int:
             "pad_token_id": tokenizer.eos_token_id,
             "eos_token_id": generation_eos_ids,
         }
+        if processor is not None:
+            options["logits_processor"] = [processor]
         if sampled:
             options["temperature"] = 0.25
         with torch.inference_mode():
@@ -218,11 +242,23 @@ def main() -> int:
             trim_qwen35_assistant_turn(decoded),
             len(new_tokens) >= args.max_new_tokens,
             int(len(new_tokens)),
+            processor,
         )
 
     def run_stage(item: dict, stage: str, historical: dict) -> dict:
         basic = stage == "fingering_agent"
         tools = public_tools_for(stage, basic=basic)
+        constrain = args.constrain_walk_hui and not basic
+        # Mirror the teacher runner's pitch gate: a jianzi_pitch_mismatch
+        # warning blocks acceptance until the model has actually re-edited
+        # that event in a LATER round (a same-turn rewrite that still warns
+        # does not count).  The model decides when to stop — acceptance also
+        # happens when it stops calling tools with a clean last preview.
+        source_to_event = {
+            int(note["index"]): int(note["event_index"])
+            for note in item["input"].get("notes_without_jianzi") or []
+            if note.get("index") is not None and note.get("event_index") is not None
+        }
         last_trace = []
         for attempt in range(args.attempts):
             runtime = RealToolRuntime(item, historical, basic_fingering=basic)
@@ -231,9 +267,41 @@ def main() -> int:
                 {"role": "user", "content": render_public_prompt(item, stage)},
             ]
             trace = []
+            pending_pitch: set[int] = set()   # warned events (音序) not yet repaired
+            repaired_pitch: set[int] = set()  # warned events re-edited in a later round
+            last_valid: list | None = None
             for round_number in range(1, args.max_rounds + 1):
-                raw, truncated, generated_tokens = generate(messages, tools, sampled=attempt > 0)
+                constraint_table = None
+                if constrain:
+                    # The allowed sets follow the *current* plan state: Base
+                    # plus every edit this stage has already applied, so the
+                    # live left-hand string reflects the Guqinizer's own
+                    # earlier rewrites.
+                    current_replay = replay_patches(
+                        item["baseline_plan"], runtime.accumulated_patches,
+                        strict_before=False,
+                    )
+                    current_text = {
+                        int(action["source_index"]): action.get("jianzi_text")
+                        for action in current_replay.actions
+                    }
+                    constraint_table = build_walk_constraints(item, current_text)
+                raw, truncated, generated_tokens, processor = generate(
+                    messages, tools, sampled=attempt > 0,
+                    constraint_table=constraint_table,
+                )
                 calls = parse_calls(raw)
+                round_entry = {
+                    "round": round_number, "raw_output": raw,
+                    "truncated": truncated, "tool_calls": calls,
+                    "tool_results": [],
+                }
+                if constraint_table is not None:
+                    round_entry["constraint"] = {
+                        "stats": dict(processor.stats),
+                        "allowed_endpoints": constraint_table.preview_allowed(),
+                    }
+                trace.append(round_entry)
                 print(json.dumps({
                     "event": "eval_round",
                     "sample_id": item.get("trajectory_id"),
@@ -243,12 +311,19 @@ def main() -> int:
                     "generated_tokens": generated_tokens,
                     "tool_calls": [call.get("name") for call in calls],
                     "truncated": truncated,
+                    **({"constraint_stats": dict(processor.stats)}
+                       if processor is not None else {}),
                 }, ensure_ascii=False), flush=True)
-                round_trace = {"round": round_number, "raw_output": raw,
-                               "truncated": truncated, "tool_calls": calls,
-                               "tool_results": []}
-                trace.append(round_trace)
                 if not calls:
+                    if last_valid is not None:
+                        # The model chose to stop after a valid preview.
+                        return {"ok": True, "no_op": False,
+                                "plan": {"actions": last_valid}, "trace": trace,
+                                "final_reply": visible_reasoning(raw) or (
+                                    "工具预览已通过，当前段减字填写完成。"
+                                    if basic else
+                                    "工具预览已通过，当前段减字润色完成。"
+                                )}
                     if stage == "guqinization" and not truncated:
                         return {"ok": True, "no_op": True,
                                 "plan": item["baseline_plan"], "trace": trace,
@@ -276,31 +351,65 @@ def main() -> int:
                 messages.append({"role": "assistant", "content": visible_reasoning(raw),
                                  "tool_calls": assistant_calls})
                 accepted = None
+                warned_now: set[int] = set()
+                edited_now: set[int] = set()
                 for assistant_call, call in zip(assistant_calls, calls):
                     result = runtime.invoke(call["name"], call.get("arguments") or {})
-                    round_trace["tool_results"].append({
+                    round_entry["tool_results"].append({
                         "name": call["name"],
                         "arguments": call.get("arguments") or {},
                         "result": result,
                     })
                     messages.append({"role": "tool", "tool_call_id": assistant_call["id"],
                                      "name": call["name"], "content": json.dumps(result, ensure_ascii=False)})
-                    if call["name"] == "edit_plan" and result.get("ok") and result.get("result", {}).get("valid"):
-                        complete = validate_jianzi_only(
+                    if call["name"] != "edit_plan":
+                        continue
+                    for row in (call.get("arguments") or {}).get("jianzi_rows") or []:
+                        if isinstance(row, list) and len(row) == 2 and isinstance(row[0], int):
+                            edited_now.add(row[0])
+                    if result.get("ok") and result.get("result", {}).get("valid"):
+                        complete, report = validate_jianzi_only(
                             item, runtime.accumulated_patches,
                             toward_reference=False,
                             require_complete=basic,
-                        )[0]
+                        )
                         if complete:
                             accepted = runtime.calls[-1]["result"]["result"]["preview_actions"]
+                            warned_now = {
+                                source_to_event.get(int(warning["source_index"]), int(warning["source_index"]))
+                                for warning in report.get("warnings") or []
+                                if warning.get("code") == "jianzi_pitch_mismatch"
+                                and warning.get("source_index") is not None
+                            }
                 if accepted is not None:
-                    return {"ok": True, "no_op": False,
-                            "plan": {"actions": accepted}, "trace": trace,
-                            "final_reply": (
-                                "工具预览已通过，当前段基础减字填写完成。"
-                                if basic else
-                                "工具预览已通过，当前段减字润色完成。"
-                            )}
+                    last_valid = accepted
+                    previously_pending = set(pending_pitch)
+                    repaired_pitch |= edited_now & previously_pending
+                    pending_pitch = ((pending_pitch | warned_now) - repaired_pitch)
+                    round_entry["pitch_gate"] = {
+                        "warned_now": sorted(warned_now),
+                        "pending": sorted(pending_pitch),
+                    }
+                    if not pending_pitch:
+                        return {"ok": True, "no_op": False,
+                                "plan": {"actions": accepted}, "trace": trace,
+                                "final_reply": (
+                                    "工具预览已通过，当前段基础减字填写完成。"
+                                    if basic else
+                                    "工具预览已通过，当前段减字润色完成。"
+                                )}
+                    # Valid preview with unresolved pitch warnings: not
+                    # accepted.  The observation carrying the warnings is
+                    # already in the model's context, so it can repair them
+                    # in the next round — mirroring the teacher runner.
+                    continue
+            # Rounds exhausted: keep the last valid preview rather than
+            # failing the phrase (a broken stage would poison the cascade).
+            if last_valid is not None:
+                return {"ok": True, "no_op": False,
+                        "plan": {"actions": last_valid}, "trace": trace,
+                        "final_reply": "轮次用尽，采用最后一份有效预览。",
+                        "pitch_pending_at_stop": sorted(pending_pitch)}
             last_trace = trace
         return {"ok": False, "trace": last_trace}
 

@@ -39,6 +39,17 @@ class AuditPitchTests(unittest.TestCase):
         self.assertEqual([p["jianpu_name"] for p in pairs], ["F3", "A4"])
         self.assertTrue(all(p["absolute_cents"] < 50 for p in pairs))
 
+    def test_compound_accepts_chinese_string_numbers_and_keeps_stopped_state(self):
+        context = MODULE.new_context()
+        pitches, reason = MODULE.parse_jianzi(
+            "撮（大指七徽五弦按音＋三弦散音）", self.opens, context
+        )
+        self.assertIsNone(reason)
+        self.assertEqual(len(pitches), 2)
+        self.assertEqual(context["stopped_string"], 5)
+        self.assertEqual(context["active_left_string"], 5)
+        self.assertAlmostEqual(context["stopped_hui"], 7.0)
+
     def test_slide_without_inherited_string_is_skipped(self):
         pitches, reason = MODULE.parse_jianzi(
             "注下七徽九分", self.opens, MODULE.new_context()
@@ -323,26 +334,26 @@ class AuditPitchTests(unittest.TestCase):
                          "context_dependent_pre_attack_technique")
         self.assertEqual(report["details"][0]["status"], "skipped")
 
-    def test_independent_chuo_is_not_forced_through_scalar_pitch_audit(self):
+    def test_inherited_chuo_and_zhu_have_scalar_pitch_audits(self):
         data = {
-            "metadata": {
-                "tonic": "1=C",
-                "tuning": {"open_strings": [
-                    {"string": index, "pitch": pitch, "octave": octave}
-                    for index, pitch, octave in (
-                        (1, "C", 3), (2, "D", 3), (3, "F", 3), (4, "G", 3),
-                        (5, "A", 3), (6, "C", 4), (7, "D", 4),
-                    )
-                ]},
-            },
+            "metadata": {"tonic": "1=C"},
+            "open_midi": self.opens,
             "notes": [
-                {"index": 0, "jianpu": "1", "jianzi": "大指七徽挑7弦"},
-                {"index": 1, "jianpu": "3", "jianzi": "绰上五徽"},
+                {"index": 0, "jianpu": "1̇", "jianzi": "大指七徽挑六弦"},
+                {"index": 1, "jianpu": "7", "jianzi": "注下七徽三分"},
+                {"index": 2, "jianpu": "3", "jianzi": "名指九徽勾五弦"},
+                {"index": 3, "jianpu": "6", "jianzi": "绰上七徽"},
             ],
         }
         report = MODULE.audit(data, 50.0)
-        self.assertEqual(report["details"][1]["reason"], "context_dependent_slide")
-        self.assertEqual(report["details"][1]["status"], "skipped")
+        self.assertEqual(
+            [detail["status"] for detail in report["details"]],
+            ["matched", "matched", "matched", "matched"],
+        )
+        self.assertAlmostEqual(
+            report["details"][1]["pairs"][0]["jianzi_midi"], 71.0, places=1
+        )
+        self.assertAlmostEqual(report["details"][3]["pairs"][0]["jianzi_midi"], 69.0)
 
     def test_jiu_requires_a_current_stopped_position(self):
         pitches, reason = MODULE.parse_jianzi(
@@ -399,6 +410,64 @@ class AuditPitchTests(unittest.TestCase):
         }
         row = MODULE.audit(data, 50)["details"][1]
         self.assertNotEqual(row.get("reason"), "harmonic_hui_missing")
+
+
+
+    def test_single_symbol_cuo_passes_on_main_note(self):
+        # 同音加厚：谱字 1 (=60)，撮出 四弦九徽(≈60)＋六弦散音(60) —— 主音匹配即过。
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=C", "tonic_degree1_midi": 60},
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "1",
+                 "jianzi": "撮（大指九徽四弦按音＋六弦散音）"},
+            ],
+        }, 50.0)
+        detail = report["details"][0]
+        self.assertEqual(detail["status"], "matched")
+        self.assertEqual(detail.get("reason"), "single_symbol_multivoice_main_note")
+
+    def test_single_symbol_octave_cuo_passes_on_main_note(self):
+        # 八度省略记谱：谱字 1 (=60)，撮出 六弦散音(60)＋一弦散音(48)。
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=C", "tonic_degree1_midi": 60},
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "1",
+                 "jianzi": "撮（六弦散音＋一弦散音）"},
+            ],
+        }, 50.0)
+        detail = report["details"][0]
+        self.assertEqual(detail["status"], "matched")
+        self.assertEqual(detail.get("reason"), "single_symbol_multivoice_main_note")
+
+    def test_single_symbol_cuo_with_no_matching_member_still_fails(self):
+        # 两个成员都不匹配谱字（5=67 vs 60/48）：仍按数量不匹配报错。
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=C", "tonic_degree1_midi": 60},
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "5",
+                 "jianzi": "撮（大指九徽四弦按音＋一弦散音）"},
+            ],
+        }, 50.0)
+        detail = report["details"][0]
+        self.assertEqual(detail["status"], "mismatched")
+        self.assertEqual(detail.get("reason"), "pitch_count_mismatch")
+
+    def test_dual_symbol_cuo_keeps_pairwise_matching(self):
+        # 双谱字仍维持 2v2 最优配对，不因新规则放宽。
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=C", "tonic_degree1_midi": 60},
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "4̣", "jianpu_alt": "6",
+                 "jianzi": "撮（大指七徽九分六弦按音＋三弦散音）"},
+            ],
+        }, 50.0)
+        detail = report["details"][0]
+        self.assertEqual(detail["status"], "matched")
+        self.assertIsNone(detail.get("reason"))
 
 
 if __name__ == "__main__":

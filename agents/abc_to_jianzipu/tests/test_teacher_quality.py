@@ -164,6 +164,32 @@ class EditableProtocolTests(unittest.TestCase):
             rendered,
         )
 
+    def test_public_guqinizer_edit_plan_runs_pitch_audit_without_reference(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "1̇"},
+                    {"index": 1, "event_index": 1, "jianpu": "5"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "大指七徽挑六弦"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        runtime = RealToolRuntime(item, {}, basic_fingering=False)
+        result = runtime.invoke(
+            "edit_plan", {"jianzi_rows": [[1, "注下七徽三分"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            "1｜5｜已填写｜[注下七徽三分]:warning:音高不匹配",
+            result["result"]["text"],
+        )
+
     def test_edit_plan_reports_identical_rows_as_unchanged(self) -> None:
         item = {
             "input": {
@@ -637,6 +663,15 @@ class EditableProtocolTests(unittest.TestCase):
         self.assertIn("掐撮三声", notes[0])
         self.assertNotIn("掐撮三声", public_system_for("fingering_agent", basic=True))
 
+    def test_cuo_knowledge_can_be_injected_for_the_basic_private_stage(self) -> None:
+        notes = "\n".join(render_compound_gesture_knowledge({
+            "reference_plan": {"actions": [{"jianzi_text": "撮"}]},
+        }))
+        self.assertIn("双按音的撮较少用", notes)
+        # The private renderer is stage-neutral; generate_one adds these notes
+        # to both basic and Guqinizer private instructions.
+        self.assertNotIn("双按音的撮较少用", public_system_for("fingering_agent", basic=True))
+
     def test_enhanced_compound_knowledge_requires_contextual_prerequisites(self) -> None:
         chuoshang = "\n".join(render_compound_gesture_knowledge({
             "reference_plan": {"actions": [{"jianzi_text": "绰上四徽"}]},
@@ -644,11 +679,16 @@ class EditableProtocolTests(unittest.TestCase):
         cuo = "\n".join(render_compound_gesture_knowledge({
             "reference_plan": {"actions": [{"jianzi_text": "挑七弦绰"}]},
         }))
+        xiao_cuo = "\n".join(render_compound_gesture_knowledge({
+            "reference_plan": {"actions": [{"jianzi_text": "撮"}]},
+        }))
         qiacuo = "\n".join(render_compound_gesture_knowledge({
             "reference_plan": {"actions": [{"jianzi_text": "掐撮三声"}]},
         }))
         self.assertIn("不需要、也不表示新的右手拨弦", chuoshang)
         self.assertIn("与右手取声配合", cuo)
+        self.assertIn("双按音的撮较少用", xiao_cuo)
+        self.assertIn("分别明确不同的左手按指、徽位", xiao_cuo)
         self.assertIn("前一减字通常应先给出", qiacuo)
         self.assertIn("此前同一对弦", qiacuo)
 
