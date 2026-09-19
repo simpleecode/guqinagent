@@ -1648,6 +1648,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
     ] if review_noop else [
         "唯一编辑入口是 edit_plan.jianzi_rows=[[音序,减字文字],...]；小节线没有音序。",
         "私有标注可以用于内部决定哪里需要改、往什么方向改；decision_summary 会原样进入学生可见轨迹，公开 reasoning 的任务是解释修改为什么在古琴演奏上合理，而不是隐藏标注事实后重新证明答案。",
+        "对新选或改写的按音、撮等双音/复合取声，在 decision_summary 的逐音或相邻音组分析中简短说明：左手为何选用该按指、该按位与另一按位能否同时落手；右手为何选该取声及其与目标弦的关系。理由以实际可演奏性、音高和前后衔接为主，避免空泛重复。",
         *([] if allow_private_reasoning_leakage else [
             "decision_summary 绝对不得提及 GQS、教师提示、系统提示、教师私有参考、最终标注、参考答案或目标答案；不得写“与参考一致”“参考使用”或“按提示”；也不得转述只有私有标注中出现的具体减字作为理由。需要使用私有目标规划时，只在内部决定 tool_calls，不在摘要中说明来源。"
         ]),
@@ -1690,7 +1691,9 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
     # Retry diagnostics remain in the private failure trace only.  Do not add
     # them to the teacher prompt: they can distract the model and expose
     # implementation details unrelated to the musical decision.
-    if toward:
+    # 撮等双音的按指可达性在基础取音时就必须成立；不能只等
+    # Guqinizer 再看到该条私有知识，否则错误的双按音已经进入中间稿。
+    if basic or toward:
         private_instruction["rules"].extend(render_compound_gesture_knowledge(item))
     private_instruction["output_contract"] = ({
         "final_answer": f"直接输出最终复核意见文字，并以“{NOOP_CONCLUSION}”结尾；不要输出 JSON、tool_calls、Markdown 或代码围栏。",
