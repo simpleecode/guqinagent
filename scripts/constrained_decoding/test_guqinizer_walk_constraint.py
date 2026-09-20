@@ -7,12 +7,12 @@ import sys
 import unittest
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.audit_jianpu_jianzi_pitch import parse_hui, position_pitch
-from scripts.guqinizer_walk_constraint import (
+from scripts.constrained_decoding.guqinizer_walk_constraint import (
     ENDPOINT_CHARSET,
     ST_ROWS,
     ST_SPAN,

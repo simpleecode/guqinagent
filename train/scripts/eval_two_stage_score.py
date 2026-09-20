@@ -155,7 +155,7 @@ def main() -> int:
     )
     from agents.abc_to_jianzipu.trajectory_replay import replay_patches
     from scripts.adapter_loading import load_adapter_checked
-    from scripts.guqinizer_walk_constraint import (
+    from scripts.constrained_decoding.guqinizer_walk_constraint import (
         WalkHuiConstraintProcessor, build_id_texts, build_walk_constraints,
     )
     from scripts.qwen35_generation import qwen35_eos_token_ids, trim_qwen35_assistant_turn
