@@ -263,6 +263,24 @@ def target_midis(item: dict, source_index: int) -> list[float]:
     return [float(value) for value in values]
 
 
+def jianpu_symbol_for_target(note: dict, target_midi: float, tonic_midi: float) -> str:
+    """Return the written jianpu component that actually denotes ``target_midi``.
+
+    A chord stores its two tones in ``jianpu`` and ``jianpu_alt``. Candidate
+    rows are grouped per *tone*, so displaying the combined chord label in a
+    per-tone table makes the header point at the wrong note.
+    """
+    for field in ("jianpu", "jianpu_alt"):
+        value = str(note.get(field) or "").strip()
+        parsed = AUDIT.parse_jianpu(value, tonic_midi)
+        if value and parsed is not None and abs(float(parsed) - target_midi) < 1e-6:
+            return value
+    return chord_jianpu_label(
+        note.get("abc"), note.get("jianpu") or note.get("jianpu_alt") or "",
+        note.get("jianpu_alt"),
+    )
+
+
 def render_pitch_candidate_table(target: float, candidates: list[dict],
                                  modes: tuple[str, ...]) -> str:
     mode_names = {"open": "散音", "stopped": "按音", "harmonic": "泛音"}
@@ -473,6 +491,9 @@ def render_grouped_candidate_table(target: float, candidates: list[dict],
     source_text = "、".join(
         str(source.get("event_index", source["source_index"])) for source in sources
     )
+    # Source entries carry the one jianpu component corresponding to this
+    # target MIDI, not the entire chord label. Keep every event source but
+    # display the deduplicated target symbol once.
     jianpu_values = list(dict.fromkeys(
         str(source.get("jianpu") or "") for source in sources
         if str(source.get("jianpu") or "")
@@ -480,7 +501,7 @@ def render_grouped_candidate_table(target: float, candidates: list[dict],
     lines = render_pitch_candidate_table(target, candidates, modes).splitlines()
     lines[0] = f"目标音高｜MIDI {target:g}｜来源｜{source_text}"
     if jianpu_values:
-        lines[0] += f"｜简谱｜{'、'.join(jianpu_values)}"
+        lines[0] += f"｜简谱｜{jianpu_values[0]}"
     return "\n".join(lines)
 
 
@@ -827,6 +848,7 @@ class RealToolRuntime:
                     is_batch_query = len(indices) > 1
                     valid_entries = []
                     skipped_indices = []
+                    tonic_midi = AUDIT.parse_tonic_midi(self.item["input"]["metadata"])
                     for index in indices:
                         try:
                             note = next(n for n in self.item["input"]["notes_without_jianzi"]
@@ -855,10 +877,8 @@ class RealToolRuntime:
                             group["sources"].append({
                                 "event_index": self._source_to_event(index),
                                 "source_index": index,
-                                "jianpu": chord_jianpu_label(
-                                    note.get("abc"),
-                                    note.get("jianpu") or note.get("jianpu_alt") or "",
-                                    note.get("jianpu_alt"),
+                                "jianpu": jianpu_symbol_for_target(
+                                    note, target_value, tonic_midi
                                 ),
                                 "label": label or f'简谱{note.get("jianpu") or note.get("jianpu_alt") or "未知"}',
                             })
