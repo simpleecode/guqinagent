@@ -2069,3 +2069,16 @@ Guqinizer。
   `train/eval_outputs_v3_two_stage/walk_constraint_debug/SCf7VJzZ_r7_courule_view.html`（暗色）。
   撮提示词与知识库改动经核验只作用于教师私有提示（`private_instruction["rules"]` 与私有知识注入），
   对评估链路零影响；r7 对比口径干净。
+
+## 7.166 S2T7rDyJ 首次整曲评估与代码重组（2026-09-19/20）
+
+- `ABC_J/final/S2T7rDyJ` 首次跑两阶段评估（19 phrase，卡 0，全栈：音高门＋走手约束＋单谱字撮
+  主音规则，A100 最终 adapter）：19/19 协议有效；终稿 base **0/304** 错、guqinizer 4/253 错
+  （p0003/p0012/p0019 各 1-2 行）；警告轮 17、挂起全部修净（无轮次耗尽回退）；走手约束 45 span、
+  228 掩码步、0 违规 0 回退。视图（暗色）：
+  `train/eval_outputs_v3_two_stage/walk_constraint_debug/S2T7rDyJ_full19_view.html`。
+- 代码重组：约束解码模块移入 `scripts/constrained_decoding/`
+  （`guqinizer_walk_constraint.py`＋测试，提交 `7ced238a`，本地与服务器已同步）；
+  `audit_jianpu_jianzi_pitch.py` 保留在 `scripts/`——它是 12+ 调用方共享的音高审计底座
+  （教师生成、训练筛选、离线审计、抽取器），非约束解码专属。
+- GPU 备注：卡 2 曾被其他用户占用导致一次启动失败，评估改在卡 0 完成；启动前应先查卡。
