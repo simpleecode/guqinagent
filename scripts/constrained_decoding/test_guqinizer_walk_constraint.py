@@ -218,7 +218,7 @@ class MockVocab:
         "[", "]", '"', "历五弦", "大指", "挑", "六弦", "三分挑", "弦",
         "泛起", "勾", "五弦", "绰", "进复", "退复", "名指", "中指", "跪指",
         "十", "九", "八", "徽外", "挑六弦", " ", "</parameter>", "</function>",
-        "</tool_call>", "<|im_end|>",
+        "</tool_call>", "<|im_end|>", " seven", "seven", "eight", "ten", "9", "7",
     ]
 
     def __init__(self):
@@ -285,16 +285,17 @@ class StateMachineTest(unittest.TestCase):
         self.assertIsNotNone(processor._pending_allowed)
         # The hui integer itself is constrained: no allowed surface starts
         # with 八, and a merged trigger+numeral token cannot smuggle it in.
-        self.assertFalse(processor._token_admissible_pending("八", ALLOWED_EVENT_2))
-        self.assertFalse(processor._token_admissible_pending("下八", ALLOWED_EVENT_2))
-        self.assertTrue(processor._token_admissible_pending("七", ALLOWED_EVENT_2))
-        self.assertTrue(processor._token_admissible_pending("下七", ALLOWED_EVENT_2))
-        # Non-numeral continuations abort the trigger and stay free.
-        self.assertTrue(processor._token_admissible_pending("。", ALLOWED_EVENT_2))
+        self.assertFalse(processor._token_admissible_pending("八", ALLOWED_EVENT_2, head_ambiguous=False))
+        self.assertFalse(processor._token_admissible_pending("下八", ALLOWED_EVENT_2, head_ambiguous=False))
+        self.assertTrue(processor._token_admissible_pending("七", ALLOWED_EVENT_2, head_ambiguous=False))
+        self.assertTrue(processor._token_admissible_pending("下七", ALLOWED_EVENT_2, head_ambiguous=False))
+        # 注下 is an unambiguous head: there is no abort any more — the model
+        # must open an allowed endpoint (ASCII/。 escapes are all blocked).
+        self.assertFalse(processor._token_admissible_pending("。", ALLOWED_EVENT_2, head_ambiguous=False))
         # 徽-initial tokens need an allowed 徽外-family label; ALLOWED_EVENT_2
         # has none, so both a 徽外 attempt and the malformed 徽三分 are banned.
-        self.assertFalse(processor._token_admissible_pending("徽外", ALLOWED_EVENT_2))
-        self.assertFalse(processor._token_admissible_pending("徽三分", ALLOWED_EVENT_2))
+        self.assertFalse(processor._token_admissible_pending("徽外", ALLOWED_EVENT_2, head_ambiguous=False))
+        self.assertFalse(processor._token_admissible_pending("徽三分", ALLOWED_EVENT_2, head_ambiguous=False))
         allowed_ids = processor._allowed_ids_for_pending()
         self.assertIsNotNone(allowed_ids)
         for token_id, text in processor.id_texts.items():
@@ -306,9 +307,9 @@ class StateMachineTest(unittest.TestCase):
         processor, _ = self.build(constraints={2: allowed})
         processor._feed_chars('<parameter=jianzi_rows>[[2, "注下')
         self.assertIsNotNone(processor._pending_allowed)
-        self.assertTrue(processor._token_admissible_pending("徽外", allowed))
-        self.assertFalse(processor._token_admissible_pending("徽外半", allowed))
-        self.assertTrue(processor._token_admissible_pending("七", allowed))
+        self.assertTrue(processor._token_admissible_pending("徽外", allowed, head_ambiguous=False))
+        self.assertFalse(processor._token_admissible_pending("徽外半", allowed, head_ambiguous=False))
+        self.assertTrue(processor._token_admissible_pending("七", allowed, head_ambiguous=False))
         processor._feed_chars('徽外"]')
         self.assertEqual(processor.stats["spans_entered"], 1)
         self.assertEqual(processor.stats["spans_completed"], 1)
@@ -325,7 +326,7 @@ class StateMachineTest(unittest.TestCase):
                 )
             elif processor._pending_allowed is not None:
                 self.assertTrue(
-                    processor._token_admissible_pending(piece, processor._pending_allowed),
+                    processor._token_admissible_pending(piece, processor._pending_allowed, head_ambiguous=False),
                     piece,
                 )
             processor._feed_chars(piece)
@@ -399,6 +400,77 @@ class StateMachineTest(unittest.TestCase):
         processor._feed_chars('<parameter=jianzi_rows>[[2, "注下七')
         self.assertEqual(processor.state, ST_SPAN)
         self.assertIsNone(processor._allowed_ids_for_prefix("七"))
+
+
+
+class AsciiEscapeRegressionTest(unittest.TestCase):
+    """S2T7rDyJ 实测：模型把被禁徽位改写成英文数字（绰上 eight / 绰上 seven nine）。"""
+
+    def build(self, allowed=ALLOWED_EVENT_2):
+        vocab = MockVocab()
+        return (
+            WalkHuiConstraintProcessor(vocab.id_texts, {2: allowed}, 0),
+            vocab,
+        )
+
+    def test_unambiguous_head_must_open_allowed_endpoint(self):
+        processor, _ = self.build()
+        processor._feed_chars('<parameter=jianzi_rows>[[2, "绰上')
+        self.assertIsNotNone(processor._pending_allowed)
+        # 英文/阿拉伯数字/空格开头 token 一律禁止——包括带前导空格的 " seven"
+        for piece in (" seven", "seven", "eight", "ten", "7", "9"):
+            self.assertFalse(
+                processor._token_admissible_pending(
+                    piece, ALLOWED_EVENT_2, head_ambiguous=False),
+                piece)
+        # 无歧义头不允许中止（引号也不行）：必须写终点
+        self.assertFalse(processor._token_admissible_pending(
+            '"', ALLOWED_EVENT_2, head_ambiguous=False))
+        # 允许集起点数字仍可写
+        self.assertTrue(processor._token_admissible_pending(
+            "七", ALLOWED_EVENT_2, head_ambiguous=False))
+
+    def test_ambiguous_head_abort_still_blocks_ascii(self):
+        processor, _ = self.build()
+        processor._feed_chars('<parameter=jianzi_rows>[[2, "挑四弦上')
+        for piece in (" seven", "ten", "8"):
+            self.assertFalse(
+                processor._token_admissible_pending(
+                    piece, ALLOWED_EVENT_2, head_ambiguous=True), piece)
+        # 中文/结构符中止仍允许（false-positive 触发需要退路）
+        self.assertTrue(processor._token_admissible_pending(
+            "。", ALLOWED_EVENT_2, head_ambiguous=True))
+        self.assertTrue(processor._token_admissible_pending(
+            '"', ALLOWED_EVENT_2, head_ambiguous=True))
+
+    def test_span_exit_blocks_ascii_escape(self):
+        processor, _ = self.build()
+        processor._feed_chars('<parameter=jianzi_rows>[[2, "注下七徽')
+        self.assertEqual(processor.state, ST_SPAN)
+        # 完整终点后的自由退出不允许 ASCII 逃逸字符开头
+        processor._feed_chars('三分')
+        for piece in (" seven", "9", "7"):
+            self.assertFalse(processor._token_admissible(processor.span_prefix, piece), piece)
+        # 引号/中文后续正常退出
+        self.assertTrue(processor._token_admissible(processor.span_prefix, '"'))
+        self.assertTrue(processor._token_admissible(processor.span_prefix, "挑"))
+
+    def test_blocked_integer_forces_allowed_surface_end_to_end(self):
+        # 允许集不含八：模型想写八时，八被禁、英文被禁，唯一出路是允许集终点
+        allowed = frozenset({"九徽三分"})
+        processor, _ = self.build(allowed=allowed)
+        text = '<parameter=jianzi_rows>[[2, "绰上'
+        for ch in text:
+            if processor._pending_allowed is not None:
+                break
+            processor._feed_chars(ch)
+        self.assertFalse(processor._token_admissible_pending("八", allowed, False))
+        self.assertFalse(processor._token_admissible_pending("eight", allowed, False))
+        self.assertTrue(processor._token_admissible_pending("九", allowed, False))
+        # 模拟 greedy：只能选九，随后正常写完终点
+        processor._feed_chars('九徽三分"]')
+        self.assertEqual(processor.stats["spans_completed"], 1)
+        self.assertEqual(processor.stats["mid_token_span_violations"], 0)
 
 
 if __name__ == "__main__":

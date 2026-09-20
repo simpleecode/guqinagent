@@ -87,7 +87,18 @@ _WALK_HEAD = r"(?:绰上|注下|进复|退复|浒上|引上|绰|注|进|退|浒|
 _LEFT_FINGER = r"(?:跪指|大指|名指|中指|食指)"
 # Matches when the value text so far ENDS with a walk head (+optional finger);
 # the next character is then the first numeral of the endpoint.
-TRIGGER_SUFFIX_RE = re.compile(rf"{_WALK_HEAD}{_LEFT_FINGER}?$")
+TRIGGER_SUFFIX_RE = re.compile(rf"(?P<head>{_WALK_HEAD})(?P<finger>{_LEFT_FINGER})?$")
+# Single-character heads can be false positives inside ordinary jianzi text
+# (e.g. 上/下 elsewhere); the multi-char or unambiguous heads always start a
+# real walk, so after them the model MUST open an allowed endpoint.
+AMBIGUOUS_HEADS = frozenset({"上", "下", "进", "退", "浒"})
+
+
+def is_ascii_escape(char: str) -> bool:
+    """ASCII letters/digits/whitespace spell forbidden numerals in disguise
+    (observed: ``绰上 seven nine`` after ``七`` was banned or merely adjacent).
+    Structural JSON punctuation (quote/comma/bracket) stays legitimate."""
+    return char.isascii() and (char.isalnum() or char.isspace())
 NUMERAL_CHARS = set("一二三四五六七八九十")
 # Characters that may prolong a walk head or finger word inside one token.
 TRIGGER_CONTINUATION_CHARS = set("绰注进退浒淌引上下大中食名跪指")
@@ -381,7 +392,8 @@ class WalkHuiConstraintProcessor:
         # head (+optional finger), so the NEXT token may open the endpoint.
         # Masking there is what actually constrains the hui integer itself.
         self._pending_allowed: frozenset[str] | None = None
-        self._pending_cache_by_allowed: dict[frozenset[str], frozenset[int]] = {}
+        self._pending_cache_by_allowed: dict[tuple[frozenset[str], bool], frozenset[int]] = {}
+        self._pending_head_ambiguous = False
         # Live left-hand context: replayed from rows the model completes
         # inside this tool call, mirroring the audit's history replay.
         self._replay_context = self.table.fresh_replay_context()
@@ -501,7 +513,8 @@ class WalkHuiConstraintProcessor:
                         self.stats["spans_completed"] += 1
                     continue
                 if (self.span_prefix in self.span_allowed
-                        and char not in ENDPOINT_CHARSET):
+                        and char not in ENDPOINT_CHARSET
+                        and not is_ascii_escape(char)):
                     self._exit_span()  # falls through to value handling
                 else:
                     # Only reachable for tokens that entered the span
@@ -536,9 +549,10 @@ class WalkHuiConstraintProcessor:
             self.value_text += char
             # Arm the pre-endpoint mask when the value now ends with a walk
             # head, so the hui integer itself cannot dodge the whitelist.
-            self._pending_allowed = (
-                self._row_allowed
-                if TRIGGER_SUFFIX_RE.search(self.value_text) else None
+            match = TRIGGER_SUFFIX_RE.search(self.value_text)
+            self._pending_allowed = self._row_allowed if match else None
+            self._pending_head_ambiguous = (
+                bool(match) and match.group("head") in AMBIGUOUS_HEADS
             )
 
     def _enter_span(self, char: str) -> None:
@@ -636,7 +650,8 @@ class WalkHuiConstraintProcessor:
             if char in ENDPOINT_CHARSET and self._is_prefix_of_allowed(combined):
                 current = combined
                 continue
-            if current in self.span_allowed and char not in ENDPOINT_CHARSET:
+            if (current in self.span_allowed and char not in ENDPOINT_CHARSET
+                    and not is_ascii_escape(char)):
                 return True
             return False
         return True
@@ -666,7 +681,8 @@ class WalkHuiConstraintProcessor:
         if self._exit_ids is None:
             self._exit_ids = frozenset(
                 token_id for token_id, text in self.id_texts.items()
-                if text and text[0] not in ENDPOINT_CHARSET and "\ufffd" not in text
+                if text and text[0] not in ENDPOINT_CHARSET
+                and not is_ascii_escape(text[0]) and "\ufffd" not in text
             )
         return self._exit_ids
 
@@ -676,16 +692,20 @@ class WalkHuiConstraintProcessor:
         allowed = self._pending_allowed
         if allowed is None:
             return None
-        cached = self._pending_cache_by_allowed.get(allowed)
+        key = (allowed, self._pending_head_ambiguous)
+        cached = self._pending_cache_by_allowed.get(key)
         if cached is None:
             cached = frozenset(
                 token_id for token_id, text in self.id_texts.items()
-                if self._token_admissible_pending(text, allowed)
+                if self._token_admissible_pending(
+                    text, allowed, self._pending_head_ambiguous)
             )
-            self._pending_cache_by_allowed[allowed] = cached
+            self._pending_cache_by_allowed[key] = cached
         return cached or None
 
-    def _token_admissible_pending(self, text: str, allowed: frozenset[str]) -> bool:
+    def _token_admissible_pending(
+        self, text: str, allowed: frozenset[str], head_ambiguous: bool,
+    ) -> bool:
         """Could this token follow a value that currently ends with a walk
         head?  Trigger/finger characters may prolong the head; the first
         numeral must open an allowed surface (then normal span rules apply
@@ -710,12 +730,17 @@ class WalkHuiConstraintProcessor:
                 if any(surface.startswith(combined) for surface in allowed):
                     prefix = combined
                     continue
-                if prefix in allowed and char not in ENDPOINT_CHARSET:
+                if (prefix in allowed and char not in ENDPOINT_CHARSET
+                        and not is_ascii_escape(char)):
                     return True
                 return False
             return True
         if first not in NUMERAL_CHARS:
-            return True
+            # Abort = the trigger was a false positive.  Only single-character
+            # heads may abort, and never via ASCII alnum/whitespace tokens:
+            # the model evades a banned hui by spelling it in English
+            # (``绰上 seven nine``) unless those tokens are blocked too.
+            return head_ambiguous and not is_ascii_escape(first)
         if not any(surface.startswith(first) for surface in allowed):
             return False
         prefix = first
@@ -724,7 +749,8 @@ class WalkHuiConstraintProcessor:
             if any(surface.startswith(combined) for surface in allowed):
                 prefix = combined
                 continue
-            if prefix in allowed and char not in ENDPOINT_CHARSET:
+            if (prefix in allowed and char not in ENDPOINT_CHARSET
+                    and not is_ascii_escape(char)):
                 return True
             return False
         return True
