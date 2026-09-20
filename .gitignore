@@ -48,6 +48,9 @@ train/eval_outputs_v3_two_stage/
 train/eval_inputs_v2_text_protocol/*
 !train/eval_inputs_v2_text_protocol/test.jsonl
 
+# Reproducible evaluation code is tracked; batch evaluation artifacts are local.
+evaluation_results/
+
 # Front-end dependencies generated for the lineage workbook
 ABC_J/results/unified_lineage/workbook_build/node_modules/
 node_modules/
