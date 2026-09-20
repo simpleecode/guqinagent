@@ -2059,3 +2059,13 @@ Guqinizer。
   `inferred_gqs_v12_tuningfix_20260914` train 重跑：**3,969 → 4,022（+53 phrase）**，
   新清单 `/tmp/pitch_select_newrule/pitch_eligible_phrase_ids.txt`（尚未用于任何教师生成或
   训练导出；正式采用时应写入 agent_training 固定目录并记录冻结口径变更）。
+
+## 7.165 r7（新撮规则整曲复跑，2026-09-19）
+
+- SCf7VJzZ 整曲 21 phrase、卡 2、同权重同环境，唯一变量为单谱字撮"主音＋隐含伙伴"审计规则：
+  终稿错误（项目 `audit()` 口径）base 41→**16**、guqinizer 21→**16**；撮主音放行 1→6 行（与该曲
+  6 处模型单谱字撮写法吻合）；警告轮 82→69；两阶段合计错误相对 r4（无门）从 218 降至 32（-85%）。
+  走手约束全程 105 span、516 掩码步、0 违规 0 回退。视图：
+  `train/eval_outputs_v3_two_stage/walk_constraint_debug/SCf7VJzZ_r7_courule_view.html`（暗色）。
+  撮提示词与知识库改动经核验只作用于教师私有提示（`private_instruction["rules"]` 与私有知识注入），
+  对评估链路零影响；r7 对比口径干净。
