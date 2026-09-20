@@ -23,3 +23,6 @@ class MetricsTests(unittest.TestCase):
         self.assertAlmostEqual(score["precision"], 0.5)
         self.assertAlmostEqual(score["recall"], 0.5)
 
+    def test_outside_hui_is_a_symbolic_position(self):
+        events = [{"reference": {"hui": "徽外"}, "prediction": {"hui": "徽外"}}]
+        self.assertEqual(rates(field_counts(events, "hui"))["accuracy"], 1.0)

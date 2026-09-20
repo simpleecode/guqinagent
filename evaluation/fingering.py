@@ -18,8 +18,16 @@ def field_counts(events: Iterable[dict[str, Any]], field: str,
         if not _valid(ref):
             continue
         counts["n"] += 1
-        equal = (abs(float(ref) - float(pred)) <= hui_tolerance
-                 if field == "hui" and _valid(pred) else ref == pred)
+        if field == "hui" and _valid(pred):
+            # Standard hui positions are numeric; ``徽外`` / ``徽外半`` are
+            # deliberate symbolic positions from the shared pitch parser.
+            # Never coerce those labels to floats.
+            try:
+                equal = abs(float(ref) - float(pred)) <= hui_tolerance
+            except (TypeError, ValueError):
+                equal = ref == pred
+        else:
+            equal = ref == pred
         counts["correct"] += int(equal)
         counts["tp"] += int(equal and _valid(pred))
         counts["fp"] += int(_valid(pred) and not equal)
@@ -51,4 +59,3 @@ def rates(counts: Counter, *, include_accuracy: bool = True) -> dict[str, float 
     if include_accuracy:
         result["accuracy"] = (counts["correct"] / counts["n"] if counts["n"] else None)
     return result
-
