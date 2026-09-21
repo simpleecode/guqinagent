@@ -27,9 +27,8 @@ by Git. Prediction JSONL may be append-only: the last row for each
   within the configured tolerance.
 * **Pitch MAE**: mean absolute cents error over pitch pairs emitted by that
   same audit. Multi-tone events use its minimum-error pairing.
-* **String / Hui accuracy**: exact primary-string match and hui match within
-  0.05 hui respectively, only where the sealed reference explicitly supplies
-  that field.
+* **String accuracy**: exact primary-string match, only where the sealed
+  reference explicitly supplies that field.
 * **Left/right hand**: micro accuracy plus label F1 for explicitly annotated
   primary fingering fields. Missing reference values are excluded rather than
   treated as negatives.

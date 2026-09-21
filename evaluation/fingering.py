@@ -9,8 +9,7 @@ def _valid(value: Any) -> bool:
     return value is not None and value != ""
 
 
-def field_counts(events: Iterable[dict[str, Any]], field: str,
-                 *, hui_tolerance: float = 0.05) -> Counter:
+def field_counts(events: Iterable[dict[str, Any]], field: str) -> Counter:
     """Micro counts for one semantic field, omitting unavailable references."""
     counts: Counter = Counter()
     for row in events:
@@ -18,16 +17,7 @@ def field_counts(events: Iterable[dict[str, Any]], field: str,
         if not _valid(ref):
             continue
         counts["n"] += 1
-        if field == "hui" and _valid(pred):
-            # Standard hui positions are numeric; ``徽外`` / ``徽外半`` are
-            # deliberate symbolic positions from the shared pitch parser.
-            # Never coerce those labels to floats.
-            try:
-                equal = abs(float(ref) - float(pred)) <= hui_tolerance
-            except (TypeError, ValueError):
-                equal = ref == pred
-        else:
-            equal = ref == pred
+        equal = ref == pred
         counts["correct"] += int(equal)
         counts["tp"] += int(equal and _valid(pred))
         counts["fp"] += int(_valid(pred) and not equal)
