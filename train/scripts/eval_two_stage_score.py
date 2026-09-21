@@ -16,6 +16,11 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+try:
+    from tqdm import tqdm
+except ImportError:  # pragma: no cover - keeps the evaluator usable on bare servers
+    tqdm = None
+
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -143,6 +148,10 @@ def main() -> int:
              " Base stage's hui or pitch-correct positions via token masking",
     )
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--no-progress", action="store_true",
+                        help="disable score/phrase progress bars")
+    parser.add_argument("--stop-after-scores", type=int,
+                        help="gracefully stop after N fully processed scores; useful for first-score verification")
     parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args()
 
@@ -431,12 +440,23 @@ def main() -> int:
             ):
                 completed[str(prior["sample_id"])] = prior
 
+    score_keys = sorted(by_score)
+    progress_enabled = not args.no_progress and tqdm is not None
+    score_progress = tqdm(total=len(score_keys), desc="曲谱", unit="首", file=sys.stdout,
+                          dynamic_ncols=True) if progress_enabled else None
     mode = "a" if args.resume else "w"
+    processed_scores = 0
     with args.output.open(mode, encoding="utf-8", newline="\n") as output:
-        for score_key in sorted(by_score):
+        for score_key in score_keys:
             previous = None
             historical = {}
-            for item in by_score[score_key]:
+            phrases = by_score[score_key]
+            phrase_progress = (
+                tqdm(total=len(phrases), desc=f"{score_key} phrase", unit="条",
+                     file=sys.stdout, dynamic_ncols=True, leave=False)
+                if progress_enabled else None
+            )
+            for item in phrases:
                 sample_id = str(item["trajectory_id"])
                 handoff = item["input"].setdefault("phrase_handoff", {})
                 handoff.pop("previous_phrase", None)
@@ -460,6 +480,8 @@ def main() -> int:
                     item["reference_plan"] = final_plan
                     previous = item
                     historical[(score_key, item["phrase_id"])] = item
+                    if phrase_progress:
+                        phrase_progress.update(1)
                     continue
 
                 item["baseline_plan"] = blank_plan_from_item(item)
@@ -493,6 +515,8 @@ def main() -> int:
                     )
                 output.write(json.dumps(record, ensure_ascii=False) + "\n")
                 output.flush()
+                if phrase_progress:
+                    phrase_progress.update(1)
                 if not record["protocol_valid"]:
                     # Later phrases must not be evaluated with missing or gold
                     # previous context. Continue with the next independent score.
@@ -500,6 +524,19 @@ def main() -> int:
                 item["reference_plan"] = final_plan
                 previous = item
                 historical[(score_key, item["phrase_id"])] = item
+            if phrase_progress:
+                phrase_progress.close()
+            processed_scores += 1
+            if score_progress:
+                score_progress.update(1)
+            if (args.stop_after_scores is not None
+                    and processed_scores >= args.stop_after_scores):
+                print(json.dumps({"event": "eval_stop_after_scores",
+                                  "processed_scores": processed_scores,
+                                  "score_key": score_key}, ensure_ascii=False), flush=True)
+                break
+    if score_progress:
+        score_progress.close()
     return 0
 
 
