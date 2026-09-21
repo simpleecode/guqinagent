@@ -165,7 +165,10 @@ def parse_reference_actions(data: dict, audit_report: dict | None = None) -> lis
 
         if mode == "stopped":
             if hui is None and context.get("active_left_hui") is not None:
-                hui = float(context["active_left_hui"])
+                # 徽外/徽外半 are symbolic positions, not floats.  Preserve
+                # their label when the following reduced notation inherits
+                # the stopped position.
+                hui = context["active_left_hui"]
                 inherited.append("hui")
             if left is None and context.get("left_finger"):
                 left = context["left_finger"]
@@ -174,7 +177,7 @@ def parse_reference_actions(data: dict, audit_report: dict | None = None) -> lis
                 string = int(context["active_left_string"])
                 inherited.append("string")
         if mode == "harmonic" and hui is None and context.get("harmonic_hui") is not None:
-            hui = float(context["harmonic_hui"])
+            hui = context["harmonic_hui"]
             inherited.append("hui")
 
         expected_sounding = any(

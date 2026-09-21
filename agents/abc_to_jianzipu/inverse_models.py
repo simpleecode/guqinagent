@@ -19,7 +19,7 @@ class ReferenceAction:
     attack: bool
     mode: str | None
     string: int | None
-    hui: float | None
+    hui: float | str | None
     left_finger: str | None
     right_finger: str | None
     # 双弦技法（撮／泼／剌）的第二根弦：mode2/hui2 缺省时继承主位。

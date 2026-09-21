@@ -56,6 +56,18 @@ class InverseTrajectoryTests(unittest.TestCase):
         AUDIT.parse_jianzi(data["notes"][1]["jianzi"], opens, context)
         self.assertFalse(context["harmonic"])
 
+    def test_parser_preserves_inherited_outside_hui_label(self) -> None:
+        data = {
+            "metadata": self.data["metadata"],
+            "notes": [
+                {"index": 0, "jianpu": "1", "jianzi": "名指徽外勾四弦"},
+                {"index": 1, "jianpu": "1", "jianzi": "进"},
+            ],
+        }
+        actions = parse_reference_actions(data)
+        self.assertEqual(actions[1].hui, "徽外")
+        self.assertIn("hui", actions[1].inherited_fields)
+
     def test_compound_gestures_are_atomic_context_dependent_attacks(self) -> None:
         data = {
             "metadata": self.data["metadata"],
