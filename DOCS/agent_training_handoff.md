@@ -2005,7 +2005,7 @@ Guqinizer。
   六分），级联上下文（模型自身前段输出）会放大尾部差距。结论：Base 音高错误的真因是"高置信
   音高不匹配 warning 不阻塞提交"（§7.18 设计）在两个环境都存在，下一步应把它升级为必须修正的
   反馈（复用 teacher runner 的 continue 机制）。
-  可视化（`scripts/visualize_running_eval_score.py --skip-pull`；标注源
+  可视化（`ABC_J/scripts/visualize_running_eval_score.py --skip-pull`；标注源
   `ABC_J/modern/SCf7VJzZ/mapped/jianpu_jianzi_readable.json` 按全局 index 对齐生成 references，
   因既有 `reference_trajectories_test.jsonl` 与 `evaluation_pairs_test.jsonl` 均不含该曲）：
   `train/eval_outputs_v3_two_stage/walk_constraint_debug/` 下 `SCf7VJzZ_baseline_a100_view.html`（7

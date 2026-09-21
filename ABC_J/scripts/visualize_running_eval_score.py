@@ -17,7 +17,7 @@ from copy import deepcopy
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SSH_RUN = Path("D:/new_cip/ops/.ssh_run.py")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
