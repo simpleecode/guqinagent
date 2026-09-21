@@ -314,6 +314,10 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / "train/eval_outputs_v3_two_stage/ScGgTmDm_running_view.html")
     parser.add_argument("--pulled", type=Path, default=ROOT / "train/eval_outputs_v3_two_stage/ScGgTmDm.remote.jsonl")
     parser.add_argument(
+        "--focus-sample",
+        help="sample_id to expand by default (for focused trajectory review)",
+    )
+    parser.add_argument(
         "--skip-pull", action="store_true",
         help="render an already downloaded --pulled JSONL without opening an SSH connection",
     )
@@ -333,9 +337,17 @@ def main() -> int:
         if str(row.get("score_key")) != args.score:
             continue
         ref_map: dict[int, str] = {}
-        for action in ((row.get("reference_plan") or {}).get("actions") or []):
+        # The older trajectory file carries reference_plan.actions; the
+        # evaluation-pairs manifest carries sealed reference.actions.  Both
+        # represent the same source-indexed notation for visualization.
+        actions = ((row.get("reference_plan") or {}).get("actions") or [])
+        if not actions:
+            actions = ((row.get("reference") or {}).get("actions") or [])
+        for action in actions:
             if isinstance(action, dict) and action.get("source_index") is not None:
-                ref_map[int(action["source_index"])] = str(action.get("jianzi") or "")
+                ref_map[int(action["source_index"])] = str(
+                    action.get("jianzi") or action.get("jianzi_text") or ""
+                )
         reference_by_id[str(row.get("score_key")) + "-" + str(row.get("phrase_id"))] = ref_map
     ordered_ids = [str(r.get("sample_id")) for r in source_rows]
     completed = sum(sample_id in predictions for sample_id in ordered_ids)
@@ -375,7 +387,7 @@ def main() -> int:
             base_prompt_html = f"<p>{esc(error)}</p>"
             guqin_prompt_html = f"<p>{esc(error)}</p>"
         blocks.append(
-            f"<details class='phrase'{' open' if position == max(0, completed - 1) else ''}>"
+            f"<details class='phrase'{' open' if (sample_id == args.focus_sample or (not args.focus_sample and position == max(0, completed - 1))) else ''}>"
             f"<summary><code>{esc(sample_id)}</code>｜{status}</summary>"
             f"<p>当前段：{esc(source.get('phrase_id'))}；这是评估运行时输入，不含私有标注。</p>"
             f"<h3>当前结果 vs 标注</h3>{compare_table(runtime, base, guqinizer, annotation)}"
