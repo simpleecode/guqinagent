@@ -188,6 +188,35 @@ class BuildConstraintsTest(unittest.TestCase):
         self.assertIn("六徽四分", allowed)
         self.assertNotIn("四徽一分", allowed)  # other strings stay out
 
+    def test_chuo_and_zhu_endpoints_must_move_from_previous_hui(self):
+        item = {
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 1, "event_index": 1, "jianpu": "2"},
+                    {"index": 2, "event_index": 2, "jianpu": "2"},
+                    {"index": 3, "event_index": 3, "jianpu": "2"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 1, "jianzi_text": "名指十徽勾三弦"},
+                {"source_index": 2, "jianzi_text": "名指十徽八分勾三弦"},
+                {"source_index": 3, "jianzi_text": "名指十徽八分勾三弦"},
+            ]},
+        }
+        processor = WalkHuiConstraintProcessor(MockVocab().id_texts,
+                                               build_walk_constraints(item), 0)
+        # Ten hui is the inherited position before event 2, hence it cannot
+        # be the endpoint.  Ten hui eight fen is a real motion and remains.
+        processor._feed_chars('<parameter=jianzi_rows>[[2, "注下')
+        self.assertNotIn("十徽", processor._pending_allowed)
+        self.assertIn("十徽八分", processor._pending_allowed)
+        processor._feed_chars('十徽八分"], [3, "绰上')
+        # The first in-call walk reached 10.8. A second 注下/绰上 to 10.8 is
+        # now prohibited even though Base's own endpoint is also 10.8.
+        self.assertNotIn("十徽八分", processor._pending_allowed)
+
 
 # --- state machine -----------------------------------------------------------
 

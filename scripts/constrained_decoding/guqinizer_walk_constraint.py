@@ -192,8 +192,10 @@ class WalkConstraintTable:
         # left-hand string at every note.
         context = new_context()
         live_by_index: dict[int, int | None] = {}
+        live_hui_by_index: dict[int, float | str | None] = {}
         for note in notes:
             live_by_index[int(note["index"])] = context.get("active_left_string")
+            live_hui_by_index[int(note["index"])] = context.get("active_left_hui")
             text = (current_text or base_text).get(int(note["index"]))
             if text:
                 try:
@@ -204,6 +206,10 @@ class WalkConstraintTable:
         self.static: dict[int, frozenset[str]] = {}
         self.base_string: dict[int, int | None] = {}
         self.initial_live: dict[int, int | None] = {}
+        # The position immediately before this event is distinct from the
+        # row's Base position.  A walk is a movement, so 绰上/注下 may not
+        # merely restate this inherited endpoint.
+        self.initial_live_hui: dict[int, float | str | None] = {}
         self.by_string: dict[int, dict[int, frozenset[str]]] = {}
         for note in notes:
             event = note.get("event_index")
@@ -220,6 +226,7 @@ class WalkConstraintTable:
             self.static[event] = frozenset(anchors)
             self.base_string[event] = position[0] if position else None
             self.initial_live[event] = live_by_index.get(index)
+            self.initial_live_hui[event] = live_hui_by_index.get(index)
             # Clause 2: pitch-correct surfaces per string (looked up later
             # for the base and live strings only).
             target = parse_jianpu(note.get("jianpu"), self.tonic)
@@ -399,6 +406,7 @@ class WalkHuiConstraintProcessor:
         self._replay_context = self.table.fresh_replay_context()
         self._replay_last_index: int | None = None
         self._row_allowed: frozenset[str] = frozenset()
+        self._pending_head: str | None = None
         # Lazy token indexes so each masked step only scans tokens whose
         # first character could matter, plus one precomputed "free exit" set.
         self._charset_first_tokens: list[tuple[int, str]] | None = None
@@ -535,22 +543,27 @@ class WalkHuiConstraintProcessor:
                 self._close_row()
                 continue
             if char in NUMERAL_CHARS and self._at_walk_trigger():
-                if self._row_allowed:
+                allowed = self._walk_allowed()
+                if allowed:
+                    self._row_allowed = allowed
                     self._enter_span(char)
                     continue
             elif char == "徽" and self._at_walk_trigger():
                 # 徽外-family endpoints open the span on 徽 instead of a
                 # numeral (they carry no numeric hui).
-                if self._row_allowed and any(
-                    surface.startswith("徽") for surface in self._row_allowed
+                allowed = self._walk_allowed()
+                if allowed and any(
+                    surface.startswith("徽") for surface in allowed
                 ):
+                    self._row_allowed = allowed
                     self._enter_span(char)
                     continue
             self.value_text += char
             # Arm the pre-endpoint mask when the value now ends with a walk
             # head, so the hui integer itself cannot dodge the whitelist.
             match = TRIGGER_SUFFIX_RE.search(self.value_text)
-            self._pending_allowed = self._row_allowed if match else None
+            self._pending_head = match.group("head") if match else None
+            self._pending_allowed = self._walk_allowed() if match else None
             self._pending_head_ambiguous = (
                 bool(match) and match.group("head") in AMBIGUOUS_HEADS
             )
@@ -563,6 +576,7 @@ class WalkHuiConstraintProcessor:
         self._prefix_cache = {}
         self.value_text += char
         self._pending_allowed = None
+        self._pending_head = None
         self.stats["spans_entered"] += 1
 
     def _close_row(self) -> None:
@@ -608,6 +622,44 @@ class WalkHuiConstraintProcessor:
             return self.table.initial_live.get(index)
         return None
 
+    def _live_hui(self) -> float | str | None:
+        """Return the endpoint held immediately before the current row.
+
+        Completed rows in this same ``edit_plan`` call take priority.  This
+        makes ``…注下十徽八分 + 注下十徽八分`` and a following
+        ``绰上十徽八分`` fail exactly like the offline stateful audit.
+        """
+        index = self.row_index
+        if (self._replay_context is not None
+                and self._replay_last_index is not None
+                and index is not None
+                and self._replay_last_index < index):
+            value = self._replay_context.get("active_left_hui")
+            if value is not None:
+                return value
+        if isinstance(self.table, WalkConstraintTable) and index is not None:
+            return self.table.initial_live_hui.get(index)
+        return None
+
+    @staticmethod
+    def _surface_for_hui(hui: float | str | None) -> str | None:
+        if hui is None:
+            return None
+        return hui if isinstance(hui, str) else render_hui(float(hui))
+
+    def _walk_allowed(self) -> frozenset[str]:
+        """Endpoint whitelist after applying non-zero-motion walk semantics."""
+        allowed = self._row_allowed
+        match = TRIGGER_SUFFIX_RE.search(self.value_text)
+        head = match.group("head") if match else self._pending_head
+        # 绰上 and 注下 are endpoint-bearing slides.  Writing their endpoint
+        # equal to the previous stopped position is a no-op, not a walk.
+        if head in {"绰上", "注下"}:
+            previous = self._surface_for_hui(self._live_hui())
+            if previous is not None:
+                allowed = frozenset(surface for surface in allowed if surface != previous)
+        return allowed
+
     def _at_walk_trigger(self) -> bool:
         return bool(TRIGGER_SUFFIX_RE.search(self.value_text))
 
@@ -625,6 +677,7 @@ class WalkHuiConstraintProcessor:
         self._rows_depth = 0
         self.value_text = ""
         self._pending_allowed = None
+        self._pending_head = None
 
     def _exit_span(self) -> None:
         self.state = ST_VALUE
