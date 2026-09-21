@@ -160,7 +160,7 @@ TOOLS = [
     {"name": "expand_context", "description": "展开一个未在 user 中提供的更早 phrase 的只读已确认谱面。已直接给出的“只读前一段”不得重复调用。返回与当前谱面相同的简表。",
      "input_schema": {"type": "object", "properties": {
          "phrase_id": {"type": "string"}}, "required": ["phrase_id"]}},
-    {"name": "get_pitch_candidates", "description": "查询取音位置候选。参数使用当前段连续的音序（小节线不占音序）；首次查询时，若当前段有4个或以上可解析的发音事件，尽量把至少4个（最好全部）音序一次放入 event_indices；后续只有确需聚焦核查某个音时才单独查询。event_indices 中偶然包含小节线、休止或无法解析音高的序号时会跳过这些序号，继续处理其余有效音，并在结果中说明。类型可传一个字符串或字符串数组。工具会解析调号、八度与和弦，并按实际目标 MIDI 自动去重，每个音高只返回一份候选及其全部来源音序。target_midi 仅用于脱离谱面事件的特殊查询。",
+    {"name": "get_pitch_candidates", "description": "查询取音位置候选。参数使用当前段连续的音序；首次查询时，若当前段有4个或以上可解析的发音事件，尽量把至少4个（最好全部）音序一次放入 event_indices；后续只有确需聚焦核查某个音时才单独查询。类型可传一个字符串或字符串数组。工具会解析调号、八度与和弦，并按实际目标 MIDI 自动去重，每个音高只返回一份候选及其全部来源音序。target_midi 仅用于脱离谱面事件的特殊查询。",
      "input_schema": {"type": "object", "properties": {
          "event_index": {"type": "integer"},
          "event_indices": {"type": "array", "items": {"type": "integer"}, "minItems": 1},
@@ -231,7 +231,7 @@ def public_system_for(stage: str, *, basic: bool = False) -> str:
             " 首次查询音高时，若当前段有4个或以上可解析的发音事件，尽量把至少4个（最好全部）音序放在同一次 get_pitch_candidates 的 event_indices 中；工具会按实际音高自动去重。只有后续确需核查某个单音时才逐音查询，不要把首次查询拆成逐音调用。"
             "依据候选位置、上下文和专业判断写出基础减字。尽量把每个演奏事件的减字填写完整，除非谱面关系很明显需要留空。"
             "可以分批提交已经确定的音，继续编辑直到结束前所有发音事件都有减字或明确空字符串。"
-            "小节线不要提交；休止和延音没有新音高，但若要表达走猱、猱、吟、泛止等延续动作，可以提交对应减字。"
+            "休止和延音没有新音高，但若要表达走猱、猱、吟、泛止等延续动作，可以提交对应减字。"
         )
     return prompt
 
@@ -1669,6 +1669,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         "唯一编辑入口是 edit_plan.jianzi_rows=[[音序,减字文字],...]；小节线没有音序。",
         "私有标注可以用于内部决定哪里需要改、往什么方向改；decision_summary 会原样进入学生可见轨迹，公开 reasoning 的任务是解释修改为什么在古琴演奏上合理，而不是隐藏标注事实后重新证明答案。",
         "对新选或改写的按音、撮等双音/复合取声，在 decision_summary 的逐音或相邻音组分析中简短说明：左手为何选用该按指、该按位与另一按位能否同时落手；右手为何选该取声及其与目标弦的关系。理由以实际可演奏性、音高和前后衔接为主，避免空泛重复。",
+        "尽量要逐音说明为什么选择该左右手动作/手指；逐小段说明选择该减字在情感表达上的考虑。",
         *([] if allow_private_reasoning_leakage else [
             "decision_summary 绝对不得提及 GQS、教师提示、系统提示、教师私有参考、最终标注、参考答案或目标答案；不得写“与参考一致”“参考使用”或“按提示”；也不得转述只有私有标注中出现的具体减字作为理由。需要使用私有目标规划时，只在内部决定 tool_calls，不在摘要中说明来源。"
         ]),

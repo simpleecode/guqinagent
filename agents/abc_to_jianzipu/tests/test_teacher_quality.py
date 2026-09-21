@@ -23,6 +23,7 @@ from ABC_J.scripts.generate_teacher_tool_trajectories import (
     render_compound_gesture_knowledge,
     COMPLEX_GESTURE_KNOWLEDGE,
     public_system_for,
+    render_grouped_candidate_table,
     validate_jianzi_only,
     can_accept_empty_tool_turn,
     render_edit_preview,
@@ -1045,6 +1046,34 @@ class TeacherQualityTests(unittest.TestCase):
         self.assertEqual(queries[0]["source_indices"], [1, 2, 3])
         self.assertIn("来源｜1、2、3｜简谱｜6̣",
                       result["result"]["text"])
+
+    def test_grouped_pitch_header_keeps_sources_but_one_jianpu_symbol(self) -> None:
+        text = render_grouped_candidate_table(
+            77.0,
+            [{"mode": "open", "string": 1, "hui": None, "sounding_midi": 77.0,
+              "confidence": "exact"}],
+            ("open",),
+            [{"event_index": 119, "source_index": 119, "jianpu": "1̣"},
+             {"event_index": 121, "source_index": 121, "jianpu": "1̇"}],
+        )
+        self.assertIn("来源｜119、121｜简谱｜1̣", text)
+        self.assertNotIn("简谱｜1̣、1̇", text)
+
+    def test_chord_pitch_header_uses_the_symbol_for_that_chord_tone(self) -> None:
+        item = self._item()
+        item["input"]["notes_without_jianzi"][:2] = [
+            {"index": 1, "abc": "[F,f]2", "jianpu": "1̣", "jianpu_alt": "1̇"},
+            {"index": 2, "abc": "[F,f]2", "jianpu": "1̣", "jianpu_alt": "1̇"},
+        ]
+        item["phrase_id"] = "p0001"
+        runtime = RealToolRuntime(item, {})
+        result = runtime.invoke("get_pitch_candidates", {
+            "source_indices": [1, 2], "max_candidates": 3,
+        })
+        self.assertTrue(result["ok"], result)
+        text = result["result"]["text"]
+        self.assertIn("目标音高｜MIDI 77｜来源｜1、2｜简谱｜1̇", text)
+        self.assertNotIn("目标音高｜MIDI 77｜来源｜1、2｜简谱｜1̣ 1̇", text)
 
     def test_batch_pitch_candidates_accept_type_array(self) -> None:
         item = self._item()
