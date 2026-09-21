@@ -217,7 +217,7 @@ class BuildConstraintsTest(unittest.TestCase):
         # now prohibited even though Base's own endpoint is also 10.8.
         self.assertNotIn("十徽八分", processor._pending_allowed)
 
-    def test_same_endpoint_only_forces_walk_to_abort_not_fallback(self):
+    def test_same_endpoint_head_is_masked_before_it_is_emitted(self):
         item = {
             "input": {"metadata": {"tonic": "1=C"},
                       "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
@@ -232,17 +232,22 @@ class BuildConstraintsTest(unittest.TestCase):
         }
         processor = WalkHuiConstraintProcessor(MockVocab().id_texts,
                                                build_walk_constraints(item), 0)
-        processor._feed_chars('<parameter=jianzi_rows>[[2, "绰上')
-        self.assertEqual(processor._pending_allowed, frozenset())
-        allowed = processor._allowed_ids_for_pending()
+        processor._feed_chars('<parameter=jianzi_rows>[[2, "')
+        allowed = processor._allowed_ids_preventing_noop_walk_head()
         self.assertIsNotNone(allowed)
-        # The only permitted continuation closes the value; 十 cannot escape
-        # through the generic empty-mask fallback.
+        # The no-op heads themselves (including a merged token) are blocked
+        # before the model can emit an incomplete walk and enter a retry loop.
         for token_id, text in processor.id_texts.items():
-            if text == "十":
+            if text == "注下":
                 self.assertNotIn(token_id, allowed)
-            if text == '"':
+            if text == "名指":
                 self.assertIn(token_id, allowed)
+        processor._feed_chars("绰")
+        allowed = processor._allowed_ids_preventing_noop_walk_head()
+        self.assertIsNotNone(allowed)
+        for token_id, text in processor.id_texts.items():
+            if text == "上":
+                self.assertNotIn(token_id, allowed)
 
 
 # --- state machine -----------------------------------------------------------

@@ -400,7 +400,6 @@ class WalkHuiConstraintProcessor:
         # Masking there is what actually constrains the hui integer itself.
         self._pending_allowed: frozenset[str] | None = None
         self._pending_cache_by_allowed: dict[tuple[frozenset[str], bool], frozenset[int]] = {}
-        self._forced_abort_ids: frozenset[int] | None = None
         self._pending_head_ambiguous = False
         # Live left-hand context: replayed from rows the model completes
         # inside this tool call, mirroring the audit's history replay.
@@ -422,7 +421,6 @@ class WalkHuiConstraintProcessor:
             "mask_steps": 0,
             "mid_token_span_violations": 0,
             "mask_fallbacks": 0,
-            "same_endpoint_walks_aborted": 0,
         }
 
     # -- transformers LogitsProcessor protocol -------------------------------
@@ -438,6 +436,8 @@ class WalkHuiConstraintProcessor:
             allowed = self._allowed_ids_for_prefix(self.span_prefix)
         elif self.state == ST_VALUE and self._pending_allowed is not None:
             allowed = self._allowed_ids_for_pending()
+        elif self.state == ST_VALUE:
+            allowed = self._allowed_ids_preventing_noop_walk_head()
         else:
             return scores
         if allowed is None:
@@ -649,11 +649,9 @@ class WalkHuiConstraintProcessor:
             return None
         return hui if isinstance(hui, str) else render_hui(float(hui))
 
-    def _walk_allowed(self) -> frozenset[str]:
+    def _walk_allowed_for_head(self, head: str | None) -> frozenset[str]:
         """Endpoint whitelist after applying non-zero-motion walk semantics."""
         allowed = self._row_allowed
-        match = TRIGGER_SUFFIX_RE.search(self.value_text)
-        head = match.group("head") if match else self._pending_head
         # 绰上 and 注下 are endpoint-bearing slides.  Writing their endpoint
         # equal to the previous stopped position is a no-op, not a walk.
         if head in {"绰上", "注下"}:
@@ -661,6 +659,35 @@ class WalkHuiConstraintProcessor:
             if previous is not None:
                 allowed = frozenset(surface for surface in allowed if surface != previous)
         return allowed
+
+    def _walk_allowed(self) -> frozenset[str]:
+        match = TRIGGER_SUFFIX_RE.search(self.value_text)
+        head = match.group("head") if match else self._pending_head
+        return self._walk_allowed_for_head(head)
+
+    def _allowed_ids_preventing_noop_walk_head(self) -> frozenset[int] | None:
+        """Block a zero-motion 绰上/注下 *before* its head is emitted.
+
+        Closing an already emitted head produced malformed ``注下`` rows and
+        repeat loops.  If the current position has no legal different
+        endpoint, mask the token that would complete the head instead.  This
+        leaves ordinary phrasing and alternative non-walk edits available.
+        """
+        if not self._row_allowed or self._live_hui() is None:
+            return None
+        forbidden = {
+            head for head in ("绰上", "注下")
+            if not self._walk_allowed_for_head(head)
+        }
+        if not forbidden:
+            return None
+        prefix = self.value_text[-16:]
+        allowed = frozenset(
+            token_id for token_id, text in self.id_texts.items()
+            if text and "\ufffd" not in text
+            and not any(head in prefix + text for head in forbidden)
+        )
+        return allowed or None
 
     def _at_walk_trigger(self) -> bool:
         return bool(TRIGGER_SUFFIX_RE.search(self.value_text))
@@ -748,19 +775,9 @@ class WalkHuiConstraintProcessor:
         if allowed is None:
             return None
         if not allowed:
-            # A no-op 绰上/注下 had no remaining legal endpoint.  Do not hit
-            # the generic empty-mask safety valve (which would silently allow
-            # the forbidden endpoint): force the current JSON value to close.
-            # The resulting incomplete walk is subsequently rejected/ignored
-            # by normal plan validation instead of becoming a fake movement.
-            if self._forced_abort_ids is None:
-                self._forced_abort_ids = frozenset(
-                    token_id for token_id, text in self.id_texts.items()
-                    if text and text[0] == '"' and "\ufffd" not in text
-                )
-            if self._forced_abort_ids:
-                self.stats["same_endpoint_walks_aborted"] += 1
-                return self._forced_abort_ids
+            # This is normally unreachable: zero-motion heads are masked
+            # before they complete. Keep the safety valve for malformed
+            # multi-character tokens rather than deadlocking generation.
             return None
         key = (allowed, self._pending_head_ambiguous)
         cached = self._pending_cache_by_allowed.get(key)
