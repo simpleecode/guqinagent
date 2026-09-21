@@ -432,17 +432,24 @@ class WalkHuiConstraintProcessor:
         for token_id in sequence[self.cursor:]:
             self.cursor += 1
             self._feed_token(int(token_id))
+        constrained = False
         if self.state == ST_SPAN:
             allowed = self._allowed_ids_for_prefix(self.span_prefix)
+            constrained = True
         elif self.state == ST_VALUE and self._pending_allowed is not None:
             allowed = self._allowed_ids_for_pending()
+            constrained = True
         elif self.state == ST_VALUE:
             allowed = self._allowed_ids_preventing_noop_walk_head()
         else:
             return scores
         if allowed is None:
-            # Safety valve: an empty mask would deadlock decoding.
-            self.stats["mask_fallbacks"] += 1
+            # ``None`` in an ordinary value is the normal “no walk constraint
+            # applies at this token” case.  Count a fallback only when a
+            # constrained endpoint/pending span was genuinely empty.
+            if constrained:
+                # Safety valve: an empty mask would deadlock decoding.
+                self.stats["mask_fallbacks"] += 1
             return scores
         banned = [index for index in range(scores.shape[-1]) if index not in allowed]
         if banned:
