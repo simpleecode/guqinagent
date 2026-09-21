@@ -249,6 +249,26 @@ class BuildConstraintsTest(unittest.TestCase):
             if text == "上":
                 self.assertNotIn(token_id, allowed)
 
+    def test_walk_head_is_masked_when_row_has_no_reliable_endpoint(self):
+        """An unconstrained row must not admit an unverifiable walk."""
+        processor = WalkHuiConstraintProcessor(MockVocab().id_texts, {}, 0)
+        processor._feed_chars('<parameter=jianzi_rows>[[2, "')
+        self.assertFalse(processor._row_allowed)
+        allowed = processor._allowed_ids_preventing_noop_walk_head()
+        self.assertIsNotNone(allowed)
+        for token_id, text in processor.id_texts.items():
+            if text == "注下":
+                self.assertNotIn(token_id, allowed)
+            if text == "名指":
+                self.assertIn(token_id, allowed)
+        # A separately tokenized 绰上 is also stopped before it completes.
+        processor._feed_chars("绰")
+        allowed = processor._allowed_ids_preventing_noop_walk_head()
+        self.assertIsNotNone(allowed)
+        for token_id, text in processor.id_texts.items():
+            if text == "上":
+                self.assertNotIn(token_id, allowed)
+
 
 # --- state machine -----------------------------------------------------------
 

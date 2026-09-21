@@ -572,7 +572,14 @@ class WalkHuiConstraintProcessor:
             # head, so the hui integer itself cannot dodge the whitelist.
             match = TRIGGER_SUFFIX_RE.search(self.value_text)
             self._pending_head = match.group("head") if match else None
-            self._pending_allowed = self._walk_allowed() if match else None
+            # An empty row whitelist means this event has no reliable pitch /
+            # position anchor.  The pre-head guard below still forbids
+            # endpoint-bearing walks in that case, but never arm the
+            # endpoint mask afterwards: there is no valid endpoint to mask
+            # *to*, and treating it as one merely causes a safety fallback.
+            self._pending_allowed = (
+                self._walk_allowed() if match and self._row_allowed else None
+            )
             self._pending_head_ambiguous = (
                 bool(match) and match.group("head") in AMBIGUOUS_HEADS
             )
@@ -680,12 +687,19 @@ class WalkHuiConstraintProcessor:
         endpoint, mask the token that would complete the head instead.  This
         leaves ordinary phrasing and alternative non-walk edits available.
         """
-        if not self._row_allowed or self._live_hui() is None:
+        if not self._row_allowed:
+            # With no reliable candidate endpoint, a 绰上/注下 cannot be
+            # verified.  Block its head before it is emitted rather than
+            # letting an unconstrained walk through (or getting stuck after
+            # the head with an empty endpoint mask).
+            forbidden = {"绰上", "注下"}
+        elif self._live_hui() is None:
             return None
-        forbidden = {
-            head for head in ("绰上", "注下")
-            if not self._walk_allowed_for_head(head)
-        }
+        else:
+            forbidden = {
+                head for head in ("绰上", "注下")
+                if not self._walk_allowed_for_head(head)
+            }
         if not forbidden:
             return None
         prefix = self.value_text[-16:]
