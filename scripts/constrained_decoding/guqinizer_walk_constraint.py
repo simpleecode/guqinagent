@@ -212,11 +212,14 @@ class WalkConstraintTable:
         self.initial_live_hui: dict[int, float | str | None] = {}
         self.by_string: dict[int, dict[int, frozenset[str]]] = {}
         for note in notes:
-            event = note.get("event_index")
-            if event is None:
-                continue
-            event = int(event)
+            # ``edit_plan.jianzi_rows`` addresses source/note indices, not
+            # the optional event_index.  The public text-protocol evaluation
+            # inputs intentionally omit event_index, so keying this table by
+            # it silently discarded every candidate endpoint at inference.
+            # Use ``index`` consistently for both the table and the logits
+            # processor's row_index lookup.
             index = int(note["index"])
+            event = index
             position = own_position(base_text.get(index))
             # Clause 1: identical to the Base stage's position.
             anchors: set[str] = set()
