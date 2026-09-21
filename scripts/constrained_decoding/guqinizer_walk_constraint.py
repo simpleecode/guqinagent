@@ -400,6 +400,7 @@ class WalkHuiConstraintProcessor:
         # Masking there is what actually constrains the hui integer itself.
         self._pending_allowed: frozenset[str] | None = None
         self._pending_cache_by_allowed: dict[tuple[frozenset[str], bool], frozenset[int]] = {}
+        self._forced_abort_ids: frozenset[int] | None = None
         self._pending_head_ambiguous = False
         # Live left-hand context: replayed from rows the model completes
         # inside this tool call, mirroring the audit's history replay.
@@ -421,6 +422,7 @@ class WalkHuiConstraintProcessor:
             "mask_steps": 0,
             "mid_token_span_violations": 0,
             "mask_fallbacks": 0,
+            "same_endpoint_walks_aborted": 0,
         }
 
     # -- transformers LogitsProcessor protocol -------------------------------
@@ -744,6 +746,21 @@ class WalkHuiConstraintProcessor:
     def _allowed_ids_for_pending(self) -> frozenset[int] | None:
         allowed = self._pending_allowed
         if allowed is None:
+            return None
+        if not allowed:
+            # A no-op 绰上/注下 had no remaining legal endpoint.  Do not hit
+            # the generic empty-mask safety valve (which would silently allow
+            # the forbidden endpoint): force the current JSON value to close.
+            # The resulting incomplete walk is subsequently rejected/ignored
+            # by normal plan validation instead of becoming a fake movement.
+            if self._forced_abort_ids is None:
+                self._forced_abort_ids = frozenset(
+                    token_id for token_id, text in self.id_texts.items()
+                    if text and text[0] == '"' and "\ufffd" not in text
+                )
+            if self._forced_abort_ids:
+                self.stats["same_endpoint_walks_aborted"] += 1
+                return self._forced_abort_ids
             return None
         key = (allowed, self._pending_head_ambiguous)
         cached = self._pending_cache_by_allowed.get(key)
