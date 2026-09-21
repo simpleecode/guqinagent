@@ -1,7 +1,7 @@
 import unittest
 
 from evaluation.fingering import field_counts, rates
-from evaluation.ornament import ornament_metrics
+from evaluation.ornament import ornament_metrics, technique_usage
 
 
 class MetricsTests(unittest.TestCase):
@@ -26,3 +26,13 @@ class MetricsTests(unittest.TestCase):
     def test_outside_hui_is_a_symbolic_position(self):
         events = [{"reference": {"hui": "徽外"}, "prediction": {"hui": "徽外"}}]
         self.assertEqual(rates(field_counts(events, "hui"))["accuracy"], 1.0)
+
+    def test_technique_usage_is_event_based(self):
+        events = [
+            {"reference": {"ornaments": ["吟"]}, "prediction": {"ornaments": ["吟", "吟"]}},
+            {"reference": {"ornaments": []}, "prediction": {"ornaments": ["绰"]}},
+        ]
+        stats = technique_usage(events)["by_technique"]
+        self.assertEqual(stats["吟"]["prediction_events"], 1)
+        self.assertEqual(stats["吟"]["reference_events"], 1)
+        self.assertEqual(stats["绰"]["event_count_delta"], 1)

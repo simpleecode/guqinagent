@@ -34,6 +34,10 @@ by Git. Prediction JSONL may be append-only: the last row for each
   primary fingering fields. Missing reference values are excluded rather than
   treated as negatives.
 * **Ornament P/R/F1**: micro set comparison of parsed `techniques` per event.
+* **Technique Usage Statistics**: for every parsed technique, its predicted
+  and reference event incidence, each divided by all evaluated events, plus
+  the predicted-minus-reference event-count delta. Repeating a technique in
+  one event still counts once.
 * **Rule violation rate**: unique events with a deterministic parser-backed
   violation divided by pitch-evaluable events. Initial violations are pitch
   mismatch and unequivocal unresolvable/unplayable parser states.
@@ -47,4 +51,3 @@ The first version does not infer subjective musical quality, phrase-level
 ornament style, ergonomics of arbitrary multi-stop hand spans, or correctness
 of context-dependent compound gestures. Those need a verified rule corpus or
 expert labels; they must not be guessed from strings.
-

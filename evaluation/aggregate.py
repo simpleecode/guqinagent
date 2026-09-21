@@ -5,7 +5,7 @@ from collections import Counter
 from typing import Any
 
 from .fingering import field_counts, rates
-from .ornament import ornament_metrics
+from .ornament import ornament_metrics, technique_usage
 from .pitch import paired_cents
 
 
@@ -25,6 +25,7 @@ def metrics(events: list[dict[str, Any]], violations: list[dict[str, Any]],
         "left_hand_fingering": rates(field_counts(events, "left_finger")),
         "right_hand_fingering": rates(field_counts(events, "right_finger")),
         "ornament": ornament_metrics(events),
+        "technique_usage": technique_usage(events),
         "rule_violation_rate": len({(v["piece_id"], v["phrase_id"], v["event_id"]) for v in violations}) /
                                len(pitch_events) if pitch_events else None,
         "rule_violations": len(violations),
@@ -44,4 +45,3 @@ def per_piece(events: list[dict[str, Any]], violations: list[dict[str, Any]],
         result.append({"piece_id": piece_id, "phrase_id": phrase_id,
                        "metrics": metrics(group, own, tolerance_cents)})
     return result
-
