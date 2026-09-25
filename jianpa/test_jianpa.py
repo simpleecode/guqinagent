@@ -208,5 +208,57 @@ class OctavePlacementTest(unittest.TestCase):
         self.assertEqual(folded, [48, 60, 76, 56, 79])
 
 
+class JianpuTextTest(unittest.TestCase):
+    SNIPPET = """T:测试小调
+1=Bb 4/4
+3' 3' 5 6 | 1' - 7 6 |
+5 6 1'&5 | #4/2 0/2 5 2 |
+"""
+
+    def test_parse_events_and_bars(self):
+        from jianpu_reader import parse_jianpu_text
+        parsed = parse_jianpu_text(self.SNIPPET)
+        self.assertEqual(parsed["title"], "测试小调")
+        self.assertEqual(parsed["tonic_pc"], 10)  # Bb
+        self.assertEqual(parsed["beats_per_bar"], 4.0)
+        events = parsed["events"]
+        # 1=Bb → 锚定 Bb3=58；3' = +4 半音再升八度
+        self.assertEqual(events[0][2], 58 + 4 + 12)
+        self.assertEqual(events[0][1], 1.0)  # 默认四分
+        # 延音 - ：第二小节 1' 占两拍
+        tie = next(e for e in events if e[0] == 4.0)
+        self.assertEqual((tie[1], tie[2]), (2.0, 58 + 12))
+        # 撮 1'&5：两个同 onset 事件，时值相同
+        dyad_main = next(e for e in events if e[0] == 10.0 and e[2] == 58 + 12)
+        dyad_partner = next(e for e in events if e[0] == 10.0 and e[2] == 58 + 7)
+        self.assertEqual(dyad_main[1], dyad_partner[1])
+        # #4/2 八分变化音（第三小节只有 3 拍音符，小节线不占时值）
+        sharp = events[-3]
+        self.assertEqual((sharp[0], sharp[1], sharp[2]), (11.0, 0.5, 58 + 5 + 1))
+        # 手写小节线位置（第一小节结束 = 拍 4）
+        self.assertIn(4.0, parsed["bars"])
+
+    def test_build_readable_pairs_dyad_once(self):
+        from jianpu_reader import parse_jianpu_text
+        from to_runtime import build_readable
+        parsed = parse_jianpu_text(self.SNIPPET)
+        readable = build_readable(parsed["events"], parsed["bars"], title="t",
+                                  tonic_pc=parsed["tonic_pc"], mode="minor",
+                                  beats_per_bar=4.0)
+        # 撮行：高音（1'）为主、低音（5）为副，且伙伴音不再重复出现
+        dyad_rows = [r for r in readable["notes"] if r.get("jianpu_alt")]
+        self.assertEqual(len(dyad_rows), 1)
+        self.assertEqual(dyad_rows[0]["jianpu"], "1\u0307")
+        self.assertEqual(dyad_rows[0]["jianpu_alt"], "5")
+        attacks = [r for r in readable["notes"] if r["duration"] in
+                   ("二分", "四分", "八分", "十六分", "三十二分")
+                   and not r["jianpu"].startswith(("－", "0"))]
+        # 撮只占一个 attack 行：12 单音 + 1 撮
+        self.assertEqual(len(attacks), 13)
+        tonic = readable["tonic_degree1_midi"]
+        for row in attacks:
+            self.assertIsNotNone(parse_jianpu(row["jianpu"], tonic), row["jianpu"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import random
+import re
 import string
 import sys
 from pathlib import Path
@@ -30,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import crawl
 from abc_reader import parse_abc
+from jianpu_reader import parse_jianpu_text
 from key_detect import detect_key, tonic_label
 from midi_reader import parse_midi
 from to_runtime import build_readable, center_octaves, fold_outliers, write_outputs
@@ -51,11 +53,31 @@ def _melody_events(data, *, onset_window_quarters: float = 0.04):
     for note in live:
         by_track.setdefault(note.track, []).append(note)
     if len(by_track) > 1:
-        def track_key(item):
-            index, notes = item
+        # Melody-track scoring for karaoke/pop layouts: the lead voice is
+        # the track with the densest onsets covering most of the piece, in
+        # a singable register, without heavy self-overlap.  "Highest median
+        # pitch" alone mistakes sparse descant/pad tracks for the melody,
+        # and remapped-percussion tracks (midi 0-1) must never win.
+        sane = {t: [n for n in notes if 36 <= n.midi <= 96]
+                for t, notes in by_track.items()}
+        sane = {t: notes for t, notes in sane.items() if notes}
+        pool = sane or by_track
+        global_span = max(
+            max(n.end_tick for n in notes) - min(n.start_tick for n in notes)
+            for notes in pool.values())
+
+        def melody_score(item):
+            _, notes = item
+            notes = sorted(notes, key=lambda n: n.start_tick)
+            onsets = len({n.start_tick for n in notes})
+            span = notes[-1].end_tick - notes[0].start_tick
+            coverage = min(span / global_span, 1.0) if global_span else 0.0
+            overlap = 1 - onsets / len(notes)
             median = sorted(n.midi for n in notes)[len(notes) // 2]
-            return (-median, -len(notes), index)
-        live = by_track[sorted(by_track.items(), key=track_key)[0][0]]
+            register = 1.0 if 58 <= median <= 84 else 0.2
+            return onsets * coverage * register * (1 - min(overlap, 0.9))
+
+        live = by_track[max(pool.items(), key=melody_score)[0]]
     notes = sorted(live, key=lambda n: (n.start_tick, -n.midi))
     groups = []
     for note in notes:
@@ -128,14 +150,21 @@ def cmd_crawl(args):
 def cmd_convert(args):
     path = Path(args.file)
     suffix = path.suffix.lower()
+    header_tonic = ""  # jianpu 文本头部调号（保留用户写法，如 Bb）
     if suffix in (".mid", ".midi"):
         events, bars, parsed = _events_from_midi(str(path))
         mode = None
-    elif suffix in (".abc", ".txt"):
-        events, bars, parsed = _events_from_abc(str(path))
-        mode = parsed["mode"]
+    elif suffix in (".abc", ".txt", ".jp", ".jianpu"):
+        text = path.read_text(encoding="utf-8")
+        if suffix != ".abc" and not re.search(r"^[XK]:", text, re.M):
+            parsed = parse_jianpu_text(text)
+            events, bars, mode = parsed["events"], parsed["bars"], None
+            header_tonic = parsed["tonic_label"]
+        else:
+            events, bars, parsed = _events_from_abc(str(path))
+            mode = parsed["mode"]
     else:
-        raise SystemExit(f"unsupported file type: {suffix} (use .mid/.midi/.abc)")
+        raise SystemExit(f"unsupported file type: {suffix} (use .mid/.midi/.abc/.jp)")
 
     sounding = [(s, d, m) for s, d, m in events if d > 0]
     if not sounding:
@@ -143,15 +172,19 @@ def cmd_convert(args):
     detected_pc, detected_mode, confidence = detect_key(sounding)
     if args.tonic and args.tonic != "auto":
         label = args.tonic
-        import re as _re
         letter = label.split("=", 1)[1].strip()
-        match = _re.fullmatch(r"([A-G])([#b♯♭]?)", letter)
-        base = "CDEFGAB".index(match.group(1)) if match else None
-        if base is None:
+        match = re.fullmatch(r"([A-G])([#b♯♭]?)", letter)
+        if match is None:
             raise SystemExit(f"unsupported tonic label: {label}")
         accidental = match.group(2)
-        pc = (base + (1 if accidental in ("#", "♯") else -1 if accidental in ("b", "♭") else 0)) % 12
+        pc = ("CDEFGAB".index(match.group(1))
+              + (1 if accidental in ("#", "♯") else -1 if accidental in ("b", "♭") else 0)) % 12
         tonic_pc, mode = pc, (mode or detected_mode)
+        auto = False
+    elif header_tonic:
+        label = f"1={header_tonic}"
+        tonic_pc = parsed["tonic_pc"]
+        mode = mode or detected_mode
         auto = False
     else:
         tonic_pc, mode = detected_pc, (mode or detected_mode)
@@ -159,7 +192,7 @@ def cmd_convert(args):
         auto = True
 
     events = fold_outliers(center_octaves(events))
-    title = args.title or path.stem
+    title = args.title or (parsed or {}).get("title") or path.stem
     score_key = args.score_key or ("J" + "".join(random.choices(string.ascii_uppercase + string.digits, k=6)))
     readable = build_readable(
         events, bars, title=title, tonic_pc=tonic_pc, mode=mode,

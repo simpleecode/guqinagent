@@ -150,7 +150,10 @@ def build_readable(events, bars, *, title, tonic_pc, mode, beats_per_bar) -> dic
         index += 1
 
     bar_idx = 0
+    consumed: set[int] = set()  # indices already paired as a chord partner
     for event_index, (start, dur, midi) in enumerate(merged):
+        if event_index in consumed:
+            continue
         while bar_idx < len(bar_set) and bar_set[bar_idx] <= start + 1e-6:
             if bar_set[bar_idx] >= pos_cursor - 1e-6:
                 add_bar()
@@ -166,11 +169,17 @@ def build_readable(events, bars, *, title, tonic_pc, mode, beats_per_bar) -> dic
                 add_row("0（休止）", None, _bucket(take), f"z{'' if take == 1 else int(round(take * 2))}")
                 gap -= take
             pos_cursor = start
-        # top-two chord voices at the same onset
-        chord = [m for s, d, m in merged[event_index:event_index + 3]
-                 if abs(s - start) < 1e-3][:2]
-        main = chord[0] if chord else midi
-        alt = chord[1] if len(chord) > 1 else None
+        # top-two chord voices at the same onset: the partner is the
+        # immediately following same-onset entry (input sorted by
+        # (start, -pitch)); consume it so it does not also surface as a
+        # duplicate attack row.
+        alt = None
+        if event_index + 1 < len(merged):
+            next_start, next_dur, next_midi = merged[event_index + 1]
+            if abs(next_start - start) < 1e-3 and next_dur > 1e-6:
+                alt = next_midi
+                consumed.add(event_index + 1)
+        main = midi
         remaining = dur
         first = True
         while remaining > 1e-3:
