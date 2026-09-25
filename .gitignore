@@ -77,3 +77,7 @@ DOCS/实验日记.md
 /captures/
 /tools/platform-tools/
 ABC_J/modern/
+
+# jianpa crawl/convert artifacts
+jianpa/cache/
+jianpa/out/
