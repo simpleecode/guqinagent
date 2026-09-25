@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $project = 'D:\sitongli\sitongli-guanshanyue'
 $root = 'C:\Users\30343\.codex\visualizations\2026\09\03\01a065f1-9f9a-77a2-97e1-effc6361e996\gqs_v12_train_run1'
-$input = Join-Path $project 'ABC_J\agent_training\inferred_gqs_v12\inferred_trajectories_train.jsonl'
+$input = Join-Path $project 'ABC_J\agent_training\inferred_gqs_v12_tuningfix_20260914\inferred_trajectories_train.jsonl'
 $ids = Join-Path $project 'ABC_J\agent_training\pitch_eligible_gqs_v12_train\pitch_eligible_phrase_ids.txt'
 $shardDirs = 0..5 | ForEach-Object { Join-Path $root "messages_gqs_v12_train_run1_shard_$_" }
 
@@ -28,7 +28,7 @@ for ($round = 1; $round -le 3; $round++) {
         $name = Split-Path $dir -Leaf
         $idx = [int]($name -replace '.*_([0-5])$','$1')
         & python (Join-Path $project 'ABC_J\scripts\generate_teacher_tool_trajectories.py') `
-            --input $input --trajectory-id-file $ids --limit 100000 `
+            --input $input --trajectory-id-file $ids `
             --output-dir $dir --score-shard-count 6 --score-shard-index $idx `
             --max-tool-rounds 24 --max-attempts 6 --allow-private-reasoning-leakage `
             --include-guqinizer-no-op --model glm-5.3 --min-interval 1 --resume --retry-failed

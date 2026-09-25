@@ -83,6 +83,11 @@ def normalize_summary(value: object) -> str:
     return summary
 
 
+def has_private_source_marker(value: object) -> bool:
+    lowered = str(value or "").casefold()
+    return any(term.casefold() in lowered for term in BANNED_PUBLIC_TERMS)
+
+
 def private_reference_texts(private: dict) -> set[str]:
     """Extract concrete reference strings for a second, text-level guard."""
     values: set[str] = set()
@@ -212,6 +217,8 @@ def main() -> int:
                         help="split source rows into disjoint shards for parallel workers")
     parser.add_argument("--shard-index", type=int, default=0,
                         help="worker index in 0..shard-count-1")
+    parser.add_argument("--only-private-source-markers", action="store_true",
+                        help="call the rewrite model only for summaries containing a banned private-source marker")
     args = parser.parse_args()
     if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
         raise SystemExit("invalid shard-count/shard-index")
@@ -348,10 +355,14 @@ def main() -> int:
             stats["newly_completed"] += 1
             save_heartbeat("running", sample_id)
             continue
-        summaries: list[str] = []
+        summaries: list[tuple[str, bool]] = []
         try:
             for _, turn in turns:
-                summaries.append(rewrite_one(item, turn, private))
+                original = turn["original_summary"]
+                if args.only_private_source_markers and not has_private_source_marker(original):
+                    summaries.append((original, False))
+                else:
+                    summaries.append((rewrite_one(item, turn, private), True))
         except Exception as exc:  # preserve the sample only in the failure report
             failures_by_id[sample_id] = {
                 "sample_id": sample_id,
@@ -361,8 +372,10 @@ def main() -> int:
             save_heartbeat("running", sample_id)
             continue
         rewritten = deepcopy(item)
-        for (index, original), summary in zip(turns, summaries):
+        for (index, original), (summary, was_rewritten) in zip(turns, summaries):
             rewritten["messages"][index]["content"] = summary
+            if not was_rewritten:
+                continue
             audit_row = {
                 "sample_id": sample_id, "message_index": index,
                 "original_summary": original["original_summary"],

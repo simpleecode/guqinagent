@@ -34,6 +34,63 @@ def load_blacklisted_score_keys() -> set[str]:
     return set(values)
 
 
+def is_bar(note: dict) -> bool:
+    return (str(note.get("abc") or "").strip() == "|"
+            or str(note.get("jianpu") or "").strip() == "|"
+            or str(note.get("duration") or "") == "小节线")
+
+
+def event_indices_by_score(rows: list[dict]) -> dict[str, dict[int, int | None]]:
+    """Assign the public continuous 音序 for every score source row.
+
+    ``source_index`` remains the internal, lossless raw-score address.  The
+    public tool protocol, training prompts, and score viewers instead use a
+    continuous ordinal that skips structural bar rows.  Derive it once over
+    every phrase of a score so phrase boundaries do not reset the numbering.
+    """
+    notes_by_score: dict[str, dict[int, dict]] = {}
+    for item in rows:
+        score_notes = notes_by_score.setdefault(str(item["score_key"]), {})
+        for note in item["input"].get("notes_without_jianzi") or []:
+            if note.get("index") is not None:
+                score_notes.setdefault(int(note["index"]), note)
+    mappings: dict[str, dict[int, int | None]] = {}
+    for score_key, notes in notes_by_score.items():
+        ordinal = 0
+        mapping: dict[int, int | None] = {}
+        for source_index, note in sorted(notes.items()):
+            if is_bar(note):
+                mapping[source_index] = None
+            else:
+                mapping[source_index] = ordinal
+                ordinal += 1
+        mappings[score_key] = mapping
+    return mappings
+
+
+def add_event_indices(item: dict, mapping: dict[int, int | None]) -> dict:
+    """Copy an item and annotate every public current-phrase note."""
+    result = deepcopy(item)
+
+    def annotate(notes: list[dict]) -> list[dict]:
+        output = []
+        for note in notes:
+            copied = deepcopy(note)
+            if copied.get("index") is not None:
+                copied["event_index"] = mapping.get(int(copied["index"]))
+            output.append(copied)
+        return output
+
+    payload = result["input"]
+    payload["notes_without_jianzi"] = annotate(
+        payload.get("notes_without_jianzi") or []
+    )
+    handoff = payload.get("phrase_handoff") or {}
+    if isinstance(handoff.get("current_phrase"), list):
+        handoff["current_phrase"] = annotate(handoff["current_phrase"])
+    return result
+
+
 def render_rows(notes: list[dict], actions: list[dict], *, readonly: bool) -> str:
     by_index = {int(action["source_index"]): action for action in actions}
     lines = ["序号｜简谱｜ABC｜时值｜谱面减字"]
@@ -41,14 +98,15 @@ def render_rows(notes: list[dict], actions: list[dict], *, readonly: bool) -> st
         index = int(note["index"])
         abc = str(note.get("abc") or "-")
         jianpu = str(note.get("jianpu") or note.get("jianpu_alt") or "休止")
+        if is_bar(note):
+            lines.append("小节线")
+            continue
         if note.get("jianpu_alt") and abc.startswith("["):
             jianpu += " " + str(note["jianpu_alt"])
         action = by_index.get(index)
         if action is not None and action.get("jianzi_text") is not None:
             text = str(action.get("jianzi_text") or "")
             surface = "" if text == "" else f"[{text}]"
-        elif abc == "|" or note.get("duration") == "小节线":
-            surface = "｜"
         elif abc.startswith("z") or jianpu.startswith("0"):
             surface = "[—]"
         elif abc.startswith("-") or "延音" in jianpu:
@@ -57,7 +115,9 @@ def render_rows(notes: list[dict], actions: list[dict], *, readonly: bool) -> st
             surface = "[空]" if readonly else "[减字待填写]"
         if readonly and note.get("notation_omitted"):
             surface = f"[{OMITTED_PLACEHOLDER}]"
-        lines.append(f"{index}｜{jianpu}｜{abc}｜{note.get('duration') or '-'}｜{surface}")
+        visible_index = note.get("event_index")
+        visible_index = index if visible_index is None else int(visible_index)
+        lines.append(f"{visible_index}｜{jianpu}｜{abc}｜{note.get('duration') or '-'}｜{surface}")
     if readonly and any(note.get("notation_omitted") for note in notes):
         lines.append(f"注｜标注〔{OMITTED_PLACEHOLDER}〕的音为再作省略音：仍需完整指法，最终减字谱不显示其减字。")
     return "\n".join(lines)
@@ -75,7 +135,7 @@ def render_public_prompt(item: dict) -> str:
         f"调弦｜{tuning.get('name') or '未知'}｜{tuning.get('open_midi') or []}",
         f"当前段｜{phrase_id}",
         f"泛音区间｜当前段开始时{'是' if item.get('harmonic_region_at_start') else '否'}",
-        "泛音区间提示｜常规写法：进入泛音区间时在减字开头添加“泛起”；结束时可在当前减字末尾添加“泛止”，也常在随后的延音行单独填写“泛止”，不要强行合并。",
+        "泛音区间提示｜常规写法：要进入泛音区间，在减字开头添加“泛起”；要结束泛音区间时，可在当前减字末尾添加“泛止”，也可在随后的延音行单独填写“泛止”。",
         "",
     ]
     if previous:
@@ -153,7 +213,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--input-dir", type=Path,
-        default=ROOT / "ABC_J/agent_training/inferred_v10_repeat_semantics_prompt_final",
+        # This is the canonical, tuning-validated held-out source.  Do not
+        # point this exporter at a legacy inferred_* snapshot: those files
+        # may contain open-MIDI values with tuning offsets applied twice.
+        default=ROOT / "ABC_J/agent_training/inferred_gqs_v12_tuningfix_20260914",
     )
     parser.add_argument(
         "--sealed-output-dir", type=Path,
@@ -177,6 +240,7 @@ def main() -> int:
     for split in ("validation", "test"):
         source = args.input_dir / f"inferred_trajectories_{split}.jsonl"
         rows = [json.loads(line) for line in source.read_text(encoding="utf-8").splitlines() if line.strip()]
+        event_index_maps = event_indices_by_score(rows)
         quality = {key: audit.mapped_score_record(audit.mapped_path(key)) for key in sorted({r["score_key"] for r in rows})}
         sealed_path = args.sealed_output_dir / f"evaluation_pairs_{split}.jsonl"
         public_path = args.public_output_dir / f"{split}.jsonl"
@@ -196,6 +260,9 @@ def main() -> int:
                     counts["dropped_trailing_blank_phrase"] += 1
                     continue
                 item = clip_item(original, int(cutoff) if cutoff is not None else None)
+                item = add_event_indices(
+                    item, event_index_maps[str(item["score_key"])]
+                )
                 actions = item["reference_plan"]["actions"]
                 if not any(str(a.get("jianzi_text") or "").strip() for a in actions):
                     counts["dropped_fully_blank_phrase"] += 1

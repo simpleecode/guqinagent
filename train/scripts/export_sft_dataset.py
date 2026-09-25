@@ -134,7 +134,9 @@ def build_trajectory_example(row: dict[str, Any]) -> tuple[dict[str, Any], dict[
             "content": (
                 "工具预览已通过，当前段基础减字填写完成。"
                 if stage == "fingering_agent"
-                else "工具预览已通过，当前段减字润色完成。"
+                else ("工具预览已通过，当前段最终减字填写完成。"
+                      if stage == "single_stage"
+                      else "工具预览已通过，当前段减字润色完成。")
             ),
         })
         appended_terminal_assistant = True

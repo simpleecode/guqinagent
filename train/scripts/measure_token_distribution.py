@@ -45,6 +45,10 @@ def main() -> int:
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--metadata", type=Path)
+    parser.add_argument("--over-threshold-output", type=Path,
+                        help="Optional TSV listing rows longer than --threshold.")
+    parser.add_argument("--threshold", type=int, default=8192,
+                        help="Length threshold for --over-threshold-output.")
     args = parser.parse_args()
     # Qwen3.5's multimodal processor owns the chat template.  Calling the
     # tokenizer's template directly can return a malformed/near-empty result
@@ -56,6 +60,7 @@ def main() -> int:
     if metadata_path.exists():
         metadata = [json.loads(line) for line in metadata_path.open(encoding="utf-8") if line.strip()]
     lengths: list[int] = []
+    over_threshold: list[dict[str, object]] = []
     by_stage: dict[str, list[int]] = defaultdict(list)
     maximum: tuple[int, int, dict] | None = None
     for line_number, line in enumerate(args.input.open(encoding="utf-8"), 1):
@@ -71,6 +76,15 @@ def main() -> int:
         by_stage[str(stage)].append(length)
         if maximum is None or length > maximum[0]:
             maximum = (length, line_number, row.get("metadata") or {})
+        if length > args.threshold:
+            over_threshold.append({
+                "line": line_number,
+                "tokens": length,
+                "source_sample_id": (metadata[line_number - 1].get("source_sample_id")
+                                     if line_number <= len(metadata) else None),
+                "agent_stage": (metadata[line_number - 1].get("agent_stage")
+                                if line_number <= len(metadata) else row.get("agent_stage")),
+            })
     lengths.sort()
     def quantile(q: float) -> float:
         position = (len(lengths) - 1) * q
@@ -110,6 +124,11 @@ def main() -> int:
         "by_stage": {stage: summary(values) for stage, values in by_stage.items()},
     }
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if args.over_threshold_output:
+        with args.over_threshold_output.open("w", encoding="utf-8", newline="\n") as out:
+            out.write("source_sample_id\tagent_stage\ttokens\tline\n")
+            for row in over_threshold:
+                out.write("{source_sample_id}\t{agent_stage}\t{tokens}\t{line}\n".format(**row))
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0
 

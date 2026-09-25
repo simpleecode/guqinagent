@@ -71,21 +71,43 @@ ORNAMENTS = {"吟", "猱", "撞", "逗", "往来", "复", "掐起", "带起", "�
 
 
 def parse_string_numbers(text: str) -> list[int]:
-    """Parse Arabic or Chinese string numbers from a jianzi surface text."""
-    tokens = re.findall(r"(十(?:一|二|三)?|[一二三四五六七]|[1-7])弦", text)
+    """Parse ordinary and compact string-number spellings.
+
+    Besides ``四弦七弦``, corpus shorthand such as ``四七弦`` names both
+    strings, with only the final 弦 shared.  Parse that compact sequence as
+    two separate strings rather than silently dropping the first one.
+    """
+    # “如一” is a named right-hand technique meaning two strings sound as
+    # one, not the string sequence “一”.  In forms such as
+    # “剔五弦散如一四弦”, parsing the 一 in 如一 as part of “一四弦” invents
+    # a spurious first-string note and causes a false pitch mismatch.
+    text = text.replace("如一", "")
+    matches = re.finditer(
+        r"(?P<compact>[一二三四五六七1-7]{2,})弦"
+        r"|(?P<number>十(?:一|二|三)?|[一二三四五六七1-7])弦",
+        text,
+    )
     values = []
-    for token in tokens:
-        value = ZH_NUMBERS.get(token)
-        if value is None:
-            value = int(token)
-        if 1 <= value <= 7:
-            values.append(value)
+    for match in matches:
+        tokens = list(match.group("compact")) if match.group("compact") else [match.group("number")]
+        for token in tokens:
+            value = ZH_NUMBERS.get(token)
+            if value is None:
+                value = int(token)
+            if 1 <= value <= 7:
+                values.append(value)
     return values
 
 
 def string_number(token: str) -> int:
     value = ZH_NUMBERS.get(token)
     return int(value) if value is not None else int(token)
+
+
+def parse_ruyi_open_string(text: str) -> int | None:
+    """Return the string explicitly opened by the ``散如一N弦`` suffix."""
+    match = re.search(r"散如一\s*([一二三四五六七1-7])弦", text)
+    return string_number(match.group(1)) if match else None
 
 
 def parse_li_string_sequence(text: str) -> list[int]:
@@ -120,6 +142,11 @@ def new_context() -> dict:
         "active_left_hui": None,
         "active_left_string": None,
         "left_finger": None,
+        # Per-finger stopped positions are retained separately from the
+        # immediately active position.  They are needed for releases such as
+        # 带起同声, where a left-hand finger releases while the right hand
+        # sounds a different string.
+        "left_positions": {},
         "right_hand": None,
     }
 
@@ -135,11 +162,48 @@ def normalize_context(context: dict | None) -> dict:
     context["harmonic_scope"] = bool(
         context.get("harmonic_scope") or context["harmonic"]
     )
+    if not isinstance(context.get("left_positions"), dict):
+        context["left_positions"] = {}
     return context
 
 
 def first_token(text: str, choices: tuple[str, ...]) -> str | None:
     return next((token for token in choices if token in text), None)
+
+
+def remember_left_position(
+    context: dict, string: int, hui: float | str | None,
+    finger: str | None = None,
+) -> None:
+    """Record a concrete stopped position for later left-hand releases."""
+    if hui is None:
+        return
+    resolved_finger = finger or context.get("left_finger")
+    if resolved_finger in LEFT_HAND_FINGERS:
+        context["left_positions"][str(resolved_finger)] = {
+            "string": int(string), "hui": hui,
+        }
+
+
+def release_position_for_daiqi(context: dict, text: str) -> tuple[str, int] | None:
+    """Resolve the previously stopped string released by 带起.
+
+    An explicitly named left finger wins.  Otherwise the current stopped
+    position is the musically least speculative reading; if it has already
+    been superseded, use the most recently recorded finger position.
+    """
+    requested = first_token(text, LEFT_HAND_FINGERS)
+    positions = context["left_positions"]
+    if requested and requested in positions:
+        return requested, int(positions[requested]["string"])
+    active_finger = context.get("left_finger")
+    active_string = context.get("active_left_string")
+    if active_finger in LEFT_HAND_FINGERS and active_string is not None:
+        return str(active_finger), int(active_string)
+    if positions:
+        finger = next(reversed(positions))
+        return str(finger), int(positions[finger]["string"])
+    return None
 
 
 def midi_name(value: float) -> str:
@@ -258,7 +322,7 @@ def position_pitch(
     return open_midi[string - 1] + 12 * math.log2(1 / coordinate), None
 
 
-def parse_jianzi(
+def _parse_jianzi(
     text: str, open_midi: list[float], context: dict | None = None,
 ) -> tuple[list[float], str | None]:
     context = normalize_context(context)
@@ -270,6 +334,50 @@ def parse_jianzi(
     # an ordinary 撮/剌 double stop.
     if find_compound_gesture(text):
         return [], "context_dependent_compound_gesture"
+
+    # 撮、泼、剌也可以由两个按音构成。每个括号组件都必须独立带有
+    # 弦位和按音标识；不能借用普通“按音＋散音”的简写分支，否则会把
+    # 两根按弦误判成“多个弦且徽位不明”。左手可达性另由
+    # audit_cuo_fingering_feasibility.py 判断，此处只还原两个声音。
+    double_stopped = re.search(
+        r"(?:小|大|反)?[撮泼剌]\s*[（(]([^）)]*)[）)]", text
+    )
+    if double_stopped:
+        components = [part.strip() for part in re.split(
+            r"[＋+]", double_stopped.group(1)
+        ) if part.strip()]
+        parsed_components: list[tuple[int, float | str, float, str | None]] = []
+        for component in components:
+            if "按音" not in component:
+                parsed_components = []
+                break
+            component_strings = parse_string_numbers(component)
+            component_hui = parse_hui(component)
+            if len(component_strings) != 1 or component_hui is None:
+                parsed_components = []
+                break
+            pitch, error = position_pitch(
+                component_strings[0], component_hui, open_midi, "stopped"
+            )
+            if error or pitch is None:
+                return [], error or "double_stopped_pitch_unavailable"
+            parsed_components.append((
+                component_strings[0], component_hui, pitch,
+                first_token(component, LEFT_HAND_FINGERS),
+            ))
+        if len(parsed_components) == 2:
+            # There is no single unambiguous active left-hand location after a
+            # double stop. Retaining either component here would make a later
+            # abbreviated glyph inherit a position selected arbitrarily.
+            context["sound_mode"] = "stopped"
+            context["stopped_string"] = None
+            context["stopped_hui"] = None
+            context["active_left_string"] = None
+            context["active_left_hui"] = None
+            context["left_finger"] = None
+            for string, hui, _pitch, finger in parsed_components:
+                remember_left_position(context, string, hui, finger)
+            return [part[2] for part in parsed_components], None
 
     # 爪起（亦写抓起）不是保持按位再次发声，而是承接前一个由大指
     # 按弦发出的按音：大指甲尖拨起并放开同一弦，使它转为散音。
@@ -298,6 +406,43 @@ def parse_jianzi(
         context["active_left_string"] = None
         context["active_left_hui"] = None
         context["left_finger"] = None
+        context["left_positions"].pop("大指", None)
+        return pitches, None
+
+    # 带起 releases a previously stopped string by its established left-hand
+    # finger.  With 同声/同起, that open-string release sounds together with
+    # the ordinary right-hand pluck in this glyph.  The releasing finger is
+    # not restricted to 名指: an explicitly stated 大指、中指等 takes
+    # precedence, otherwise the current left-hand position is inherited.
+    if "带起" in text:
+        release = release_position_for_daiqi(context, text)
+        if release is None:
+            return [], "daiqi_requires_previous_stopped_note"
+        released_finger, released_string = release
+        ordinary = (text.replace("带起", "").replace("同声", "")
+                    .replace("同起", "").strip())
+        pitches: list[float] = []
+        if ordinary:
+            ordinary_context = dict(context)
+            ordinary_context["left_positions"] = dict(context["left_positions"])
+            ordinary_pitches, ordinary_reason = parse_jianzi(
+                ordinary, open_midi, ordinary_context
+            )
+            if ordinary_reason is not None:
+                return [], ordinary_reason
+            pitches.extend(ordinary_pitches)
+            context["right_hand"] = ordinary_context.get("right_hand")
+        released_pitch = open_midi[released_string - 1]
+        if released_pitch not in pitches:
+            pitches.append(released_pitch)
+        context["left_positions"].pop(released_finger, None)
+        if context.get("left_finger") == released_finger:
+            context["sound_mode"] = "open"
+            context["stopped_string"] = None
+            context["stopped_hui"] = None
+            context["active_left_string"] = None
+            context["active_left_hui"] = None
+            context["left_finger"] = None
         return pitches, None
 
     ends_harmonic = "泛止" in text
@@ -322,7 +467,25 @@ def parse_jianzi(
     # early-return branch incorrectly forced every 历 into open-string mode.
     li_strings = parse_li_string_sequence(text)
     strings = li_strings or parse_string_numbers(text)
-    starts_harmonic = text.startswith("泛起")
+    ruyi_open_string = parse_ruyi_open_string(text)
+    # Prefix labels such as ``〔再作起点〕`` may appear before 泛起.  The
+    # state transition is attached to the marker, not to byte zero.
+    starts_harmonic = (
+        "泛起" in text
+        and ("泛止" not in text or text.find("泛起") < text.find("泛止"))
+    )
+    # A control glyph may carry a leading qualifier, e.g. ``停泛止``.  It
+    # has no string/pitch of its own, but it still closes the persistent
+    # 泛起…泛止 span.  Previously only the exact bare glyph ``泛止`` reached
+    # the cleanup below; ``停泛止`` returned as an unparseable no-string row
+    # and left the auditor in harmonic mode.  That disagreed with the
+    # prompt-facing marker replay, which correctly sees the embedded 泛止.
+    if ends_harmonic and not strings:
+        context["harmonic"] = False
+        context["harmonic_scope"] = False
+        context["harmonic_hui"] = None
+        context["sound_mode"] = None
+        return [], "ornament_or_control"
     # 泛起 may be a standalone control glyph.  It still opens a persistent
     # harmonic span for the notes that follow, even though this glyph itself
     # names no string and therefore produces no scalar pitch.
@@ -346,6 +509,17 @@ def parse_jianzi(
     # 浒上七徽九分, 淌九徽, or 引上七徽六分) has no new right-hand attack, but its endpoint is still a
     # definite sounding melody pitch and should be compared with the aligned
     # jianpu note.  Destination-less ornaments remain non-comparable controls.
+    # ``掐起/滔起`` may be written with a new left-hand finger and hui but
+    # without an explicit string (e.g. ``跪指五徽滔起``).  It is nevertheless
+    # a positioned continuation on the previously stopped string: its sound
+    # and the following abbreviated plucks must use that newly stated hui.
+    # Treating only the bare word ``滔起`` as a control used to leave the
+    # older hui active, producing false warnings immediately afterwards.
+    positioned_qiaqi = (
+        not strings
+        and any(gesture in text for gesture in ("掐起", "滔起"))
+        and parse_hui(text) is not None
+    )
     direction_only = (
         not strings
         and (
@@ -353,15 +527,20 @@ def parse_jianzi(
                 ("上", "下", "进", "退", "绰", "注", "浒", "淌", "引上")
             )
             or text in ORNAMENTS
+            or positioned_qiaqi
         )
     )
     if direction_only:
         destination = parse_hui(text)
         if destination is not None and context.get("active_left_string") is not None:
             active_string = int(context["active_left_string"])
+            left_finger = first_token(text, LEFT_HAND_FINGERS)
+            if left_finger is not None:
+                context["left_finger"] = left_finger
             context["stopped_hui"] = destination
             context["active_left_hui"] = destination
             context["sound_mode"] = "stopped"
+            remember_left_position(context, active_string, destination, left_finger)
             pitch, error = position_pitch(
                 active_string, destination, open_midi, "stopped"
             )
@@ -384,9 +563,43 @@ def parse_jianzi(
         r"[撮泼剌]\（?（?[^）]*?"
         r"(?P<hui>(?:十三|十二|十一|十|九|八|七|六|五|四|三|二|一)徽"
         r"(?:(?:一|二|三|四|五|六|七|八|九)分)?|徽外半|徽外)"
-        r"(?P<stopped>[一二三四五六七1-7])弦按音[＋+](?P<open>[一二三四五六七1-7])弦散音",
+        r"(?P<stopped>[一二三四五六七1-7])弦(?:按音)?[＋+](?P<open>[一二三四五六七1-7])弦散音",
         text,
     )
+    # The corpus also uses the musically equivalent order “散音＋按音”,
+    # especially for 撮.  Keep the same named captures so downstream pitch
+    # and left-hand-state handling is identical to the canonical order.
+    if compound is None:
+        compound = re.search(
+            r"[撮泼剌]\（?（?[^）]*?"
+            r"(?P<open>[一二三四五六七1-7])弦散音[＋+]"
+            r"(?:[^）]*?)"
+            r"(?P<hui>(?:十三|十二|十一|十|九|八|七|六|五|四|三|二|一)徽"
+            r"(?:(?:一|二|三|四|五|六|七|八|九)分)?|徽外半|徽外)"
+            r"(?P<stopped>[一二三四五六七1-7])弦(?:按音)?",
+            text,
+        )
+    # Some generated and historical rows put the stopped string before its
+    # hui: “一弦七徽按音”.  Accept it in either compound-component order.
+    if compound is None:
+        compound = re.search(
+            r"[撮泼剌]\（?（?[^）]*?"
+            r"(?P<stopped>[一二三四五六七1-7])弦"
+            r"(?P<hui>(?:十三|十二|十一|十|九|八|七|六|五|四|三|二|一)徽"
+            r"(?:(?:一|二|三|四|五|六|七|八|九)分)?|徽外半|徽外)(?:按音)?"
+            r"[＋+](?P<open>[一二三四五六七1-7])弦散音",
+            text,
+        )
+    if compound is None:
+        compound = re.search(
+            r"[撮泼剌]\（?（?[^）]*?"
+            r"(?P<open>[一二三四五六七1-7])弦散音[＋+]"
+            r"(?:[^）]*?)"
+            r"(?P<stopped>[一二三四五六七1-7])弦"
+            r"(?P<hui>(?:十三|十二|十一|十|九|八|七|六|五|四|三|二|一)徽"
+            r"(?:(?:一|二|三|四|五|六|七|八|九)分)?|徽外半|徽外)(?:按音)?",
+            text,
+        )
     if compound:
         hui = parse_hui(compound.group("hui"))
         if hui is None:
@@ -408,6 +621,7 @@ def parse_jianzi(
         context["stopped_hui"] = hui
         context["active_left_string"] = stopped_string
         context["active_left_hui"] = hui
+        remember_left_position(context, stopped_string, hui)
         context["sound_mode"] = None
         return ([stopped, opened] if error is None else []), error
 
@@ -426,7 +640,11 @@ def parse_jianzi(
         context["active_left_hui"] = None
         if hui is not None:
             context["harmonic_hui"] = hui
-    explicit_open = "散" in text and not starts_harmonic
+    # In “剔五弦散如一四弦”, 散 modifies only the 如一 partner (4弦).
+    # The first string keeps the inherited stopped position.
+    explicit_open = (
+        "散" in text and not starts_harmonic and ruyi_open_string is None
+    )
     explicit_left = hui is not None or any(
         finger in text for finger in LEFT_HAND_FINGERS
     )
@@ -464,10 +682,11 @@ def parse_jianzi(
 
     pitches = []
     for string in strings:
-        effective_hui = hui
-        if effective_hui is None and mode == "harmonic":
+        string_mode = "open" if string == ruyi_open_string else mode
+        effective_hui = None if string_mode == "open" else hui
+        if effective_hui is None and string_mode == "harmonic":
             effective_hui = context["harmonic_hui"]
-        elif effective_hui is None and mode == "stopped":
+        elif effective_hui is None and string_mode == "stopped":
             # Jianzipu commonly omits the left-hand position while it remains
             # on the same string. “就” explicitly permits the current position
             # to be reused when the newly plucked string is different.
@@ -475,13 +694,15 @@ def parse_jianzi(
                 effective_hui = context.get("active_left_hui")
             if uses_current_position and effective_hui is None:
                 return [], "current_stopped_position_missing"
-        if mode == "harmonic" and effective_hui is None:
+        if string_mode == "harmonic" and effective_hui is None:
             return [], "harmonic_hui_missing"
-        pitch, error = position_pitch(string, effective_hui, open_midi, mode)
+        pitch, error = position_pitch(
+            string, effective_hui, open_midi, string_mode
+        )
         if error:
             return [], error
         pitches.append(pitch)
-        if mode == "harmonic":
+        if string_mode == "harmonic":
             context["harmonic_hui"] = effective_hui
         elif effective_hui is not None:
             context["sound_mode"] = "stopped"
@@ -489,12 +710,50 @@ def parse_jianzi(
             context["stopped_hui"] = effective_hui
             context["active_left_string"] = string
             context["active_left_hui"] = effective_hui
+            remember_left_position(context, string, effective_hui)
     if ends_harmonic_after_note:
         context["harmonic"] = False
         context["harmonic_scope"] = False
         context["harmonic_hui"] = None
         context["sound_mode"] = None
     return pitches, None
+
+
+def parse_jianzi(
+    text: str, open_midi: list[float], context: dict | None = None,
+) -> tuple[list[float], str | None]:
+    """Parse one glyph and always commit its trailing harmonic transition.
+
+    Several specialised branches (撮双音、带起、爪起等) return before the
+    ordinary single-string tail.  A trailing ``泛止`` is nevertheless a state
+    transition after that glyph, so make it a wrapper-level invariant instead
+    of relying on every branch to remember the same cleanup.
+    """
+    normalized = normalize_context(context)
+    compact = str(text or "").strip()
+    # Commit a leading 泛起 before delegating to specialised parsers.  In
+    # particular, the double-stopped branch returns before the normal
+    # single-string state update, while corpus glyphs such as
+    # ``泛起撮（…）`` still open a harmonic span.  Bracketed control labels
+    # may precede 泛起, so rely on marker order rather than startswith().
+    start_at = compact.find("泛起")
+    stop_at = compact.find("泛止")
+    if start_at >= 0 and (stop_at < 0 or start_at < stop_at):
+        normalized["harmonic"] = True
+        normalized["harmonic_scope"] = True
+        normalized["sound_mode"] = "harmonic"
+        marker_hui = parse_hui(compact)
+        if marker_hui is not None:
+            normalized["harmonic_hui"] = marker_hui
+        normalized["active_left_string"] = None
+        normalized["active_left_hui"] = None
+    pitches, reason = _parse_jianzi(text, open_midi, normalized)
+    if "泛止" in compact and not compact.startswith("泛止"):
+        normalized["harmonic"] = False
+        normalized["harmonic_scope"] = False
+        normalized["harmonic_hui"] = None
+        normalized["sound_mode"] = None
+    return pitches, reason
 
 
 def best_pairing(expected: list[float], actual: list[float]) -> list[dict]:
@@ -593,6 +852,33 @@ def audit(data: dict, tolerance_cents: float) -> dict:
             row.update(status="skipped", reason="no_sounding_jianpu")
         elif reason:
             row.update(status="skipped", reason=reason)
+        elif any(gesture in text for gesture in ("应合", "放合")) and len(expected) == 2:
+            # These compound gestures can encode a coordinated two-note event
+            # while the surface parse only exposes one independently verifiable
+            # pitch (or the two strings are intended to merge as one sound).
+            # Accept when any parsed member matches either written pitch.
+            candidates = [
+                {
+                    "expected": target,
+                    "actual": value,
+                    "delta_cents": round((value - target) * 100, 3),
+                    "absolute_cents": round(abs(value - target) * 100, 3),
+                }
+                for target in expected for value in actual
+            ]
+            best = min(candidates, key=lambda pair: pair["absolute_cents"])
+            matched = best["absolute_cents"] <= tolerance_cents
+            gesture = next(name for name in ("应合", "放合") if name in text)
+            reason_prefix = {"应合": "yinghe", "放合": "fanghe"}[gesture]
+            row.update(
+                status="matched" if matched else "mismatched",
+                reason=f"{reason_prefix}_single_pitch_match" if matched
+                else f"{reason_prefix}_no_pitch_match",
+                pairs=[best],
+                expected_pitch_count=len(expected),
+                actual_pitch_count=len(actual),
+            )
+            pair_errors.append(best["absolute_cents"])
         elif len(expected) != len(actual):
             # Single-symbol rows whose jianzi sounds several strings are the
             # corpus's "main note + implied partner" shorthand, not added

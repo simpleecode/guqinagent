@@ -11,7 +11,7 @@ Usage (repo root, guqin-agent env):
   python scripts/run_teacher_generation_parallel.py \
       --workers 4 \
       --output-dir ABC_J/agent_training/messages_pilot_v1 \
-      -- --basic-intermediate --limit 40 \
+      -- --basic-intermediate \
          --max-tool-rounds 24 --max-attempts 2
 
 Everything after `--` is passed through to the generator verbatim. Pass pilot

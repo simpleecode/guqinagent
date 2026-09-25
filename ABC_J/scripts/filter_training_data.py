@@ -116,11 +116,12 @@ def cmd_pitch_select(args: argparse.Namespace) -> None:
         for item in read_jsonl(path):
             total += 1
             result = canonical_pitch_class(item)
-            keep = bool(result["parseable_and_at_least_one_match"]) if args.require_match else bool(result["no_parseable_pitch"] or result["parseable_and_at_least_one_match"])
+            strict_match = bool(result["parseable_and_at_least_two_matches_or_half_matched"])
+            keep = strict_match if args.require_match else bool(result["no_parseable_pitch"] or strict_match)
             if keep: selected.append(str(item["trajectory_id"]))
     args.output_dir.mkdir(parents=True, exist_ok=True)
     (args.output_dir / "pitch_eligible_phrase_ids.txt").write_text("".join(f"{value}\n" for value in selected), encoding="utf-8")
-    payload = {"schema_version": "training-data-filter-1.0", "rule": "pitch_eligible", "inputs": {"inferred_dir": str(args.inferred_dir), "splits": args.splits}, "require_match": args.require_match, "source_phrase_count": total, "selected_phrase_count": len(selected)}
+    payload = {"schema_version": "training-data-filter-1.1", "rule": "pitch_eligible_at_least_two_or_half", "inputs": {"inferred_dir": str(args.inferred_dir), "splits": args.splits}, "require_match": args.require_match, "source_phrase_count": total, "selected_phrase_count": len(selected), "eligibility": "至少两个可解析音高匹配，或匹配数不少于可解析音的一半"}
     (args.output_dir / "selection_manifest.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(payload, ensure_ascii=False))
 
@@ -232,7 +233,7 @@ def cmd_apply_source_audit(args: argparse.Namespace) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__); sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("source-audit", help="审计低覆盖率与连续空尾"); p.add_argument("--source", type=Path, required=True); p.add_argument("--output", type=Path, required=True); p.set_defaults(func=cmd_source_audit)
-    p = sub.add_parser("pitch-select", help="选择至少一音命中的 phrase"); p.add_argument("--inferred-dir", type=Path, required=True); p.add_argument("--splits", nargs="+", choices=("train", "validation", "test"), default=("train",)); p.add_argument("--require-match", action="store_true"); p.add_argument("--output-dir", type=Path, required=True); p.set_defaults(func=cmd_pitch_select)
+    p = sub.add_parser("pitch-select", help="选择至少两音匹配或覆盖可解析音一半的 phrase"); p.add_argument("--inferred-dir", type=Path, required=True); p.add_argument("--splits", nargs="+", choices=("train", "validation", "test"), default=("train",)); p.add_argument("--require-match", action="store_true"); p.add_argument("--output-dir", type=Path, required=True); p.set_defaults(func=cmd_pitch_select)
     p = sub.add_parser("basic-blank-audit", help="检测基础单发后连续空减字"); p.add_argument("--source", type=Path, required=True); p.add_argument("--output", type=Path, required=True); p.add_argument("--min-following-blanks", type=int, default=5); p.set_defaults(func=cmd_basic_blank_audit)
     p = sub.add_parser("filter-corpus", help="按 phrase ID 成对移除教师轨迹"); p.add_argument("--input", type=Path, required=True); p.add_argument("--exclude", type=Path, action="append", required=True); p.add_argument("--output", type=Path, required=True); p.set_defaults(func=cmd_filter_corpus)
     p = sub.add_parser("apply-source-audit", help="应用低覆盖率与连续空尾源谱规则"); p.add_argument("--audit", type=Path, required=True); p.add_argument("--old-dir", type=Path, required=True); p.add_argument("--rebuilt-dir", type=Path, required=True); p.add_argument("--output", type=Path, required=True); p.set_defaults(func=cmd_apply_source_audit)

@@ -188,6 +188,24 @@ class WalkConstraintTable:
             key=lambda note: int(note["index"]),
         )
 
+        # Public tool calls address the continuous event sequence, whereas
+        # ``index`` is a sparse source-row id (it includes bar lines).  The
+        # latter must never be used as the decoder-facing key: after a bar it
+        # would apply another note's pitch surface to a model edit.
+        missing_event_indices = [
+            int(note["index"])
+            for note in notes
+            if not (str(note.get("abc") or "").strip() == "|"
+                    or str(note.get("jianpu") or "").strip() == "|"
+                    or note.get("duration") == "小节线")
+            and note.get("event_index") is None
+        ]
+        if missing_event_indices:
+            raise ValueError(
+                "walk constraints require event_index for every non-bar note; "
+                f"missing source_index={missing_event_indices}"
+            )
+
         # Replay the current plan in musical order to snapshot the inherited
         # left-hand string at every note.
         context = new_context()
@@ -212,14 +230,15 @@ class WalkConstraintTable:
         self.initial_live_hui: dict[int, float | str | None] = {}
         self.by_string: dict[int, dict[int, frozenset[str]]] = {}
         for note in notes:
-            # ``edit_plan.jianzi_rows`` addresses source/note indices, not
-            # the optional event_index.  The public text-protocol evaluation
-            # inputs intentionally omit event_index, so keying this table by
-            # it silently discarded every candidate endpoint at inference.
-            # Use ``index`` consistently for both the table and the logits
-            # processor's row_index lookup.
+            # ``edit_plan.jianzi_rows`` addresses continuous event indices.
+            # Keep source ``index`` only for looking up the corresponding
+            # Base text and replay state.
             index = int(note["index"])
-            event = index
+            event_value = note.get("event_index")
+            if event_value is None:
+                # A bar line is not editable and has no decoder-facing row.
+                continue
+            event = int(event_value)
             position = own_position(base_text.get(index))
             # Clause 1: identical to the Base stage's position.
             anchors: set[str] = set()

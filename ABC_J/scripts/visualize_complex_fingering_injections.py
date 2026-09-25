@@ -71,7 +71,7 @@ q.addEventListener('input',render);mode.addEventListener('change',render);split.
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input", type=Path, default=ROOT / "ABC_J/agent_training/inferred_gqs_v12/inferred_trajectories_all.jsonl")
+    parser.add_argument("--input", type=Path, default=ROOT / "ABC_J/agent_training/inferred_gqs_v12_tuningfix_20260914/inferred_trajectories_all.jsonl")
     parser.add_argument("--output", type=Path, default=ROOT / "ABC_J/agent_training/complex_fingering_injection_review_v3_20260909.html")
     args = parser.parse_args()
     records, counts = collect(args.input)

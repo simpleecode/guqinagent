@@ -39,6 +39,24 @@ class AuditPitchTests(unittest.TestCase):
         self.assertEqual([p["jianpu_name"] for p in pairs], ["F3", "A4"])
         self.assertTrue(all(p["absolute_cents"] < 50 for p in pairs))
 
+    def test_compound_accepts_open_then_stopped_order(self):
+        text = "撮（六弦散音＋七徽一弦按音）"
+        pitches, reason = MODULE.parse_jianzi(text, self.opens)
+        self.assertIsNone(reason)
+        self.assertEqual(len(pitches), 2)
+
+    def test_compound_accepts_implicit_stopped_component(self):
+        text = "撮（六弦散音＋中指七徽一弦）"
+        pitches, reason = MODULE.parse_jianzi(text, self.opens)
+        self.assertIsNone(reason)
+        self.assertEqual(len(pitches), 2)
+
+    def test_compound_accepts_string_then_hui_component(self):
+        text = "撮（六弦散音＋一弦七徽按音）"
+        pitches, reason = MODULE.parse_jianzi(text, self.opens)
+        self.assertIsNone(reason)
+        self.assertEqual(len(pitches), 2)
+
     def test_compound_accepts_chinese_string_numbers_and_keeps_stopped_state(self):
         context = MODULE.new_context()
         pitches, reason = MODULE.parse_jianzi(
@@ -57,6 +75,27 @@ class AuditPitchTests(unittest.TestCase):
         self.assertEqual(pitches, [])
         self.assertEqual(reason, "context_dependent_slide")
 
+    def test_positioned_taoqi_updates_inherited_position_for_following_plucks(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("大指四徽六分挑7弦", self.opens, context)
+
+        taoqi, reason = MODULE.parse_jianzi("跪指五徽滔起", self.opens, context)
+        expected_taoqi, _ = MODULE.position_pitch(7, 5.0, self.opens, "stopped")
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(taoqi[0], expected_taoqi)
+        self.assertEqual(context["active_left_string"], 7)
+        self.assertEqual(context["active_left_hui"], 5.0)
+        self.assertEqual(context["left_finger"], "跪指")
+
+        inherited_sixth, reason = MODULE.parse_jianzi("就勾6弦", self.opens, context)
+        expected_sixth, _ = MODULE.position_pitch(6, 5.0, self.opens, "stopped")
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(inherited_sixth[0], expected_sixth)
+
+        inherited_seventh, reason = MODULE.parse_jianzi("挑7弦", self.opens, context)
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(inherited_seventh[0], expected_taoqi)
+
     def test_zhi_string_transition_is_skipped(self):
         pitches, reason = MODULE.parse_jianzi("至5弦", self.opens)
         self.assertEqual(pitches, [])
@@ -71,6 +110,42 @@ class AuditPitchTests(unittest.TestCase):
         pitches, reason = MODULE.parse_jianzi("散托七弦", self.opens)
         self.assertIsNone(reason)
         self.assertEqual(pitches, [62])
+
+    def test_compact_chinese_string_numbers_share_trailing_xian(self):
+        self.assertEqual(MODULE.parse_string_numbers("散撮四七弦"), [4, 7])
+        pitches, reason = MODULE.parse_jianzi("散撮四七弦", self.opens)
+        self.assertIsNone(reason)
+        self.assertEqual(pitches, [55, 62])
+
+    def test_ruyi_is_not_parsed_as_string_one(self):
+        self.assertEqual(MODULE.parse_string_numbers("剔五弦散如一四弦"), [5, 4])
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("名指七徽六分勾五弦", self.opens, context)
+        pitches, reason = MODULE.parse_jianzi(
+            "剔五弦散如一四弦", self.opens, context
+        )
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(pitches[0], 67.038015, places=5)
+        self.assertEqual(pitches[1], 55)
+        self.assertEqual(context["active_left_string"], 5)
+        self.assertEqual(context["active_left_hui"], 7.6)
+
+    def test_compact_double_open_string_chord_audits_both_written_pitches(self):
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=G"},
+            "open_midi": self.opens,
+            "notes": [{
+                "index": 407,
+                "jianpu": "1̣",
+                "jianpu_alt": "5̣",
+                "jianzi": "散撮四七弦",
+            }],
+        }, 50.0)
+        self.assertEqual(report["details"][0]["status"], "matched")
+        self.assertEqual(
+            [pair["absolute_cents"] for pair in report["details"][0]["pairs"]],
+            [0.0, 0.0],
+        )
 
     def test_explicit_stopped_note_overrides_harmonic_scope_for_one_event(self):
         context = MODULE.new_context()
@@ -170,6 +245,30 @@ class AuditPitchTests(unittest.TestCase):
         self.assertEqual(
             reason, "zhuaqi_requires_previous_thumb_stopped_note"
         )
+
+    def test_daiqi_tongsheng_releases_previous_thumb_and_sounds_right_hand_note(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("大指九徽勾5弦", self.opens, context)
+        pitches, reason = MODULE.parse_jianzi(
+            "散挑7弦带起同声", self.opens, context
+        )
+        self.assertIsNone(reason)
+        self.assertEqual(pitches, [62, 57])
+        self.assertIsNone(context["active_left_string"])
+        self.assertNotIn("大指", context["left_positions"])
+
+    def test_daiqi_can_release_previous_middle_finger(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("中指九徽勾5弦", self.opens, context)
+        pitches, reason = MODULE.parse_jianzi("带起", self.opens, context)
+        self.assertIsNone(reason)
+        self.assertEqual(pitches, [57])
+        self.assertNotIn("中指", context["left_positions"])
+
+    def test_daiqi_without_stopped_context_is_unresolved(self):
+        pitches, reason = MODULE.parse_jianzi("散挑7弦带起同声", self.opens)
+        self.assertEqual(pitches, [])
+        self.assertEqual(reason, "daiqi_requires_previous_stopped_note")
 
     def test_li_compact_surface_emits_ordered_open_strings(self):
         for text in ("历四三", "历四、三弦", "厉四三"):
@@ -440,6 +539,89 @@ class AuditPitchTests(unittest.TestCase):
         detail = report["details"][0]
         self.assertEqual(detail["status"], "matched")
         self.assertEqual(detail.get("reason"), "single_symbol_multivoice_main_note")
+
+    def test_yinghe_with_two_written_pitches_passes_if_one_pitch_matches(self):
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=G"},
+            "open_midi": self.opens,
+            "notes": [{
+                "index": 323,
+                "jianpu": "1̣",
+                "jianpu_alt": "1",
+                "jianzi": "大指七徽六分勾五弦应合",
+            }],
+        }, 50.0)
+        detail = report["details"][0]
+        self.assertEqual(detail["status"], "matched")
+        self.assertEqual(detail["reason"], "yinghe_single_pitch_match")
+        self.assertEqual(detail["expected_pitch_count"], 2)
+        self.assertEqual(detail["actual_pitch_count"], 1)
+        self.assertLessEqual(detail["pairs"][0]["absolute_cents"], 50.0)
+
+    def test_yinghe_still_warns_when_neither_written_pitch_matches(self):
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=G"},
+            "open_midi": self.opens,
+            "notes": [{
+                "index": 323,
+                "jianpu": "2̣",
+                "jianpu_alt": "3",
+                "jianzi": "大指七徽六分勾五弦应合",
+            }],
+        }, 50.0)
+        detail = report["details"][0]
+        self.assertEqual(detail["status"], "mismatched")
+        self.assertEqual(detail["reason"], "yinghe_no_pitch_match")
+
+    def test_fanghe_accepts_one_match_and_ruyi_inherits_first_string_position(self):
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=C"},
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 58, "jianpu": "5̣", "jianpu_alt": "5",
+                 "jianzi": "名指七徽六分勾五弦放合"},
+                {"index": 59, "jianpu": "5̣", "jianpu_alt": "5",
+                 "jianzi": "剔五弦散如一四弦"},
+            ],
+        }, 50.0)
+        self.assertEqual(
+            [row["status"] for row in report["details"]],
+            ["matched", "matched"],
+        )
+        self.assertEqual(report["details"][0]["reason"], "fanghe_single_pitch_match")
+        self.assertIsNone(report["details"][1].get("reason"))
+        self.assertEqual(
+            [pair["absolute_cents"] for pair in report["details"][1]["pairs"]],
+            [0.0, 3.802],
+        )
+
+    def test_fanghe_still_warns_when_neither_pitch_matches(self):
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=C"},
+            "open_midi": self.opens,
+            "notes": [{
+                "index": 1, "jianpu": "2̣", "jianpu_alt": "3",
+                "jianzi": "名指七徽六分勾五弦放合",
+            }],
+        }, 50.0)
+        detail = report["details"][0]
+        self.assertEqual(detail["status"], "mismatched")
+        self.assertEqual(detail["reason"], "fanghe_no_pitch_match")
+
+    def test_ruyi_requires_the_inherited_and_open_pitches_to_match(self):
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=C"},
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "5",
+                 "jianzi": "名指七徽六分勾五弦"},
+                {"index": 2, "jianpu": "2̣", "jianpu_alt": "3",
+                 "jianzi": "剔五弦散如一四弦"},
+            ],
+        }, 50.0)
+        detail = report["details"][1]
+        self.assertEqual(detail["status"], "mismatched")
+        self.assertTrue(any(pair["absolute_cents"] > 50 for pair in detail["pairs"]))
 
     def test_single_symbol_cuo_with_no_matching_member_still_fails(self):
         # 两个成员都不匹配谱字（5=67 vs 60/48）：仍按数量不匹配报错。

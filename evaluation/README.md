@@ -33,10 +33,14 @@ by Git. Prediction JSONL may be append-only: the last row for each
   primary fingering fields. Missing reference values are excluded rather than
   treated as negatives.
 * **Ornament P/R/F1**: micro set comparison of parsed `techniques` per event.
-* **Technique Usage Statistics**: for every parsed technique, its predicted
-  and reference event incidence, each divided by all evaluated events, plus
-  the predicted-minus-reference event-count delta. Repeating a technique in
-  one event still counts once.
+* **Technique Usage Statistics**: for every parsed technique,
+  `prediction_events` / `reference_events` count note events containing that
+  technique (not textual occurrences). `prediction_rate` /
+  `reference_rate` divide those counts by all valid note events, and
+  `rate_delta = prediction_rate - reference_rate`. Repeating a technique in
+  one event still counts once. `technique_density` reports the same event
+  incidence and rates for “contains at least one technique”, making an
+  overall overly-plain / overly-dense prediction easy to spot.
 * **Rule violation rate**: unique events with a deterministic parser-backed
   violation divided by pitch-evaluable events. Initial violations are pitch
   mismatch and unequivocal unresolvable/unplayable parser states.

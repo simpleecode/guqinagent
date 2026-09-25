@@ -168,8 +168,8 @@ class BuildConstraintsTest(unittest.TestCase):
         self.assertIn("徽外", table.allowed_for(2, table.initial_live.get(2)))
         self.assertEqual(table.initial_live.get(2), 6)
 
-    def test_constraints_use_source_index_when_event_index_is_absent(self):
-        """Public evaluation inputs omit event_index but edit_plan uses index."""
+    def test_constraints_require_event_index_for_non_bar_notes(self):
+        """The public tool protocol has no source-index fallback."""
         item = {
             "input": {
                 "metadata": {"tonic": "1=C"},
@@ -182,9 +182,29 @@ class BuildConstraintsTest(unittest.TestCase):
                 {"source_index": 42, "jianzi_text": "名指九徽勾五弦"},
             ]},
         }
+        with self.assertRaisesRegex(ValueError, "require event_index"):
+            build_walk_constraints(item)
+
+    def test_constraints_key_by_event_index_across_bar_lines(self):
+        """A source-row gap from a bar must not shift decoder constraints."""
+        item = {
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "2", "abc": "D"},
+                    {"index": 1, "event_index": None, "jianpu": "|", "abc": "|", "duration": "小节线"},
+                    {"index": 2, "event_index": 1, "jianpu": "7", "abc": "B"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "名指九徽勾五弦"},
+                {"source_index": 2, "jianzi_text": "大指七徽三分挑六弦"},
+            ]},
+        }
         table = build_walk_constraints(item)
-        self.assertIn("九徽", table.allowed_for(42, None))
-        self.assertNotIn(None, table.static)
+        self.assertIn("七徽三分", table.allowed_for(1, table.initial_live.get(1)))
+        self.assertNotIn("九徽", table.allowed_for(1, table.initial_live.get(1)))
 
     def test_in_call_rows_update_the_live_string(self):
         # Rows the model has already completed inside the SAME tool call are

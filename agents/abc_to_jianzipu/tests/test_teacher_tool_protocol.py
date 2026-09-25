@@ -24,6 +24,15 @@ class TeacherToolProtocolTests(unittest.TestCase):
         )
         self.assertEqual(payload["tool_calls"][0]["name"], "get_pitch_candidates")
 
+    def test_private_reasoning_is_accepted_but_discarded_from_envelope(self) -> None:
+        payload = parse_teacher_envelope(
+            '{"tool_turn":{"private_reasoning":"私有标注建议检查这一音。",'
+            '"decision_summary":"核对当前音的候选。","tool_calls":['
+            '{"name":"get_pitch_candidates","arguments":{"source_indices":[1]}}]}}'
+        )
+        self.assertEqual(payload["decision_summary"], "核对当前音的候选。")
+        self.assertNotIn("private_reasoning", payload)
+
     def test_prefixed_reasoning_and_calls_only_json_is_recovered(self) -> None:
         payload = parse_teacher_envelope(
             '【公开思考】\n先核对当前音与前段的衔接。\n【工具调用】\n'
@@ -161,6 +170,18 @@ class TeacherToolProtocolTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_teacher_envelope(
                 '{"decision_summary":"查询。" "tool_calls":[]}'
+            )
+
+    def test_more_than_five_tool_calls_in_one_turn_are_rejected(self) -> None:
+        with self.assertRaises(ValueError):
+            parse_teacher_envelope(
+                '{"decision_summary":"查询。","tool_calls":['
+                '{"name":"list_context","arguments":{}},'
+                '{"name":"list_context","arguments":{}},'
+                '{"name":"list_context","arguments":{}},'
+                '{"name":"list_context","arguments":{}},'
+                '{"name":"list_context","arguments":{}},'
+                '{"name":"list_context","arguments":{}}]}'
             )
 
 

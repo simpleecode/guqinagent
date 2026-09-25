@@ -459,12 +459,12 @@ check_scale_resources → submit_tuning）；改弦曲的区分度待 176 条全
   --input ABC_J\agent_training\inferred_v6\inferred_trajectories_train.jsonl `
   --basic-intermediate `
   --trajectory-id S0tu8BXC-p0019 `
-  --limit 1 --max-tool-rounds 24 --max-attempts 3 `
+  --max-tool-rounds 24 --max-attempts 3 `
   --output-dir ABC_J\agent_training\messages_prompt_review_v24
 ```
 
 pilot 生成（pilot ID 清单来自 `ABC_J\agent_training\pilot_sampling\pilot_ids.txt`；当前 Token Plan
-先用单线程，且必须显式传 ID，不能在 4 个 shard 后各自 `--limit 40`，否则会最多选中 160 条）：
+先用单线程，且必须显式传 ID）：
 
 ```powershell
 $pilotArgs = Get-Content ABC_J\agent_training\pilot_sampling\pilot_ids.txt |
@@ -473,7 +473,7 @@ $pilotArgs = Get-Content ABC_J\agent_training\pilot_sampling\pilot_ids.txt |
 & 'D:\Program Files\miniconda\envs\guqin-agent\python.exe' `
   scripts\generate_teacher_tool_trajectories.py `
   --input ABC_J\agent_training\inferred_v6\inferred_trajectories_train.jsonl `
-  --basic-intermediate --limit 40 --max-tool-rounds 24 --max-attempts 3 `
+  --basic-intermediate --max-tool-rounds 24 --max-attempts 3 `
   @pilotArgs --output-dir ABC_J\agent_training\messages_pilot_next
 ```
 
@@ -513,8 +513,8 @@ $env:HF_HUB_OFFLINE='1'; $env:TRANSFORMERS_OFFLINE='1'
   -o ABC_J\agent_training\messages_pilot_v44_final\teacher_io_viewer.html
 ```
 
-批量生成前，应先选定独立输出目录并小批量检查失败样本；不要覆盖已有验证目录。`--limit`、
-`--trajectory-id` 可用于分批与断点调查；已有 Fingering 中间体可通过 `--intermediate-input` 续跑
+批量生成前，应先选定独立输出目录并小批量检查失败样本；不要覆盖已有验证目录。`--trajectory-id`
+可用于分批与断点调查；已有 Fingering 中间体可通过 `--intermediate-input` 续跑
 Guqinizer。
 
 ## 9. 已知限制与下一步
@@ -1219,9 +1219,9 @@ Guqinizer。
   `ABC_J/agent_training/messages_batch_glm_40_repeat_prompt_text_jianzi_quality_filtered_minimal_merged_v1/`：
   共 9,008 条（Fingering 4,714、Guqinizer 4,294），公开/私有 ID 对齐。该目录仍含原始私有
   reasoning，不能直接训练；需按既定流程脱敏后再导出 SFT。
-- 首次误用默认 `--limit=2` 的连接失败审计保留在
-  `messages_quality_filter_minimal_retry_v1_fingering/`，不计入最终合并结果；后续重跑已显式
-  `--limit=11` 并使用网络授权完成。
+- 曾因生成器默认截断而产生的连接失败审计保留在
+  `messages_quality_filter_minimal_retry_v1_fingering/`，不计入最终合并结果；生成器现已移除
+  `--limit`，只按显式 ID、分片或输入池选择工作量。
 
 ## 7.103 教师候选按最小过滤推理集对齐（2026-08-30）
 
@@ -2098,3 +2098,73 @@ Guqinizer。
   掩码步 228→317、0 违规 0 回退。终稿口径 guq 错 4→12：修复封闭了逃逸口后，原本"以垃圾文本
   逃过审计"的行转为真实减字（不可解析/超差计入显式错误），错误可见性上升而非质量下降；
   base 0→2 为轨迹波动。视图：`walk_constraint_debug/S2T7rDyJ_r2_escapefix_view.html`。
+
+## 7.168 GLM 教师重跑的网络与限流排查（2026-09-23）
+
+- 场景：重跑 `SaljUbT2` 全部 122 个 phrase 的 Fingering + Guqinizer，以使历史 `edit_plan` 审计
+  与当前音高审计器一致。8 路、零间隔运行出现大量失败。
+- 实测：在实际网络环境中，对 `.env` 的 `GLM_BASE_URL` 进行探测，**直连**（`curl --noproxy '*'`）
+  与当前环境的**代理路径**均返回 HTTP 200，连接约 0.002 秒、总耗时约 0.10 秒。因此 GLM 网络
+  可达，代理不是必要条件，也不是本次 API error 的根因。受限沙箱内曾出现直连 DNS 无法解析、默认
+  代理 `127.0.0.1:7897` 连接失败；该现象不代表实际执行环境，不能据此判断生产网络不可用。
+- 失败证据：8 路日志中的主因是 GLM `RateLimitError 429`、代码 `1302`（账户请求速率限制），不是
+  `APIConnectionError`/DNS/timeout；另有少量模型输出未满足教师 envelope（缺 JSON、或
+  `tool_calls` 结构错误）。每个 worker 各自退避，8 路同时恢复会形成重试尖峰，进一步触发 429。
+- 推荐：教师批量生成默认显式**禁用代理**，即在启动命令中设置
+  `HTTP_PROXY= HTTPS_PROXY= ALL_PROXY= http_proxy= https_proxy= all_proxy= NO_PROXY=* no_proxy=*`；
+  并使用全局受控的 2–3 路并发/节流。仅靠每 worker 的 `_RateLimitedMessages` 是进程内限速，不能
+  限制多进程总 QPS；若以后仍需 7–8 路，应先实现跨进程共享限速器和 429 全局 cooldown，而不要仅
+  把 `--min-interval` 设为 0。
+- 当前运行：此前各轮累计已有 61 条两阶段成功产物保留；其余 61 条正在无代理 5 路任务
+  `ABC_J/agent_training/pitch_eligible_two_or_half_SaljUbT2_auditrefresh_20260923_retry5/` 中断点重跑，
+  screen 名 `saljubt2_auditrefresh_5way_20260923`。总控日志仅记录 worker 启停；应 tail
+  `.parallel_workers/worker_*/worker.log` 查看每个 phrase 与 transient retry。生成器已补充重试日志：
+  今后每条 transient 日志会携带 `cause=<异常类型和详情>`，不再只显示笼统标签。
+- 全量启动（同日）：用户要求覆盖当前 `pitch_eligible_gqs_v12_train` 的**全部**曲谱；输入冻结为
+  176 首、4,691 phrase。任务目录
+  `ABC_J/agent_training/pitch_eligible_two_or_half_all_scores_auditrefresh_20260923_raw/`，screen
+  `all_scores_auditrefresh_5way_20260923`。使用 5 个 worker（958/921/901/963/948 phrase），显式无代理。
+  为避免每 worker 独立退避导致的 429 尖峰，生成器 `_RateLimitedMessages` 新增可选跨进程锁文件
+  （`GLM_GLOBAL_RATE_LIMIT_STATE`）和全局请求启动间隔（当前 `GLM_GLOBAL_MIN_INTERVAL=0.35` 秒）；
+  轨迹仍按 phrase 并发，只有 API 请求被全局错开，支持断点续跑。
+
+## 7.169 J00124：GLM harmonic-parse-fix 终版 SFT（2026-09-24）
+
+- Jobber `J00124` 已在实验室服务器 `219.216.65.119` 成功完成：4×RTX 3090，
+  `cutoff_len=8192`、单卡 batch 1、梯度累积 2、有效 batch 8，3 epoch / 2,886 step。
+  最终 `train_loss=0.4569`，耗时 9:25:59。
+- 远端最终 LoRA 输出：
+  `~/guqin-agent/train/output/guqin_sft_glm_final_harmonicparsefix_20260924_ctx8192_bs8_accum2/`。
+  顶层为可推理产物；`checkpoint-*` 为中间恢复点。
+- 已下载至本地：
+  `train/artifacts/J00124_guqin_sft_glm_final_harmonicparsefix_20260924/`（116 MB）。其中包括
+  `adapter_model.safetensors`（83 MB）、`adapter_config.json`、tokenizer/chat template、
+  `training_loss.png`、`trainer_state.json` 和 `J00124_training.log`。
+
+## 7.170 J00128：pitch-eligible two-or-half 全量 SFT（2026-09-25）
+
+- Jobber `J00128` 已在实验室服务器 `219.216.65.119` 成功完成：4×RTX 3090，数据集
+  `train/data/guqin_agent_sft_pitch_eligible_two_or_half_20260925_longrerun/`，`cutoff_len=8192`、
+  单卡 batch 1、梯度累积 2、有效 batch 8、QLoRA 4-bit、bf16、Liger、3 epoch / 2,703 step。
+- 训练参数：learning rate `2e-4`、AdamW、cosine scheduler、warmup ratio `0.03`；最终
+  `train_loss=0.5697428`，训练耗时 `9:10:06.84`。loss 曲线由 Trainer 保存为 `training_loss.png`。
+- 远端最终 adapter：
+  `~/guqin-agent/train/output/guqin_sft_pitch_eligible_twohalf_longrerun_20260925_ctx8192_bs8/`；
+  最后可恢复 checkpoint 为 `checkpoint-2703/`（含 LoRA、optimizer、scheduler、trainer state）。
+  Jobber 日志：`~/code/training/runtime/gpu_queue/logs/J00128.log`。
+- 本地归档：
+  `train/artifacts/J00128_guqin_sft_pitch_eligible_twohalf_longrerun_20260925/`，含最终 adapter、
+  tokenizer/config、`training_loss.png`、`trainer_log.jsonl`、`trainer_state.json` 和完整训练日志；
+  下载时排除了中间 checkpoint。Adapter SHA-256：
+  `492486b553178149ca7bc25abeb59ffd706d0c0aba548e496c3e4fc0e1610e4b`（与服务器一致）。
+- 用户要求基于该训练继续 2 epoch：已准备独立续训配置
+  `~/guqin-agent/train/runtime/guqin_sft_pitch_eligible_twohalf_longrerun_20260925_continue2/train_lora.yaml`，
+  从 `checkpoint-2703` 恢复（包括 optimizer/scheduler/RNG），训练总 epoch 设为 5，因此续训预期约
+  1,802 optimizer steps；仍用相同数据、8192 cutoff、batch 1×4 卡×累积 2、bf16、QLoRA 4-bit、
+  Liger、learning rate `2e-4`、AdamW、cosine scheduler、warmup ratio `0.03`。scheduler 按 5 epoch
+  总步数延展；续训的 loss 曲线和 adapter 写入独立目录
+  `~/guqin-agent/train/output/guqin_sft_pitch_eligible_twohalf_longrerun_20260925_continue2_ctx8192_bs8/`，
+  不覆盖 J00128 原产物。
+- Jobber `J00130`（`guqin-sft-longrerun-continue2-20260925`）已提交，申请 4 卡，当前 `queued`；
+  等待四卡空闲，不抢占其他任务。日志：
+  `~/code/training/runtime/gpu_queue/logs/J00130.log`。

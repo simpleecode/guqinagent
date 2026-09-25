@@ -28,7 +28,6 @@ for shard in 0 1 2 3 4 5 6; do
       --input "$INPUT" \
       --trajectory-id-file "$IDS" \
       --output-dir "$out" \
-      --limit 100 \
       --include-guqinizer-no-op \
       --allow-private-reasoning-leakage \
       --max-attempts 4 \

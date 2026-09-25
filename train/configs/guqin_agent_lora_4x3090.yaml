@@ -34,7 +34,7 @@ overwrite_output_dir: false
 report_to: none
 
 ### train
-# 1 x 8 x 4 = 32 effective batch, copied from the validated 4 x RTX 3090 recipe.
+# 1 x 2 x 4 = 8 effective batch: cutoff 8192 fits 24 GB RTX 3090 reliably.
 per_device_train_batch_size: 1
 gradient_accumulation_steps: __GRADIENT_ACCUMULATION_STEPS__
 learning_rate: 2.0e-4

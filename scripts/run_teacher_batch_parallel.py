@@ -59,9 +59,15 @@ def merge_unique(base: Path, shard_paths: list[Path], key: str) -> int:
 
 def merge_checkpoint(base: Path, shard_paths: list[Path]) -> int:
     existing = read_jsonl(base)
-    seen = {str(row.get("trajectory_id")) for row in existing
-            if row.get("trajectory_id") is not None}
-    added = 0
+    # Checkpoints are state records, unlike the public trajectories: a retry
+    # must be able to supersede an earlier ``attempted_with_failure`` record.
+    # Keep the append-only audit trail and let readers use the final record per
+    # trajectory id.
+    latest_existing = {
+        str(row["trajectory_id"]): row for row in existing
+        if row.get("trajectory_id") is not None
+    }
+    updated = 0
     with base.open("a", encoding="utf-8", newline="\n") as handle:
         for shard in shard_paths:
             latest: dict[str, dict] = {}
@@ -69,22 +75,30 @@ def merge_checkpoint(base: Path, shard_paths: list[Path]) -> int:
                 if row.get("trajectory_id") is not None:
                     latest[str(row["trajectory_id"])] = row
             for trajectory_id, row in latest.items():
-                if trajectory_id in seen:
+                if latest_existing.get(trajectory_id) == row:
                     continue
                 handle.write(json.dumps(row, ensure_ascii=False) + "\n")
-                seen.add(trajectory_id)
-                added += 1
-    return added
+                latest_existing[trajectory_id] = row
+                updated += 1
+    return updated
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument("--input", type=Path)
     parser.add_argument("--output-dir", type=Path, required=True)
-    parser.add_argument("--target-count", type=int, required=True,
+    parser.add_argument("--target-count", type=int,
                         help="total source phrase target, including already completed IDs")
+    parser.add_argument("--merge-only", action="store_true",
+                        help="merge existing worker checkpoint outputs without starting workers")
+    parser.add_argument("--retry-failed", action="store_true",
+                        help="retry only root checkpoint rows whose latest status is attempted_with_failure")
+    parser.add_argument("--worker-prefix", default="worker",
+                        help="directory prefix for this worker run; use a new prefix for an isolated retry pass")
     parser.add_argument("--trajectory-id-file", type=Path,
                         help="newline-delimited IDs to rerun; full input is still supplied for context")
+    parser.add_argument("--score-key", action="append",
+                        help="limit work to one or more complete score keys")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--min-interval", type=float, default=0.5)
     parser.add_argument("--model", default="glm-5.3")
@@ -101,22 +115,67 @@ def main() -> int:
     args = parser.parse_args()
     if args.workers < 1:
         raise SystemExit("--workers must be positive")
+    if not args.merge_only and (args.input is None or args.target_count is None):
+        raise SystemExit("--input and --target-count are required unless --merge-only is used")
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    if args.merge_only:
+        parallel_root = args.output_dir / ".parallel_workers"
+        shard_outputs = sorted(
+            path / "output" for path in parallel_root.glob(f"{args.worker_prefix}_*")
+            if (path / "output").is_dir()
+        )
+        if not shard_outputs:
+            raise SystemExit(f"no worker outputs under {parallel_root}")
+        counts = {
+            "messages_train": merge_unique(
+                args.output_dir / "messages_train.jsonl",
+                [path / "messages_train.jsonl" for path in shard_outputs], "sample_id"),
+            "teacher_trajectory_audit": merge_unique(
+                args.output_dir / "teacher_trajectory_audit.jsonl",
+                [path / "teacher_trajectory_audit.jsonl" for path in shard_outputs], "sample_id"),
+            "fingering_intermediates": merge_unique(
+                args.output_dir / "fingering_intermediates.jsonl",
+                [path / "fingering_intermediates.jsonl" for path in shard_outputs], "trajectory_id"),
+            "checkpoint": merge_checkpoint(
+                args.output_dir / "checkpoint.jsonl",
+                [path / "checkpoint.jsonl" for path in shard_outputs]),
+        }
+        print(json.dumps({"merge_only": True, "workers": len(shard_outputs),
+                          "added": counts}, ensure_ascii=False))
+        return 0
     score_shard_count = args.score_shard_count or args.workers
     if score_shard_count < 1 or score_shard_count != args.workers:
         raise SystemExit("--score-shard-count must equal --workers when using parallel workers")
-    args.output_dir.mkdir(parents=True, exist_ok=True)
 
     source_rows = read_jsonl(args.input)
+    if args.score_key:
+        selected_scores = set(args.score_key)
+        source_rows = [row for row in source_rows
+                       if str(row.get("score_key") or "") in selected_scores]
     source_ids = [str(row["trajectory_id"]) for row in source_rows]
     base_checkpoint = args.output_dir / "checkpoint.jsonl"
-    completed = {str(row.get("trajectory_id")) for row in read_jsonl(base_checkpoint)
-                 if row.get("trajectory_id") is not None}
-    remaining = [trajectory_id for trajectory_id in source_ids if trajectory_id not in completed]
+    checkpoint_rows = read_jsonl(base_checkpoint)
+    latest_checkpoint = {
+        str(row["trajectory_id"]): row for row in checkpoint_rows
+        if row.get("trajectory_id") is not None
+    }
+    if args.retry_failed:
+        remaining = [trajectory_id for trajectory_id in source_ids
+                     if latest_checkpoint.get(trajectory_id, {}).get("status") == "attempted_with_failure"]
+        completed = set(source_ids) - set(remaining)
+    else:
+        completed = set(latest_checkpoint)
+        remaining = [trajectory_id for trajectory_id in source_ids if trajectory_id not in completed]
     if args.trajectory_id_file:
         wanted = {line.strip() for line in args.trajectory_id_file.read_text(encoding="utf-8").splitlines()
                   if line.strip()}
         remaining = [trajectory_id for trajectory_id in remaining if trajectory_id in wanted]
-    remaining = remaining[:max(0, args.target_count - len(completed))]
+    if args.retry_failed:
+        # Here target-count is the retry-pool cap, not the corpus total: the
+        # non-failed rows deliberately do not consume the requested budget.
+        remaining = remaining[:args.target_count]
+    else:
+        remaining = remaining[:max(0, args.target_count - len(completed))]
     if not remaining:
         print(json.dumps({"remaining": 0, "message": "没有需要并行处理的片段"}, ensure_ascii=False))
         return 0
@@ -127,18 +186,25 @@ def main() -> int:
         digest = hashlib.blake2b(str(value).encode("utf-8"), digest_size=8).digest()
         return int.from_bytes(digest, "big") % score_shard_count
 
-    source_by_id = {str(row["trajectory_id"]): row for row in source_rows}
     shards: list[list[str]] = [[] for _ in range(args.workers)]
-    for trajectory_id in remaining:
-        shard_index = bucket(trajectory_id if args.shard_by_trajectory_id else
-                             source_by_id[trajectory_id].get("score_key", ""))
-        shards[shard_index].append(trajectory_id)
+    if args.shard_by_trajectory_id:
+        # Every worker receives the full source corpus for historical context,
+        # so score affinity is unnecessary here.  Round-robin assignment keeps
+        # small resume sets balanced too (a hash can put their last few IDs in
+        # only one or two workers).
+        for index, trajectory_id in enumerate(remaining):
+            shards[index % args.workers].append(trajectory_id)
+    else:
+        source_by_id = {str(row["trajectory_id"]): row for row in source_rows}
+        for trajectory_id in remaining:
+            shard_index = bucket(source_by_id[trajectory_id].get("score_key", ""))
+            shards[shard_index].append(trajectory_id)
 
     processes: list[tuple[int, subprocess.Popen, Path]] = []
     for index, ids in enumerate(shards):
         if not ids:
             continue
-        worker_dir = parallel_root / f"worker_{index:02d}"
+        worker_dir = parallel_root / f"{args.worker_prefix}_{index:02d}"
         worker_dir.mkdir(parents=True, exist_ok=True)
         id_file = worker_dir / "trajectory_ids.txt"
         id_file.write_text("\n".join(ids) + "\n", encoding="utf-8")
@@ -148,12 +214,13 @@ def main() -> int:
                    "--input", str(args.input),
                    "--output-dir", str(worker_dir / "output"),
                    "--trajectory-id-file", str(id_file),
-                   "--limit", str(len(ids)),
                    "--model", args.model,
                    "--max-tool-rounds", str(args.max_tool_rounds),
                    "--max-attempts", str(args.max_attempts),
                    "--min-interval", str(args.min_interval),
                    "--resume"]
+        if args.retry_failed:
+            command.append("--retry-failed")
         if not args.shard_by_trajectory_id:
             command.extend(("--score-shard-count", str(score_shard_count),
                             "--score-shard-index", str(index)))

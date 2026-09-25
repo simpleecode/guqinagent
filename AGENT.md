@@ -51,3 +51,12 @@ conda run -n guqin python C:\Users\30343\.codex\skills\.system\skill-creator\scr
 - 未知编码保留原值，结论区分“已验证 / 推断 / 未验证”。
 - 修改提取逻辑后，用 `batch/SYuY17FF/out/raw_data.json` 回归检查输出。
 - 完整采集说明见 `AGENT_REPRODUCTION_GUIDE.md`；排查经验见 `docs/PARTIAL_OMISSION_POSTMORTEM.md`。
+
+## 教师轨迹并发任务监控
+
+`scripts/run_teacher_batch_parallel.py` 的 coordinator 日志只记录 worker 的启动、退出和最终汇总；实时 tqdm 进度条写入各 worker 的 `worker.log`。
+每次运行这个代码时，记得给用户tail带实时进度条的命令，如
+```
+cd /Volumes/F/work/Gunqin-agent
+tail -f ABC_J/agent_training/pitch_eligible_two_or_half_tuningfix_affected_20260924_guqinizer_raw/.parallel_workers/fast7_1000ms_*/worker.log
+```

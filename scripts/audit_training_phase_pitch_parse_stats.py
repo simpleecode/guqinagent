@@ -168,6 +168,14 @@ def classify(report: dict[str, Any]) -> dict[str, Any]:
         "unparseable_reason_counts": dict(skip_reasons),
         "no_parseable_pitch": not parseable,
         "parseable_and_at_least_one_match": bool(parseable and matched),
+        # A phrase used as supervised pitch data should not be admitted merely
+        # because one accidental row happens to agree.  This stricter class is
+        # deliberately kept alongside the historical one so old reports stay
+        # interpretable.
+        "parseable_and_at_least_two_matches_or_half_matched": bool(
+            parseable
+            and (len(matched) >= 2 or len(matched) * 2 >= len(parseable))
+        ),
         "audit_summary": summary,
     }
 
@@ -217,6 +225,8 @@ def main() -> int:
             classifications[(stage, "no_parseable_pitch")] += 1
         if result["parseable_and_at_least_one_match"]:
             classifications[(stage, "parseable_and_at_least_one_match")] += 1
+        if result["parseable_and_at_least_two_matches_or_half_matched"]:
+            classifications[(stage, "parseable_and_at_least_two_matches_or_half_matched")] += 1
         if result["parseable_pitch_rows"] and not result["matched_pitch_rows"]:
             classifications[(stage, "parseable_but_no_match")] += 1
         details.append({
@@ -256,6 +266,10 @@ def main() -> int:
                 item["classification"]["parseable_and_at_least_one_match"]
                 for item in rows
             ),
+            "parseable_and_at_least_two_matches_or_half_matched_count": sum(
+                item["classification"]["parseable_and_at_least_two_matches_or_half_matched"]
+                for item in rows
+            ),
             "parseable_but_no_match_count": sum(
                 item["classification"]["parseable_pitch_rows"] > 0
                 and not item["classification"]["matched_pitch_rows"]
@@ -285,6 +299,7 @@ def main() -> int:
             "definition": {
                 "no_parseable_pitch": "该阶段所有减字经旧审计解析后都没有可比较的 MIDI 音高",
                 "parseable_and_at_least_one_match": "该阶段至少有一个可解析减字，且至少一音与简谱 MIDI 在容差内匹配",
+                "parseable_and_at_least_two_matches_or_half_matched": "该阶段至少有两个可解析减字匹配，或匹配音数不少于全部可解析音的一半",
             },
         },
         "input": {
@@ -307,6 +322,10 @@ def main() -> int:
             ),
             "parseable_and_at_least_one_match_count": sum(
                 item["classification"]["parseable_and_at_least_one_match"]
+                for item in details
+            ),
+            "parseable_and_at_least_two_matches_or_half_matched_count": sum(
+                item["classification"]["parseable_and_at_least_two_matches_or_half_matched"]
                 for item in details
             ),
             "parseable_but_no_match_count": sum(

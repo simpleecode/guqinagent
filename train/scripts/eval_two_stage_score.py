@@ -25,7 +25,9 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-EVAL_SCHEMA_VERSION = "agent-two-stage-eval-prediction-1.1"
+# 1.2: public evaluation inputs now carry continuous event_index values.
+# Older prediction files must not be resumed against that different protocol.
+EVAL_SCHEMA_VERSION = "agent-two-stage-eval-prediction-1.2"
 
 
 def first_json(text: str) -> Any:
@@ -158,7 +160,9 @@ def main() -> int:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from ABC_J.scripts.generate_teacher_tool_trajectories import (
-        RealToolRuntime, blank_plan_from_item, harmonic_region_at_phrase_start,
+        RealToolRuntime, blank_plan_from_item, canonical_jianzi_text,
+        harmonic_region_at_phrase_start,
+        public_pitch_warning_source_indices,
         public_system_for, public_tools_for, render_public_prompt,
         validate_jianzi_only,
     )
@@ -258,6 +262,12 @@ def main() -> int:
         basic = stage == "fingering_agent"
         tools = public_tools_for(stage, basic=basic)
         constrain = args.constrain_walk_hui and not basic
+        if stage == "guqinization":
+            item["public_pitch_warning_source_indices"] = sorted(
+                public_pitch_warning_source_indices(item, historical=historical)
+            )
+        else:
+            item.pop("public_pitch_warning_source_indices", None)
         # Mirror the teacher runner's pitch gate: a jianzi_pitch_mismatch
         # warning blocks acceptance until the model has actually re-edited
         # that event in a LATER round (a same-turn rewrite that still warns
@@ -276,8 +286,11 @@ def main() -> int:
                 {"role": "user", "content": render_public_prompt(item, stage)},
             ]
             trace = []
-            pending_pitch: set[int] = set()   # warned events (音序) not yet repaired
-            repaired_pitch: set[int] = set()  # warned events re-edited in a later round
+            # A warning asks for one deliberate follow-up edit, not an
+            # optimizer-style requirement to drive the warning count to zero.
+            # Once the model has made that later edit, it may decide to stop.
+            warning_followup_required = False
+            saw_pitch_warning = False
             last_valid: list | None = None
             for round_number in range(1, args.max_rounds + 1):
                 constraint_table = None
@@ -324,7 +337,7 @@ def main() -> int:
                        if processor is not None else {}),
                 }, ensure_ascii=False), flush=True)
                 if not calls:
-                    if last_valid is not None:
+                    if last_valid is not None and not warning_followup_required:
                         # The model chose to stop after a valid preview.
                         return {"ok": True, "no_op": False,
                                 "plan": {"actions": last_valid}, "trace": trace,
@@ -333,18 +346,26 @@ def main() -> int:
                                     if basic else
                                     "工具预览已通过，当前段减字润色完成。"
                                 )}
-                    if stage == "guqinization" and not truncated:
+                    if (stage == "guqinization" and not truncated
+                            and not warning_followup_required):
                         return {"ok": True, "no_op": True,
                                 "plan": item["baseline_plan"], "trace": trace,
                                 "final_reply": "逐音审阅完成，当前段无需修改。"}
-                    # This mirrors the teacher runner: an unfinished Base is
-                    # told to continue rather than being silently accepted.
+                    # Do not accept an empty final answer immediately after
+                    # a pitch warning: ask for one edit attempt.  This is not
+                    # a demand that the attempt eliminates every warning.
+                    if warning_followup_required:
+                        error = (
+                            "上一轮出现音高警告；请至少提交一次 edit_plan 尝试后再决定"
+                            "是否结束。请依据上一轮工具返回核对相关音序。"
+                        )
+                    else:
+                        error = "当前段仍有待填写的演奏音，不能直接结束；请提交需要修改的 jianzi_rows。"
                     messages.append({
                         "role": "user",
                         "content": json.dumps({
                             "tool_results": [{
-                                "ok": False,
-                                "error": "当前段仍有待填写的演奏音，不能直接结束；请提交需要修改的 jianzi_rows。",
+                                "ok": False, "error": error,
                             }],
                             "instruction": "根据真实反馈继续；需要工具时继续调用工具。",
                         }, ensure_ascii=False),
@@ -361,8 +382,34 @@ def main() -> int:
                                  "tool_calls": assistant_calls})
                 accepted = None
                 warned_now: set[int] = set()
-                edited_now: set[int] = set()
+                repeated_submission: list[int] | None = None
                 for assistant_call, call in zip(assistant_calls, calls):
+                    if call["name"] == "edit_plan":
+                        submitted = [
+                            row for row in (call.get("arguments") or {}).get("jianzi_rows") or []
+                            if isinstance(row, list) and len(row) == 2
+                            and isinstance(row[0], int) and not isinstance(row[0], bool)
+                        ]
+                        if submitted:
+                            current = {
+                                int(action["source_index"]): action.get("jianzi_text")
+                                for action in replay_patches(
+                                    item["baseline_plan"], runtime.accumulated_patches,
+                                    strict_before=False,
+                                ).actions
+                            }
+                            unchanged_events: list[int] = []
+                            for event_index, text in submitted:
+                                try:
+                                    source_index = runtime._event_to_source(event_index)
+                                except ValueError:
+                                    break
+                                if canonical_jianzi_text(text) == canonical_jianzi_text(
+                                    current.get(source_index)
+                                ):
+                                    unchanged_events.append(event_index)
+                            if len(unchanged_events) == len(submitted):
+                                repeated_submission = unchanged_events
                     result = runtime.invoke(call["name"], call.get("arguments") or {})
                     round_entry["tool_results"].append({
                         "name": call["name"],
@@ -373,14 +420,16 @@ def main() -> int:
                                      "name": call["name"], "content": json.dumps(result, ensure_ascii=False)})
                     if call["name"] != "edit_plan":
                         continue
-                    for row in (call.get("arguments") or {}).get("jianzi_rows") or []:
-                        if isinstance(row, list) and len(row) == 2 and isinstance(row[0], int):
-                            edited_now.add(row[0])
                     if result.get("ok") and result.get("result", {}).get("valid"):
                         complete, report = validate_jianzi_only(
                             item, runtime.accumulated_patches,
                             toward_reference=False,
                             require_complete=basic,
+                            # Keep this acceptance/pitch-gate audit in the
+                            # same musical state as RealToolRuntime.edit_plan.
+                            # In particular, phrase-spanning harmonic state
+                            # depends on the preceding phrases.
+                            historical=historical,
                         )
                         if complete:
                             accepted = runtime.calls[-1]["result"]["result"]["preview_actions"]
@@ -392,25 +441,33 @@ def main() -> int:
                             }
                 if accepted is not None:
                     last_valid = accepted
-                    previously_pending = set(pending_pitch)
-                    repaired_pitch |= edited_now & previously_pending
-                    pending_pitch = ((pending_pitch | warned_now) - repaired_pitch)
+                    if repeated_submission:
+                        round_entry["repeated_submission"] = sorted(
+                            repeated_submission
+                        )
+                        return {
+                            "ok": True, "no_op": False,
+                            "plan": {"actions": accepted}, "trace": trace,
+                            "final_reply": (
+                                "检测到重复提交未改变的音序（"
+                                + "、".join(str(index) for index in sorted(repeated_submission))
+                                + "），采用当前有效预览并停止交互。"
+                            ),
+                        }
+                    # Any edit after the first warning fulfills the required
+                    # repair attempt.  Later warnings remain visible in the
+                    # tool result, but do not force an endless loop.
+                    if warning_followup_required:
+                        warning_followup_required = False
+                    if warned_now and not saw_pitch_warning:
+                        saw_pitch_warning = True
+                        warning_followup_required = True
                     round_entry["pitch_gate"] = {
                         "warned_now": sorted(warned_now),
-                        "pending": sorted(pending_pitch),
+                        "followup_edit_required": warning_followup_required,
                     }
-                    if not pending_pitch:
-                        return {"ok": True, "no_op": False,
-                                "plan": {"actions": accepted}, "trace": trace,
-                                "final_reply": (
-                                    "工具预览已通过，当前段基础减字填写完成。"
-                                    if basic else
-                                    "工具预览已通过，当前段减字润色完成。"
-                                )}
-                    # Valid preview with unresolved pitch warnings: not
-                    # accepted.  The observation carrying the warnings is
-                    # already in the model's context, so it can repair them
-                    # in the next round — mirroring the teacher runner.
+                    # A valid preview is only a candidate final state. Keep
+                    # it and let the model decide in the next assistant turn.
                     continue
             # Rounds exhausted: keep the last valid preview rather than
             # failing the phrase (a broken stage would poison the cascade).
@@ -418,7 +475,7 @@ def main() -> int:
                 return {"ok": True, "no_op": False,
                         "plan": {"actions": last_valid}, "trace": trace,
                         "final_reply": "轮次用尽，采用最后一份有效预览。",
-                        "pitch_pending_at_stop": sorted(pending_pitch)}
+                        "pitch_followup_edit_required_at_stop": warning_followup_required}
             last_trace = trace
         return {"ok": False, "trace": last_trace}
 

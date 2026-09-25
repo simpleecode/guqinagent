@@ -27,6 +27,7 @@ from ABC_J.scripts.generate_teacher_tool_trajectories import (
     validate_jianzi_only,
     can_accept_empty_tool_turn,
     render_edit_preview,
+    advance_pitch_warning_state,
 )
 from agents.abc_to_jianzipu.trajectory_replay import (
     compare_replay_to_patch_targets,
@@ -36,6 +37,26 @@ from agents.abc_to_jianzipu.reference_parser import AUDIT
 
 
 class EditableProtocolTests(unittest.TestCase):
+    def test_first_edit_warning_requires_a_later_turn(self) -> None:
+        pending: set[int] = set()
+        repaired: set[int] = set()
+        # The first edit used candidates queried in an earlier turn, but the
+        # warning only appears in this edit-plan response.  It must remain
+        # pending so the model sees the warning and gets another turn.
+        unresolved = advance_pitch_warning_state(
+            pending, repaired, {211}, {211}
+        )
+        self.assertEqual(unresolved, {211})
+        self.assertEqual(repaired, set())
+
+        # A later candidate-informed edit is an actual repair attempt.  It
+        # may end even if this advisory warning persists.
+        unresolved = advance_pitch_warning_state(
+            pending, repaired, {211}, {211}
+        )
+        self.assertEqual(unresolved, set())
+        self.assertEqual(repaired, {211})
+
     def test_explicit_open_note_overrides_active_harmonic_region(self) -> None:
         tuning = {
             "open_strings": [
@@ -162,6 +183,26 @@ class EditableProtocolTests(unittest.TestCase):
         )
         self.assertIn(
             "3｜2｜已填写｜[散挑4弦]:warning:音高不匹配",
+            rendered,
+        )
+
+    def test_edit_preview_surfaces_unmodified_pitch_warning(self) -> None:
+        item = {"input": {"notes_without_jianzi": [
+            {"index": 7, "event_index": 3, "jianpu": "2", "abc": "D"},
+            {"index": 8, "event_index": 4, "jianpu": "3", "abc": "E"},
+        ]}}
+        actions = [
+            {"source_index": 7, "mode": "open", "string": 4,
+             "attack": True, "jianzi_text": "散挑4弦"},
+            {"source_index": 8, "mode": "open", "string": 5,
+             "attack": True, "jianzi_text": "散挑5弦"},
+        ]
+        patches = [{"source_index": 7, "after": {"jianzi_text": "散挑4弦"}}]
+        warnings = [{"source_index": 8, "code": "jianzi_pitch_mismatch"}]
+        rendered = render_edit_preview(actions, patches, True, [], item, warnings)
+        self.assertIn("仍有未修改的音高警告", rendered)
+        self.assertIn(
+            "4｜3｜未修改｜[散挑5弦]:warning:音高不匹配",
             rendered,
         )
 
@@ -314,7 +355,7 @@ class EditableProtocolTests(unittest.TestCase):
             "input": {
                 "metadata": {"tonic": "1=C"},
                 "notes_without_jianzi": [
-                    {"index": 1, "jianpu": "1", "abc": "C"},
+                    {"index": 1, "event_index": 1, "jianpu": "1", "abc": "C"},
                 ],
             },
         }
@@ -339,7 +380,7 @@ class EditableProtocolTests(unittest.TestCase):
             "input": {
                 "metadata": {"tonic": "1=C"},
                 "notes_without_jianzi": [
-                    {"index": 1, "jianpu": "2", "abc": "D"},
+                    {"index": 1, "event_index": 1, "jianpu": "2", "abc": "D"},
                 ],
             },
         }
@@ -463,7 +504,7 @@ class EditableProtocolTests(unittest.TestCase):
 
     def test_text_only_intermediate_is_visible_without_structural_fields(self) -> None:
         table = _render_phrase_lines(
-            [{"index": 1, "jianpu": "1", "abc": "C", "duration": "四分"}],
+            [{"index": 1, "event_index": 1, "jianpu": "1", "abc": "C", "duration": "四分"}],
             [{"source_index": 1, "mode": None, "attack": True,
               "jianzi_text": "散挑1弦"}],
         )
@@ -472,7 +513,7 @@ class EditableProtocolTests(unittest.TestCase):
 
     def test_readonly_context_uses_neutral_placeholder_for_missing_text(self) -> None:
         table = _render_phrase_lines(
-            [{"index": 1, "jianpu": "3", "abc": "C", "duration": "八分"}],
+            [{"index": 1, "event_index": 1, "jianpu": "3", "abc": "C", "duration": "八分"}],
             [{"source_index": 1, "mode": None, "attack": False,
               "jianzi_text": None}], readonly=True,
         )
@@ -481,7 +522,7 @@ class EditableProtocolTests(unittest.TestCase):
 
     def test_readonly_context_harmonic_missing_text_is_not_pending(self) -> None:
         table = _render_phrase_lines(
-            [{"index": 1, "jianpu": "6", "abc": "D", "duration": "八分"}],
+            [{"index": 1, "event_index": 1, "jianpu": "6", "abc": "D", "duration": "八分"}],
             [{"source_index": 1, "mode": "harmonic", "string": 2,
               "hui": 4, "attack": True, "jianzi_text": None}], readonly=True,
         )
@@ -490,7 +531,7 @@ class EditableProtocolTests(unittest.TestCase):
 
     def test_readonly_context_missing_action_is_empty_not_pending(self) -> None:
         table = _render_phrase_lines(
-            [{"index": 9, "jianpu": "5", "abc": "D", "duration": "四分"}],
+            [{"index": 9, "event_index": 9, "jianpu": "5", "abc": "D", "duration": "四分"}],
             [], readonly=True,
         )
         self.assertIn("9｜5｜D｜四分｜[空]", table)
@@ -499,9 +540,9 @@ class EditableProtocolTests(unittest.TestCase):
     def test_readonly_context_normalizes_legacy_pending_literal_and_barline(self) -> None:
         table = _render_phrase_lines(
             [
-                {"index": 1, "jianpu": "3", "abc": "C", "duration": "八分"},
+                {"index": 1, "event_index": 1, "jianpu": "3", "abc": "C", "duration": "八分"},
                 {"index": 2, "jianpu": "|", "abc": "|", "duration": "小节线"},
-                {"index": 3, "jianpu": "4", "abc": "D", "duration": "八分"},
+                {"index": 3, "event_index": 2, "jianpu": "4", "abc": "D", "duration": "八分"},
             ],
             [
                 {"source_index": 1, "mode": None, "attack": True,
@@ -520,8 +561,8 @@ class EditableProtocolTests(unittest.TestCase):
     def test_readonly_context_renders_explicit_empty_text_as_empty(self) -> None:
         table = _render_phrase_lines(
             [
-                {"index": 1, "jianpu": "3", "abc": "C", "duration": "八分"},
-                {"index": 2, "jianpu": "4", "abc": "D", "duration": "八分"},
+                {"index": 1, "event_index": 1, "jianpu": "3", "abc": "C", "duration": "八分"},
+                {"index": 2, "event_index": 2, "jianpu": "4", "abc": "D", "duration": "八分"},
             ],
             [
                 {"source_index": 1, "mode": None, "attack": True,
@@ -534,8 +575,8 @@ class EditableProtocolTests(unittest.TestCase):
         self.assertEqual(table.count("[空]"), 2)
         self.assertNotIn("[减字待填写]", table)
 
-    def test_current_repeat_copy_does_not_prelabel_omission(self) -> None:
-        note = [{"index": 1, "jianpu": "3", "abc": "C", "duration": "八分",
+    def test_readonly_handoff_does_not_leak_source_omission_metadata(self) -> None:
+        note = [{"index": 1, "event_index": 1, "jianpu": "3", "abc": "C", "duration": "八分",
                  "notation_omitted": True}]
         action = [{"source_index": 1, "mode": None, "attack": False,
                    "jianzi_text": None, "notation_omitted": True}]
@@ -543,7 +584,25 @@ class EditableProtocolTests(unittest.TestCase):
         readonly = _render_phrase_lines(note, action, readonly=True)
         self.assertIn("[减字待填写]", current)
         self.assertNotIn("无（由于是再作部分，省略）", current)
-        self.assertIn("无（由于是再作部分，省略）", readonly)
+        self.assertIn("[空]", readonly)
+        self.assertNotIn("无（由于是再作部分，省略）", readonly)
+
+    def test_readonly_empty_rest_and_tie_keep_their_musical_surfaces(self) -> None:
+        table = _render_phrase_lines(
+            [
+                {"index": 1, "event_index": 1, "jianpu": "－（延音）", "abc": "-C",
+                 "duration": "-"},
+                {"index": 2, "event_index": 2, "jianpu": "0（休止）", "abc": "z4",
+                 "duration": "四分"},
+            ],
+            [
+                {"source_index": 1, "attack": False, "jianzi_text": ""},
+                {"source_index": 2, "attack": False, "jianzi_text": ""},
+            ],
+            readonly=True,
+        )
+        self.assertIn("1｜－（延音）｜-C｜-｜[续音]", table)
+        self.assertIn("2｜0（休止）｜z4｜四分｜[—]", table)
 
     def test_surface_digit_variants_are_reference_equivalent(self) -> None:
         self.assertEqual(canonical_jianzi_text("散摘7弦"),
@@ -995,7 +1054,8 @@ class TeacherQualityTests(unittest.TestCase):
                            "explicit_fields": [], "inherited_fields": ["mode", "hui"],
                            "mode": "harmonic", "hui": 9.0, "attack": False,
                            "techniques": []})
-        notes = [{"index": index, "abc": "D4", "jianpu": "6̣"}
+        notes = [{"index": index, "event_index": index,
+                  "abc": "D4", "jianpu": "6̣"}
                  for index in range(1, 6)]
         return {
             "input": {
@@ -1029,6 +1089,12 @@ class TeacherQualityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             expand_jianzi_rows([["245.0", "吟"]], current_text={245: None})
 
+    def test_public_tools_reject_missing_event_indices(self) -> None:
+        item = self._item()
+        item["input"]["notes_without_jianzi"][0].pop("event_index")
+        with self.assertRaisesRegex(ValueError, "requires continuous event_index"):
+            RealToolRuntime(item, {})
+
 
 
     def test_batch_pitch_candidates_deduplicate_equal_target_pitch(self) -> None:
@@ -1037,7 +1103,7 @@ class TeacherQualityTests(unittest.TestCase):
         runtime = RealToolRuntime(item, {})
 
         result = runtime.invoke("get_pitch_candidates", {
-            "source_indices": [1, 2, 3], "max_candidates": 3,
+            "event_indices": [1, 2, 3], "max_candidates": 3,
         })
 
         self.assertTrue(result["ok"], result)
@@ -1062,13 +1128,13 @@ class TeacherQualityTests(unittest.TestCase):
     def test_chord_pitch_header_uses_the_symbol_for_that_chord_tone(self) -> None:
         item = self._item()
         item["input"]["notes_without_jianzi"][:2] = [
-            {"index": 1, "abc": "[F,f]2", "jianpu": "1̣", "jianpu_alt": "1̇"},
-            {"index": 2, "abc": "[F,f]2", "jianpu": "1̣", "jianpu_alt": "1̇"},
+            {"index": 1, "event_index": 1, "abc": "[F,f]2", "jianpu": "1̣", "jianpu_alt": "1̇"},
+            {"index": 2, "event_index": 2, "abc": "[F,f]2", "jianpu": "1̣", "jianpu_alt": "1̇"},
         ]
         item["phrase_id"] = "p0001"
         runtime = RealToolRuntime(item, {})
         result = runtime.invoke("get_pitch_candidates", {
-            "source_indices": [1, 2], "max_candidates": 3,
+            "event_indices": [1, 2], "max_candidates": 3,
         })
         self.assertTrue(result["ok"], result)
         text = result["result"]["text"]
@@ -1081,7 +1147,7 @@ class TeacherQualityTests(unittest.TestCase):
         runtime = RealToolRuntime(item, {})
 
         result = runtime.invoke("get_pitch_candidates", {
-            "source_indices": [1, 2], "类型": ["按音", "散音"],
+            "event_indices": [1, 2], "类型": ["按音", "散音"],
         })
 
         self.assertTrue(result["ok"], result)
@@ -1096,7 +1162,7 @@ class TeacherQualityTests(unittest.TestCase):
         runtime = RealToolRuntime(item, {})
 
         result = runtime.invoke("get_pitch_candidates", {
-            "source_indices": [1, 2],
+            "event_indices": [1, 2],
             "modes": ["按音", "散音", "泛音"],
         })
 
@@ -1112,17 +1178,17 @@ class TeacherQualityTests(unittest.TestCase):
                             for candidate in candidates
                             if candidate["mode"] == "open"))
 
-    def test_batch_pitch_candidates_skips_non_sounding_indices(self) -> None:
+    def test_batch_pitch_candidates_rejects_unknown_public_event_index(self) -> None:
         item = self._item()
         item["phrase_id"] = "p0001"
         runtime = RealToolRuntime(item, {})
 
         result = runtime.invoke("get_pitch_candidates", {
-            "source_indices": [1, 99, 2],
+            "event_indices": [1, 99, 2],
         })
 
-        self.assertTrue(result["ok"], result)
-        self.assertIn("跳过不可解析或非发音序号｜99", result["result"]["text"])
+        self.assertFalse(result["ok"], result)
+        self.assertIn("unknown public event_index: 99", result["error"])
 
     def test_partial_edit_preview_does_not_fail_on_unsubmitted_rows(self) -> None:
         item = self._item()
@@ -1136,22 +1202,15 @@ class TeacherQualityTests(unittest.TestCase):
         self.assertNotIn("errors", result["result"])
         self.assertEqual(runtime.calls[-1]["result"]["result"].get("errors"), [])
 
-    def test_mixed_edit_batch_applies_legal_rows_and_warns_about_structural_rows(self) -> None:
+    def test_edit_plan_rejects_unknown_public_event_index(self) -> None:
         item = self._item()
         runtime = RealToolRuntime(item, {}, basic_fingering=True)
         result = runtime.invoke("edit_plan", {
             "jianzi_rows": [[1, "散勾7弦"], [99, "不应应用"]],
         })
 
-        self.assertTrue(result["ok"], result)
-        self.assertTrue(result["result"]["valid"], result["result"]["text"])
-        self.assertIn("ignored_noneditable_jianzi_rows", result["result"]["text"])
-        self.assertIn('"event_indices":[99]', result["result"]["text"])
-        replay = replay_patches(
-            item["baseline_plan"], runtime.accumulated_patches, strict_before=False,
-        )
-        by_index = {action["source_index"]: action for action in replay.actions}
-        self.assertEqual(by_index[1]["jianzi_text"], "散勾7弦")
+        self.assertFalse(result["ok"], result)
+        self.assertIn("source_index has no public event_index: 99", result["error"])
 
     def test_final_quality_check_still_requires_complete_jianzi_text(self) -> None:
         item = self._item()

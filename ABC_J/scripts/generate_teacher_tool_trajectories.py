@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -61,6 +62,25 @@ NOOP_CONCLUSION = "综上所述，无需修改。"
 PURE_CUO_RULE = (
     "普通撮本身就是右手指法：括号内只写参与的两弦及各弦必要的散音、按音、左手按指和徽位信息，不再写“勾、挑、托”等右手指法；也不得把“撮”与二至三个中文数字直接拼成缩略写法。"
 )
+
+
+def validate_normalized_tuning(item: dict) -> None:
+    """Reject stale inferred seeds before any teacher API call.
+
+    The frozen ``normalized_tuning`` field is consumed by candidate lookup and
+    edit-plan auditing.  It must exactly reproduce the sounding open strings
+    in source metadata; otherwise a historic double-application of tuning
+    offsets can silently make every candidate table wrong.
+    """
+    input_data = item.get("input") or {}
+    actual = (input_data.get("normalized_tuning") or {}).get("open_midi")
+    expected = AUDIT.parse_open_midi(input_data.get("metadata") or {})
+    if (not isinstance(actual, list) or len(actual) != 7
+            or [float(value) for value in actual] != [float(value) for value in expected]):
+        raise ValueError(
+            "normalized_tuning mismatch for "
+            f"{item.get('trajectory_id')}: actual={actual!r}, expected={expected!r}"
+        )
 
 
 def finalize_noop_review(text: str) -> str:
@@ -155,7 +175,7 @@ def blank_plan_from_item(item: dict) -> dict:
     return {"actions": actions}
 
 TOOLS = [
-    {"name": "list_context", "description": "仅列出当前 phrase 之前可展开的 phrase 目录，不返回谱面动作。",
+    {"name": "list_context", "description": "按曲谱章节压缩列出当前 phrase 之前可展开的只读上下文 phrase ID；不返回谱面动作或音序范围。",
      "input_schema": {"type": "object", "properties": {}, "additionalProperties": False}},
     {"name": "expand_context", "description": "展开一个未在 user 中提供的更早 phrase 的只读已确认谱面。已直接给出的“只读前一段”不得重复调用。返回与当前谱面相同的简表。",
      "input_schema": {"type": "object", "properties": {
@@ -169,7 +189,7 @@ TOOLS = [
          "max_candidates": {"type": "integer"}},
       "anyOf": [{"required": ["event_index"]}, {"required": ["event_indices"]},
                 {"required": ["target_midi"]}]}},
-    {"name": "edit_plan", "description": "批量预览并设置减字文本。唯一输入为 jianzi_rows=[[音序,减字文字],...]；音序应为 JSON 整数（例如 [12,\"吟\"]，不要写成 [\"12\",\"吟\"]），小节线没有音序、不可提交。一次调用可以只提交已决定修改的部分行，未提交的行不会使本次预览失败；Fingering 阶段应继续分批填写，直到结束前所有发音事件都有字符串（必要时为空字符串）。空字符串的直接语义是将该行 jianzi_text 置空；不会删除声音或其他演奏状态。若前一减字已包含多个动作，后续被覆盖的声音可用空字符串表示不重复显示。工具只在减字和简谱都可高置信解析且音高明显不符时给出警告。",
+    {"name": "edit_plan", "description": "批量预览并设置减字文本。唯一输入为 jianzi_rows=[[音序,减字文字],...]；音序应为 JSON 整数（例如 [12,\"吟\"]，不要写成 [\"12\",\"吟\"]）。一次调用可以只提交已决定修改的部分行，未提交的行不会使本次预览失败；Fingering 阶段应继续分批填写，直到结束前所有发音事件都有字符串（必要时为空字符串）。空字符串的直接语义是将该行 jianzi_text 置空；不会删除声音或其他演奏状态。若前一减字已包含多个动作，后续被覆盖的声音可用空字符串表示不重复显示。工具只在减字和简谱都可高置信解析且音高明显不符时给出警告、应该尽量修复",
      "input_schema": {"type": "object", "properties": {
              "jianzi_rows": {"type": "array", "description": "本次决定编辑的行 [音序,jianzi_text]；可以只提交部分行，未提交的行保留现状，不会因尚未决定而失败。音序为 JSON 整数，小节线没有音序。空字符串表示将该行 jianzi_text 置空；不会删除声音或演奏状态，常用于前一复合减字已覆盖后续声音、无需重复显示的情况。", "items": {
              "type": "array", "prefixItems": [{"type": "integer"}, {"type": "string"}],
@@ -198,6 +218,16 @@ PUBLIC_SYSTEM = {
         "工具的音高结果是高置信情况下的辅助警告，如果有音高警告，需要尽量修正。"
         "当前段减字由只会基础指法的 Agent 初步填写；请在不破坏音高和可演奏性的前提下适当加入高级指法，使曲子更丰富、更有韵味。"
     ),
+    "single_stage": (
+        "你是减字谱 Agent。直接从简谱、ABC、时值与上下文，为当前段一次完成可演奏的最终减字谱；"
+        "同时判断取音方式、左手按指与徽位、右手指法、走手/复合技法以及必要的空显示范围。"
+        "通过 edit_plan.jianzi_rows 进行编辑；可分批提交已决定的行，未提交的行保留现状。"
+        "空字符串表示该行不重复显示减字，不删除声音或演奏状态；若前一复合减字已覆盖后续声音可使用。"
+        "优先保证音高、左右手可演奏性与前后衔接，再按需要使用绰、注、吟、猱、历、撮等复杂技法，"
+        "不要为了堆砌技法而改坏已经合理的取音。"
+        "若工具在已填写的减字后标注\":warning:音高不匹配\"，应尽量核对并修正该行；"
+        "若结合候选与音乐判断决定保留，也可说明理由后结束。"
+    ),
 }
 
 INHERITANCE_RULES_PROMPT = (
@@ -211,25 +241,26 @@ def public_tools_for(stage: str, *, basic: bool = False) -> list[dict]:
     allowed = {"list_context", "expand_context", "edit_plan"}
     # Guqinizer can also receive a pitch warning after changing a concrete
     # fingering.  It needs the same read-only lookup tool to repair that edit.
-    if basic or stage == "guqinization":
+    if basic or stage in {"guqinization", "single_stage"}:
         allowed.add("get_pitch_candidates")
     return [deepcopy(tool) for tool in TOOLS if tool["name"] in allowed]
 
 
 def public_system_for(stage: str, *, basic: bool = False) -> str:
-    prompt = PUBLIC_SYSTEM[stage] + (PURE_CUO_RULE if basic else "") + INHERITANCE_RULES_PROMPT + (
-        " 每次工具调用前说明理由。"
+    prompt = PUBLIC_SYSTEM[stage] + (PURE_CUO_RULE if stage == "fingering_agent" and basic else "") + INHERITANCE_RULES_PROMPT + (
+        "每次工具调用前说明理由。get_pitch_candidates 与 edit_plan 不得在同一 assistant 回合同时调用：先查询并读取候选工具返回，再在后续回合提交编辑。"
         "edit_plan 一次可提交多行，也可以只提交当前已经确定的部分行；未提交的行保留现状，不会因尚未决定而使本次预览失败。收到反馈后只修正需要变化的行，不要重复未变化内容。"
     )
-    if stage == "guqinization":
+    if stage in {"guqinization", "single_stage"}:
         prompt += (
             "先逐一分析每个音应该使用什么指法/减字，再决定是否编辑；"
             "只把决定改写的音提交给 edit_plan。"
         )
     if basic:
+        completion_scope = "最终减字" if stage == "single_stage" else "基础减字"
         prompt += (
             " 首次查询音高时，若当前段有4个或以上可解析的发音事件，尽量把至少4个（最好全部）音序放在同一次 get_pitch_candidates 的 event_indices 中；工具会按实际音高自动去重。只有后续确需核查某个单音时才逐音查询，不要把首次查询拆成逐音调用。"
-            "依据候选位置、上下文和专业判断写出基础减字。尽量把每个演奏事件的减字填写完整，除非谱面关系很明显需要留空。"
+            f"依据候选位置、上下文和专业判断写出{completion_scope}。尽量把每个演奏事件的减字填写完整，除非谱面关系很明显需要留空。"
             "可以分批提交已经确定的音，继续编辑直到结束前所有发音事件都有减字或明确空字符串。"
             "休止和延音没有新音高，但若要表达走猱、猱、吟、泛止等延续动作，可以提交对应减字。"
         )
@@ -488,9 +519,14 @@ def render_grouped_candidate_table(target: float, candidates: list[dict],
                                    modes: tuple[str, ...],
                                    sources: list[dict]) -> str:
     """Render one physical candidate list with every score event that reuses it."""
-    source_text = "、".join(
-        str(source.get("event_index", source["source_index"])) for source in sources
-    )
+    missing = [source.get("source_index") for source in sources
+               if source.get("event_index") is None]
+    if missing:
+        raise ValueError(
+            "public candidate rendering requires event_index; missing source_index="
+            + "、".join(str(index) for index in missing)
+        )
+    source_text = "、".join(str(source["event_index"]) for source in sources)
     # Source entries carry the one jianpu component corresponding to this
     # target MIDI, not the entire chord label. Keep every event source but
     # display the deduplicated target symbol once.
@@ -552,8 +588,9 @@ def private_reference_semantics_rules(stage: str) -> list[str]:
     """Explain private reference display markers without leaking them publicly."""
     harmonic_scope_rule = (
         "泛起至泛止构成泛音区间：区间内未显式写“散”或“按音”的起音默认按泛音解释，"
-        "不必每音重复写“泛音”。例如“大指七徽挑七弦”等同于“泛音大指七徽挑七弦”。"
+        "泛音区间内不必每音重复写“泛音”。例如“大指七徽挑七弦”等同于“泛音大指七徽挑七弦”。"
         "显式“散”只覆盖当前音，不结束后续泛音区间；只有“泛止”才结束该区间。"
+        "决定要进入泛音区间的话，请给出理由"
     )
     warning_rule = (
         '工具在已填写的减字后标注":warning:音高不匹配"时，应尽量核对该行的取音与减字并修正；'
@@ -701,8 +738,7 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
                         warnings: list[dict] | None = None) -> str:
     changed = {int(patch["source_index"]) for patch in patches
                if patch.get("source_index") is not None}
-    by_index = {int(action["source_index"]): action for action in actions
-                if int(action["source_index"]) in changed}
+    by_index = {int(action["source_index"]): action for action in actions}
     patch_types: dict[int, list[str]] = {}
     for patch in patches:
         patch_types.setdefault(int(patch["source_index"]), []).append(
@@ -754,8 +790,96 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         lines.append(
             f'{visible_index}｜{jianpu}｜{display}｜{surface}{warning_suffix}'
         )
+    # ``edit_plan`` previews only the submitted rows above.  A cumulative
+    # audit can nevertheless find pitch warnings inherited from the current
+    # Base/earlier plan.  They must be shown to the model: otherwise the
+    # acceptance gate keeps the turn alive for an issue it cannot identify.
+    unmodified_warning_indices = sorted(set(pitch_warnings) - changed)
+    if unmodified_warning_indices:
+        lines.append("仍有未修改的音高警告｜以下行未包含在本轮提交；请核对或查询候选：")
+    for index in unmodified_warning_indices:
+        action = by_index.get(index)
+        visible_index = event_index_for_source(item, index) if item is not None else None
+        visible_index = index if visible_index is None else visible_index
+        if action is None:
+            lines.append(
+                f'{visible_index}｜{pitch_label(item, index) if item is not None else ""}｜'
+                "未找到动作｜-:warning:音高不匹配"
+            )
+            continue
+        surface = render_jianzi_surface(
+            action, omitted_placeholder=OMITTED_PLACEHOLDER
+        ) or "—"
+        warning = pitch_warnings[index]
+        warning_suffix = (
+            ":warning:音高不匹配（当前可能仍处于泛音状态；若此音应为按音，请明确写“按音”或先泛止）"
+            if warning.get("possible_harmonic_state_mismatch")
+            else ":warning:音高不匹配"
+        )
+        lines.append(
+            f'{visible_index}｜{pitch_label(item, index) if item is not None else ""}｜'
+            f'未修改｜{surface}{warning_suffix}'
+        )
     if errors:
         lines.append("错误｜" + json.dumps(errors, ensure_ascii=False, separators=(",", ":")))
+    return "\n".join(lines)
+
+
+def advance_pitch_warning_state(
+    pending: set[int],
+    repair_attempted: set[int],
+    current_warnings: set[int],
+    candidate_informed_edits: set[int],
+) -> set[int]:
+    """Record one edit-plan result and return warnings still requiring a turn.
+
+    A warning produced by this very edit cannot also count as repaired by the
+    same edit, even if its candidates were queried earlier.  The teacher must
+    receive that warning and take at least one later turn before choosing
+    whether to repair it or retain the notation.  A later candidate-informed
+    edit may resolve the warning or leave it as an advisory result.
+    """
+    previously_pending = set(pending)
+    pending.update(current_warnings)
+    later_repairs = candidate_informed_edits & previously_pending
+    repair_attempted.update(later_repairs)
+    # If the later repair made the warning disappear, it no longer needs to
+    # remain pending.  If it remains visible, the later attempted repair is
+    # sufficient to let the model end on this advisory warning.
+    pending.difference_update(later_repairs - current_warnings)
+    return pending - repair_attempted
+
+
+def compact_context_catalog(entries: list[dict]) -> str:
+    """Render a short, human-readable catalog of expandable phrase IDs.
+
+    ``list_context`` is a discovery tool, not a score dump.  Preserve each
+    section marker and phrase-id availability, but collapse consecutive
+    ``pNNNN`` IDs into inclusive ranges.
+    """
+    grouped: dict[str, list[str]] = {}
+    for entry in entries:
+        marker = str(entry.get("section_marker") or "未分段").strip() or "未分段"
+        grouped.setdefault(marker, []).append(str(entry["phrase_id"]))
+
+    def compact(ids: list[str]) -> str:
+        runs: list[tuple[str, str]] = []
+        start = previous = ids[0]
+        previous_number = int(match.group(1)) if (match := re.search(r"(\d+)$", previous)) else None
+        for phrase_id in ids[1:]:
+            match = re.search(r"(\d+)$", phrase_id)
+            number = int(match.group(1)) if match else None
+            if number is not None and previous_number is not None and number == previous_number + 1:
+                previous, previous_number = phrase_id, number
+                continue
+            runs.append((start, previous))
+            start = previous = phrase_id
+            previous_number = number
+        runs.append((start, previous))
+        return "、".join(first if first == last else f"{first}–{last}" for first, last in runs)
+
+    lines = [f"可展开更早段｜共 {len(entries)} 段"]
+    lines.extend(f"{marker}：{compact(ids)}" for marker, ids in grouped.items())
     return "\n".join(lines)
 
 
@@ -770,24 +894,44 @@ class RealToolRuntime:
         self.toward_reference = toward_reference
         self.target_patches = list(target_patches or [])
         self.calls: list[dict] = []
+        notes = item.get("input", {}).get("notes_without_jianzi", [])
+        missing_event_indices = [
+            int(note["index"]) for note in notes
+            if note.get("index") is not None
+            and not (str(note.get("abc") or "").strip() == "|"
+                     or str(note.get("jianpu") or "").strip() == "|"
+                     or note.get("duration") == "小节线")
+            and note.get("event_index") is None
+        ]
+        if missing_event_indices:
+            raise ValueError(
+                "public tool protocol requires continuous event_index for every "
+                f"non-bar note; missing source_index={missing_event_indices}"
+            )
         self.event_to_source = {
             int(note["event_index"]): int(note["index"])
-            for note in item.get("input", {}).get("notes_without_jianzi", [])
+            for note in notes
             if note.get("event_index") is not None
         }
         self.source_to_event = {source: event for event, source in self.event_to_source.items()}
+        if len(self.event_to_source) != len(self.source_to_event):
+            raise ValueError("public tool protocol has duplicate event_index values")
         # edit_plan 的累计 patch：多批次提交时，预览与审计始终针对累计状态，
         # 否则后续批次会被误报为“其余音全部待定”。重复序号按序覆盖。
         self.accumulated_patches: list[dict] = []
 
     def _event_to_source(self, value: Any) -> int:
-        """Resolve public continuous 音序; legacy source indexes remain accepted."""
+        """Resolve a required public continuous 音序 to its source row."""
         index = int(value)
-        return self.event_to_source.get(index, index)
+        if index not in self.event_to_source:
+            raise ValueError(f"unknown public event_index: {index}")
+        return self.event_to_source[index]
 
     def _source_to_event(self, value: Any) -> int:
         index = int(value)
-        return self.source_to_event.get(index, index)
+        if index not in self.source_to_event:
+            raise ValueError(f"source_index has no public event_index: {index}")
+        return self.source_to_event[index]
 
     def invoke(self, name: str, args: dict) -> dict:
         try:
@@ -827,7 +971,10 @@ class RealToolRuntime:
                                     "section_marker": section.get("marker", ""),
                                     "event_range": older["input"]["event_range"]})
                 entries.sort(key=lambda entry: int(entry["event_range"]["start"]))
-                result = {"count": len(entries), "phrases": entries, "readonly": True}
+                result = {
+                    "text": compact_context_catalog(entries),
+                    "readonly": True,
+                }
             elif name == "get_pitch_candidates":
                 explicit_target = args.get("target_midi")
                 skipped_indices = []
@@ -839,12 +986,13 @@ class RealToolRuntime:
                         indices = [self._event_to_source(args["event_index"])]
                     elif args.get("event_indices") is not None:
                         indices = [self._event_to_source(value) for value in args.get("event_indices") or []]
-                    elif args.get("source_index") is not None:
-                        indices = [int(args["source_index"])]
                     else:
-                        indices = [int(value) for value in args.get("source_indices") or []]
+                        raise ValueError(
+                            "event_index, event_indices or target_midi is required; "
+                            "source_index is internal-only"
+                        )
                     if not indices:
-                        raise ValueError("source_index, source_indices or target_midi is required")
+                        raise ValueError("event_index, event_indices or target_midi is required")
                     is_batch_query = len(indices) > 1
                     valid_entries = []
                     skipped_indices = []
@@ -1086,25 +1234,30 @@ def response_content_blocks(response) -> list[dict[str, Any]]:
     return blocks
 
 
-def parse_final(text: str) -> dict:
-    """Extract the first complete JSON object from a model response.
+def parse_final(text: str, *, required_keys: set[str] | None = None) -> dict:
+    """Extract the final complete JSON object from a model response.
 
     Models sometimes wrap the object in Markdown fences or a short prose
-    prefix/suffix.  ``raw_decode`` lets us stop at the end of the first
-    complete object instead of joining unrelated braces with ``rfind``.
+    prefix/suffix.  ``raw_decode`` lets us stop at the end of each complete
+    object instead of joining unrelated braces with ``rfind``.  We retain the
+    last one: GLM can occasionally echo a malformed draft or a tool receipt
+    before emitting its actual final envelope.
     When the object is truncated only by missing closing delimiters, a
     conservative delimiter repair is attempted; no tokens are changed.
     """
     decoder = json.JSONDecoder()
     last_error: json.JSONDecodeError | None = None
+    last_payload: dict | None = None
     for start, char in enumerate(text):
         if char != "{":
             continue
         candidate = text[start:]
         try:
             payload, _ = decoder.raw_decode(candidate)
-            if isinstance(payload, dict):
-                return payload
+            if (isinstance(payload, dict)
+                    and (required_keys is None or required_keys.issubset(payload))):
+                last_payload = payload
+                continue
         except json.JSONDecodeError as exc:
             last_error = exc
 
@@ -1141,10 +1294,14 @@ def parse_final(text: str) -> dict:
         )
         try:
             payload = json.loads(repaired)
-            if isinstance(payload, dict):
-                return payload
+            if (isinstance(payload, dict)
+                    and (required_keys is None or required_keys.issubset(payload))):
+                last_payload = payload
+                continue
         except json.JSONDecodeError as exc:
             last_error = exc
+    if last_payload is not None:
+        return last_payload
     if last_error is not None:
         raise last_error
     raise ValueError("final response has no JSON object")
@@ -1225,6 +1382,61 @@ def recover_labeled_teacher_envelope(text: str) -> dict | None:
     }
 
 
+def recover_malformed_summary_envelope(text: str) -> dict | None:
+    """Recover a valid call array when only the summary string is malformed.
+
+    GLM occasionally puts an unescaped quote in ``decision_summary`` while
+    the final ``tool_calls`` array itself remains valid JSON.  Rejecting that
+    response discards an otherwise executable and fully structured tool turn.
+    Recover only when both labelled fields are present and the call array can
+    be decoded losslessly; the summary is retained as plain text rather than
+    attempting to reinterpret or edit it as JSON.
+    """
+    matches = list(re.finditer(r'"tool_calls"\s*:\s*(\[)', text))
+    if not matches:
+        return None
+    match = matches[-1]
+    try:
+        calls, _ = json.JSONDecoder().raw_decode(text[match.start(1):])
+    except json.JSONDecodeError:
+        # A recurrent GLM variant closes the arguments object but omits the
+        # enclosing call-object brace (``...arguments:{...}]}]``).  The
+        # labelled name plus independently decodable arguments object remain
+        # lossless.  Extract only those explicit pairs; do not try to repair
+        # arbitrary JSON tokens or fabricate missing argument values.
+        calls = []
+        call_pattern = re.compile(
+            r'"name"\s*:\s*"(?P<name>[^"]+)"\s*,\s*'
+            r'"arguments"\s*:\s*'
+        )
+        tail = text[match.start(1):]
+        for call_match in call_pattern.finditer(tail):
+            try:
+                arguments, _ = json.JSONDecoder().raw_decode(
+                    tail[call_match.end():]
+                )
+            except json.JSONDecodeError:
+                continue
+            if isinstance(arguments, dict):
+                calls.append({"name": call_match.group("name"),
+                              "arguments": arguments})
+        if not calls:
+            return None
+    if not isinstance(calls, list):
+        return None
+    summary_matches = list(re.finditer(r'"decision_summary"\s*:\s*"', text[:match.start()]))
+    if not summary_matches:
+        return None
+    summary = text[summary_matches[-1].end():match.start()].rstrip()
+    if summary.endswith(","):
+        summary = summary[:-1].rstrip()
+    if summary.endswith('"'):
+        summary = summary[:-1]
+    if not summary.strip():
+        return None
+    return {"decision_summary": summary.strip(), "tool_calls": calls}
+
+
 def recover_explicit_noop_prose(text: str) -> dict | None:
     """Normalize GLM's explicit no-op prose into the teacher envelope.
 
@@ -1249,9 +1461,10 @@ def parse_teacher_envelope(text: str, *, forbidden_phrases: tuple[str, ...] = ()
     payload = recover_labeled_teacher_envelope(text)
     if payload is None:
         try:
-            payload = parse_final(text)
+            payload = parse_final(text, required_keys={"tool_calls"})
         except ValueError as exc:
-            payload = recover_explicit_noop_prose(text)
+            payload = (recover_malformed_summary_envelope(text)
+                       or recover_explicit_noop_prose(text))
             if payload is None:
                 raise exc
     # Some providers wrap the requested envelope in a single ``tool_turn``
@@ -1263,8 +1476,20 @@ def parse_teacher_envelope(text: str, *, forbidden_phrases: tuple[str, ...] = ()
     payload = recover_prefixed_summary(text, payload)
     if not isinstance(payload, dict):
         raise ValueError("teacher envelope must be a JSON object")
-    if set(payload) - {"decision_summary", "tool_calls"} or "tool_calls" not in payload:
-        raise ValueError("teacher envelope must contain only tool_calls and optional decision_summary")
+    # ``private_reasoning`` is a teacher-only scratchpad.  It may use the
+    # private GQS/reference supplied to the teacher, so accepting it must not
+    # make it part of the parsed envelope returned to the public trajectory
+    # builder.  The raw provider response stays solely in teacher_io_trace
+    # until the existing redaction step; public messages receive only the
+    # validated decision_summary and tool calls below.
+    allowed_fields = {"private_reasoning", "decision_summary", "tool_calls"}
+    if set(payload) - allowed_fields or "tool_calls" not in payload:
+        raise ValueError(
+            "teacher envelope must contain tool_calls plus optional "
+            "decision_summary/private_reasoning"
+        )
+    if "private_reasoning" in payload and not isinstance(payload["private_reasoning"], str):
+        raise ValueError("private_reasoning must be a string when present")
     raw_summary = str(payload.get("decision_summary") or "").strip()
     if not raw_summary:
         raise ValueError("teacher envelope requires decision_summary before every tool call")
@@ -1276,12 +1501,25 @@ def parse_teacher_envelope(text: str, *, forbidden_phrases: tuple[str, ...] = ()
     calls = payload.get("tool_calls")
     if not isinstance(calls, list):
         raise ValueError("tool_calls must be a list")
+    # A small batch is useful for genuinely independent checks, but a model
+    # must not turn one round into dozens of candidate queries.  It remains
+    # free to choose a single-event or multi-event query shape.
+    if len(calls) > 5:
+        raise ValueError("teacher envelope permits at most five tool calls per assistant turn")
     normalized = []
     for position, call in enumerate(calls, 1):
         if not isinstance(call, dict):
             raise ValueError(f"tool_calls[{position}] must be an object")
         name = str(call.get("name") or "").strip()
         arguments = call.get("arguments")
+        # GLM occasionally flattens the sole edit_plan argument one level,
+        # returning {"name": "edit_plan", "jianzi_rows": [...]} rather
+        # than putting it under ``arguments``.  This is losslessly
+        # equivalent to the documented protocol; normalize only this
+        # unambiguous one-tool shape rather than accepting arbitrary fields.
+        if (arguments is None and name == "edit_plan"
+                and set(call) == {"name", "jianzi_rows"}):
+            arguments = {"jianzi_rows": call["jianzi_rows"]}
         # Some providers serialize the arguments object one extra time.  A
         # valid JSON object string is losslessly equivalent and safe to
         # normalize; arbitrary text remains rejected below.
@@ -1612,6 +1850,27 @@ def validate_jianzi_only(
     }
 
 
+def public_pitch_warning_source_indices(
+    item: dict, *, historical: dict[tuple[str, str], dict] | None = None,
+) -> set[int]:
+    """Return current-phrase pitch warnings safe to expose in a Guqinizer prompt.
+
+    This deliberately reuses the same audit path as ``edit_plan``.  It reads
+    only the public Base plan, notation and prior model-generated history;
+    sealed reference actions are never consulted.
+    """
+    _, report = validate_jianzi_only(
+        item, [], toward_reference=False, require_complete=False,
+        historical=historical,
+    )
+    return {
+        int(warning["source_index"])
+        for warning in report.get("warnings") or []
+        if warning.get("code") == "jianzi_pitch_mismatch"
+        and warning.get("source_index") is not None
+    }
+
+
 def can_accept_empty_tool_turn(
     item: dict, patches: list[dict] | None = None, *, historical: dict | None = None
 ) -> bool:
@@ -1637,7 +1896,8 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         item, historical
     )
     public_input = _public_input(item)
-    basic = objective == "basic_fingering"
+    direct_final = stage == "single_stage"
+    basic = objective == "basic_fingering" or direct_final
     toward = objective == "toward_reference"
     review_noop = objective == "review_noop"
     if not (basic or toward or review_noop):
@@ -1654,11 +1914,13 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
     private_instruction["tools"] = public_tools_for(stage, basic=basic)
     private_instruction["teacher_only_goal"] = {
         "objective": (
-            "为当前段每个演奏事件填写可读、可演奏的基础减字初稿"
-            if basic else
+            "从空白谱面一次完成当前段可读、可演奏的最终减字、复杂技法和显示范围"
+            if direct_final else
+            ("为当前段每个演奏事件填写可读、可演奏的基础减字初稿"
+             if basic else
             ("复核现有减字，并说明当前稿为何可以直接保留"
              if review_noop else
-             "依据 GQS 与上下文润色最终减字、复杂技法和空显示范围")
+             "依据 GQS 与上下文润色最终减字、复杂技法和空显示范围"))
         )
     }
     private_instruction["rules"] = ([
@@ -1666,15 +1928,10 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         f"直接给出可独立核查的音乐学复核意见，不调用工具；最后必须用“{NOOP_CONCLUSION}”收束。",
         "用“当前稿”或“当前谱面”指称现有内容，不讨论生成流程或数据来源。",
     ] if review_noop else [
-        "唯一编辑入口是 edit_plan.jianzi_rows=[[音序,减字文字],...]；小节线没有音序。",
-        "私有标注可以用于内部决定哪里需要改、往什么方向改；decision_summary 会原样进入学生可见轨迹，公开 reasoning 的任务是解释修改为什么在古琴演奏上合理，而不是隐藏标注事实后重新证明答案。",
+        "私有标注可以用于内部决定哪里需要改、往什么方向改；decision_summary 会作为训练轨迹中的推理部分，用于训练模型推理出应该如何在没有参考标注时编辑完成专业的减字谱，因此不得提及 GQS、教师提示、系统提示、教师私有参考、最终标注、参考答案或目标答案等相关字眼，也不要出现不得写“与参考一致”“参考使用”或“按提示”等说法",
         "对新选或改写的按音、撮等双音/复合取声，在 decision_summary 的逐音或相邻音组分析中简短说明：左手为何选用该按指、该按位与另一按位能否同时落手；右手为何选该取声及其与目标弦的关系。理由以实际可演奏性、音高和前后衔接为主，避免空泛重复。",
-        "尽量要逐音说明为什么选择该左右手动作/手指；逐小段说明选择该减字在情感表达上的考虑。",
-        *([] if allow_private_reasoning_leakage else [
-            "decision_summary 绝对不得提及 GQS、教师提示、系统提示、教师私有参考、最终标注、参考答案或目标答案；不得写“与参考一致”“参考使用”或“按提示”；也不得转述只有私有标注中出现的具体减字作为理由。需要使用私有目标规划时，只在内部决定 tool_calls，不在摘要中说明来源。"
-        ]),
-        "最终结束前每个演奏事件必须得到字符串；一次 edit_plan 可以只提交已决定修改的部分行，未提交的行保留现状。空字符串的直接语义是将该行 jianzi_text 置空；不会删除声音或演奏状态。若前一减字已覆盖多个动作，后续行可用空字符串表示不重复显示。",
-        "音高工具只在减字与简谱都可可靠解析时给出警告；复杂技法或未解析动作不算失败。",
+        "**尽量要逐音说明为什么选择该左右手动作/手指；逐小段说明选择该减字在情感表达上的考虑。一定要详细说明原因，因为这涉及到学生模型能否真正学会复杂指法的意义**",
+        "最终结束前每个演奏事件必须得到字符串；若前一减字已覆盖多个动作，后续行可用空字符串置空表示不重复显示。",
     ])
     # Keep the surface order explicit in the teacher-only prompt.  The model
     # otherwise sometimes copies the semantic field order (finger/string/hui)
@@ -1688,7 +1945,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         "除撮、泼、剌等明确的多弦复合写法外，一个起音的弦序只写在该音右手指法之后；"
         "完成前逐项比对这四组正例，修正任何把弦序写到徽位之前的行。"
     )
-    if basic:
+    if basic and not direct_final:
         private_instruction["rules"] = [
             jianzi_field_order_rule,
             "首次查询音高时，若当前段有4个或以上可解析的发音事件，尽量把至少4个（最好全部）音序放在同一次 get_pitch_candidates 的 event_indices 中；候选会按目标音高自动去重。只有后续确需核查某个单音时才逐音查询，不要把首次查询拆成逐音调用。",
@@ -1705,10 +1962,16 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             jianzi_field_order_rule,
             "休止和延音行没有新音高，但若要表达走猱、猱、吟、泛止等延续动作，可以提交减字。",
             "给出的 GQS 参考是改进方向，不要求逐字复制；请结合基础初稿、上下文和专业判断适度加入高级指法。",
-            "必须从头到尾按音序审阅完整个当前段：可以逐音分析，也可以每次按一小组相邻音分析，但不能只讨论少数差异音便结束。私有标注用于提示值得关注的位置和方向，不要求逐字照抄；公开 reasoning 应说明各音或各小组为何保留或修改，以及相关的音高、技法和减字取舍，不要说“因为标注/参考这样写”。edit_plan.jianzi_rows 只填写实际决定改写的音，不必重发保留项。",
+            "必须从头到尾按音序审阅完整个当前段：可以逐音分析，也可以每次按一小组相邻音分析，但不能只讨论少数差异音便结束。私有标注用于提示值得关注的位置和方向，不要求逐字照抄；公开 reasoning 应说明各音或各小组为何保留或修改，以及相关的音高、技法和减字取舍，不要说“因为标注/参考这样写”。",
             "遇到复杂技法时，应结合相邻音组说明其演奏前提和效果，例如承接的弦、按位、右手动作或余音状态；重点核对走手动作的同弦连续性，以及掐撮三声等组合技法此前是否已建立所需的撮弦、按散关系和按位。允许依据完整上下文作出与私有标注不同但合理的判断。",
             "如果逐音分析后确认当前基础初稿已经合适，不需要润色，则不要调用 edit_plan；tool_calls 返回空数组，并在 decision_summary 中逐音或按相邻音组说明为何现有指法、衔接和技法已经足够，无需为了制造变化而改写。",
         ] + private_reference_semantics_rules(stage) + private_instruction["rules"]
+        if direct_final:
+            private_instruction["rules"] = [
+                jianzi_field_order_rule,
+                "当前段从空白谱面开始：首次查询音高时，若有4个或以上可解析发音事件，尽量把至少4个（最好全部）音序放在同一次 get_pitch_candidates 的 event_indices 中；之后按候选、上下文与演奏可行性完成最终减字。",
+                "不要先写一套受限的基础稿再等待第二阶段；本阶段直接决定需要的走手、复合技法、泛音区间和空显示，同时逐音检查音高与左右手可演奏性。",
+            ] + private_instruction["rules"]
     # Retry diagnostics remain in the private failure trace only.  Do not add
     # them to the teacher prompt: they can distract the model and expose
     # implementation details unrelated to the musical decision.
@@ -1720,12 +1983,16 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         "final_answer": f"直接输出最终复核意见文字，并以“{NOOP_CONCLUSION}”结尾；不要输出 JSON、tool_calls、Markdown 或代码围栏。",
     } if review_noop else {
         "tool_turn": {
+            "private_reasoning": "可选；仅供教师内部思考，可引用私有 GQS/标注；"
+                                 "系统会丢弃该字段，绝不进入训练轨迹或公开消息",
             "decision_summary": "必填；基于公开谱面、前文或已有工具结果的理由或思考过程"
                                "（不得含未转义的半角双引号或换行，引用参数用中文引号）",
             "tool_calls": [{"name": "工具名", "arguments": {"参数": "值"}}],
         },
         "rules": [
             "每轮只输出一个 JSON 对象，不要输出 Markdown、代码围栏或 JSON 之外的文字。",
+            "private_reasoning 可选，仅用于你在私有参考与公开谱面之间作内部核对；"
+            "可提及私有标注，但该字段会被丢弃，不能替代公开 decision_summary。",
             "每次工具调用前必须填写 decision_summary；把一个或多个调用写入 tool_calls。",
             "若分析后确定无需调用工具，也必须填写有音乐学内容的 decision_summary，并令 tool_calls=[]。",
             "工具 Schema 已在 tools 字段中给出；不得编造工具名或参数。",
@@ -1738,6 +2005,12 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             "不得复述隐藏推理过程。"
         ),
     })
+    if stage in {"guqinization", "single_stage"}:
+        item["public_pitch_warning_source_indices"] = sorted(
+            public_pitch_warning_source_indices(item, historical=historical)
+        )
+    else:
+        item.pop("public_pitch_warning_source_indices", None)
     user_payload = render_public_prompt(item, stage)
     api_messages: list[dict[str, Any]] = [
         {"role": "user", "content": user_payload}
@@ -1756,6 +2029,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
     pitch_candidate_round: dict[int, int] = {}
     pitch_repair_attempted: set[int] = set()
     pending_pitch_warning_events: set[int] = set()
+    submitted_edit_signatures: set[str] = set()
     teacher_io_trace: list[dict] = []
     for round_number in range(1, max_rounds + 1):
         options = {"model": model,
@@ -1831,6 +2105,12 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             results.append({"name": name, "arguments": arguments, "result": result})
             if (name == "edit_plan" and result.get("ok")
                     and result["result"].get("valid")):
+                rows = arguments.get("jianzi_rows") or []
+                signature = json.dumps(rows, ensure_ascii=False,
+                                       sort_keys=True, separators=(",", ":"))
+                repeated_submission = bool(rows) and signature in submitted_edit_signatures
+                if rows:
+                    submitted_edit_signatures.add(signature)
                 edited_events = {
                     int(row[0]) for row in arguments.get("jianzi_rows") or []
                     if isinstance(row, list) and row
@@ -1840,22 +2120,20 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
                     event_index for event_index in edited_events
                     if pitch_candidate_round.get(event_index, round_number) < round_number
                 }
-                pitch_repair_attempted.update(candidate_informed_edits)
                 current_warning_events = {
                     runtime._source_to_event(int(warning["source_index"]))
                     for warning in audit_payload.get("warnings") or []
                     if warning.get("code") == "jianzi_pitch_mismatch"
                     and warning.get("source_index") is not None
                 }
-                # Once a warning has appeared, merely overwriting the row or
-                # making it disappear in another same-turn edit is not enough:
-                # the training trace must show a later candidate lookup and a
-                # candidate-informed repair edit for that exact event.
-                previously_pending = set(pending_pitch_warning_events)
-                pending_pitch_warning_events.update(current_warning_events)
-                pending_pitch_warning_events.difference_update(
-                    (candidate_informed_edits & previously_pending)
-                    - current_warning_events
+                # A first edit may itself reveal a warning.  It cannot count
+                # as its own repair: require another model turn so the warning
+                # becomes visible in context before accepting the trajectory.
+                unresolved_pitch_warning_events = advance_pitch_warning_state(
+                    pending_pitch_warning_events,
+                    pitch_repair_attempted,
+                    current_warning_events,
+                    candidate_informed_edits,
                 )
                 # 必须当前批次重放有效：畸形批次不得借助“空累计＝距离持平”
                 # 的确认路径蒙混过关。
@@ -1878,10 +2156,13 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
                 # musically valid techniques cannot be represented by the
                 # simple pitch parser, so requiring every warning to vanish
                 # causes an unproductive correction loop.
-                unresolved_pitch_warning_events = (
-                    pending_pitch_warning_events - pitch_repair_attempted
-                )
-                if unresolved_pitch_warning_events:
+                # A duplicate submission cannot provide new evidence or
+                # change the score.  Preserve the accepted accumulated plan
+                # rather than consuming more turns in an identical warning
+                # loop.
+                if repeated_submission and preview_matches:
+                    accepted_preview = normalize_patches(accumulated)
+                elif unresolved_pitch_warning_events:
                     accepted_preview = None
                 elif preview_matches:
                     accepted_preview = normalize_patches(accumulated)
@@ -1897,24 +2178,49 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
                 item, runtime.accumulated_patches, historical=historical
             ):
                 public_messages.append(public_assistant)
-                accepted_preview = []
-                no_edit_accepted = True
-                final_payload = {"patches": []}
+                accepted_preview = normalize_patches(runtime.accumulated_patches)
+                no_edit_accepted = not bool(runtime.accumulated_patches)
+                final_payload = {"patches": accepted_preview}
                 break
-            # This assistant turn incorrectly attempted to terminate an
-            # incomplete plan.  It remains in the private API/audit trace so
-            # the next response receives the correction, but is not a public
-            # training turn: otherwise public messages contain adjacent,
-            # contradictory assistant roles with no intervening observation.
+            # Keep the correction in both transcripts.  Previously it was
+            # injected only into api_messages, so the teacher could refer to
+            # a supposedly tool-reported missing-note warning that was absent
+            # from the public training trajectory.  Also identify the actual
+            # pending event indices instead of making the model guess.
+            _, completeness = validate_jianzi_only(
+                item, runtime.accumulated_patches, toward_reference=False,
+                require_complete=True, historical=historical,
+            )
+            pending_source_indices = sorted({
+                int(problem["source_index"])
+                for problem in completeness.get("problems", [])
+                if problem.get("code") == "pending_jianzi_text"
+                and problem.get("source_index") is not None
+            })
+            pending_event_indices = [
+                runtime._source_to_event(index) for index in pending_source_indices
+            ]
+            pending_text = (
+                "；当前段仍待填写的音序："
+                + "、".join(str(index) for index in pending_event_indices)
+                if pending_event_indices else "；请检查当前段基础稿是否完整"
+            )
+            # This completeness feedback is an internal control message, not
+            # a real edit_plan response; keep it out of public_messages.
+            correction = {
+                "tool_results": [{
+                    "ok": False,
+                    "error": (
+                        "当前段仍有待填写的演奏音"
+                        + pending_text
+                        + "；不能以空工具调用结束，请通过 edit_plan.jianzi_rows 填写这些行。"
+                    ),
+                }],
+                "instruction": "根据这条校验反馈继续；需要编辑时调用 edit_plan。",
+            }
             api_messages.append({
                 "role": "user",
-                "content": json.dumps({
-                    "tool_results": [{
-                        "ok": False,
-                        "error": "当前段仍有待填写的演奏音，不能以空工具调用结束；请提交需要修改的 jianzi_rows。",
-                    }],
-                    "instruction": "根据这些真实工具结果继续；需要工具时输出 tool_calls。",
-                }, ensure_ascii=False),
+                "content": json.dumps(correction, ensure_ascii=False),
             })
             continue
         public_messages.append(public_assistant)
@@ -1925,7 +2231,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
                 "role": "assistant",
                 "content": (
                     "工具预览已通过，当前段基础减字填写完成。"
-                    if basic else "工具预览已通过，当前段减字润色完成。"
+                    if basic and not direct_final else "工具预览已通过，当前段最终减字填写完成。"
                 ),
             })
             break
@@ -1940,15 +2246,15 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             )
             if queried:
                 instruction = (
-                    "编辑工具仍报出音高不匹配。你已经查看过这些音的候选；"
-                    f"请根据候选对音序 {warning_indices} 至少进行一次修复性 edit_plan，"
-                    "只提交需要变化的行。即使判断警告可能来自复杂技法，也必须先尝试修复。"
+                    "编辑工具报出音高不匹配。你已经查看过这些音的候选；"
+                    f"请判断音序 {warning_indices} 是否需要修正。需要时只提交确实变化的行；"
+                    "若基于候选与音乐判断决定保留，可用 tool_calls=[] 结束并说明理由。"
                 )
             else:
                 instruction = (
-                    "编辑工具报出音高不匹配，暂不能结束。先查看这些音的候选："
+                    "编辑工具报出音高不匹配。先查看这些音的候选，再决定是否修正："
                     f"音序 {warning_indices}；下一轮调用 get_pitch_candidates，"
-                    "把这些音序放入 event_indices。看到真实候选后，再用 edit_plan 尝试修复。"
+                    "把这些音序放入 event_indices。看到真实候选后，可修正或保留并结束。"
                 )
         else:
             instruction = "根据这些真实工具结果继续；需要工具时输出 tool_calls。"
@@ -2036,17 +2342,57 @@ class _RecordingClient:
 
 
 class _RateLimitedMessages:
-    """Serialize API calls and enforce a minimum gap between requests."""
+    """Rate-limit local calls and, optionally, all worker processes together."""
 
     def __init__(self, messages, min_interval: float):
         self._messages = messages
         self._min_interval = max(0.0, float(min_interval))
         self._last_call = 0.0
+        self._global_min_interval = max(
+            0.0, float(os.getenv("GLM_GLOBAL_MIN_INTERVAL", "0"))
+        )
+        state = os.getenv("GLM_GLOBAL_RATE_LIMIT_STATE", "").strip()
+        self._global_state_path = Path(state) if state else None
+
+    def _reserve_global_slot(self) -> None:
+        """Reserve one cross-process request slot when configured.
+
+        ``--min-interval`` only spaces calls made by one worker.  The batch
+        runner uses separate processes, so a small shared lock file is needed
+        to prevent simultaneous retries from creating a 429 burst.
+        """
+        if not self._global_state_path or self._global_min_interval <= 0:
+            return
+        self._global_state_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._global_state_path.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                handle.seek(0)
+                try:
+                    previous = float(handle.read().strip() or "0")
+                except ValueError:
+                    previous = 0.0
+                now = time.monotonic()
+                # ``monotonic`` restarts at boot.  A persisted timestamp from
+                # a prior macOS/Linux boot must never turn into a days-long
+                # artificial wait for every resumed worker.
+                if previous > now:
+                    previous = 0.0
+                wait = self._global_min_interval - (now - previous)
+                if wait > 0:
+                    time.sleep(wait)
+                handle.seek(0)
+                handle.truncate()
+                handle.write(f"{time.monotonic():.9f}")
+                handle.flush()
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def create(self, **options):
         wait = self._min_interval - (time.monotonic() - self._last_call)
         if wait > 0:
             time.sleep(wait)
+        self._reserve_global_slot()
         self._last_call = time.monotonic()
         return self._messages.create(**options)
 
@@ -2091,7 +2437,7 @@ def generate_with_retries(client, model: str, item: dict, stage: str,
             if transient and attempt_number < attempts:
                 delay = min(60.0, 5.0 * (2 ** (attempt_number - 1))) + random.uniform(0.0, 2.0)
                 print(f"transient API error: retrying {item['trajectory_id']} {stage} "
-                      f"after {delay:.1f}s", flush=True)
+                      f"after {delay:.1f}s; cause={error}", flush=True)
                 time.sleep(delay)
     raise RuntimeError("teacher attempts exhausted: " + " | ".join(errors))
 
@@ -2100,7 +2446,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--input", type=Path, default=ROOT / "ABC_J/agent_training/inferred_v6/inferred_trajectories_train.jsonl")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "ABC_J/agent_training/messages_teacher_tools")
-    parser.add_argument("--limit", type=int, default=2)
     parser.add_argument("--stage", choices=("fingering_agent", "guqinization"),
                         help="limit generation to one agent stage")
     parser.add_argument("--max-actions", type=int,
@@ -2165,6 +2510,7 @@ def main() -> int:
             if not line.strip():
                 continue
             candidate = json.loads(line)
+            validate_normalized_tuning(candidate)
             if args.score_shard_count > 1 and score_bucket(candidate.get("score_key", "")) != args.score_shard_index:
                 continue
             rows.append(candidate)
@@ -2257,13 +2603,10 @@ def main() -> int:
             if not infer_jianzi_text_patches(intermediate["plan"], references)["patches"]:
                 completed_ids.add(source_id)
     pool = [row for row in eligible if row["trajectory_id"] not in completed_ids]
-    # ``args.limit`` applies to the already-filtered eligible pool.  Do not
-    # subtract global completed IDs here: Guqinizer resume commonly receives
-    # a large fingering intermediate file containing no-op phrases outside
-    # the requested retry set, and counting those would make the retry pool
-    # appear empty.
-    remaining = args.limit
-    selected = pool[:remaining]
+    # The already-filtered eligible pool is the complete requested workload.
+    # In particular, an explicit --trajectory-id set must never be silently
+    # truncated by an unrelated default limit.
+    selected = pool
     counts = Counter(row.get("agent_stage") for row in existing_public)
     failures = list(existing_report.get("failures") or [])
     quarantined = list(existing_report.get("quarantine") or [])

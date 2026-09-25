@@ -10,7 +10,7 @@
 3. 按 `DOCS/agent_training_handoff.md` 和 `DOCS/agent_sft_training_guide.md` 恢复数据生成、SFT 导出和评估流程。
 4. `ABC_J/agent_training/messages_repeat_semantics_pure_cuo_repaired_final_v3_public/` 是当前已脱敏公开轨迹；
    `train/data/guqin_agent_sft_v5_pure_cuo_final_v3/` 是对应 SFT 数据。
-5. 当前 GQS 1.2 继续生成所需输入位于 `ABC_J/agent_training/inferred_gqs_v12/`，训练 split 清单位于
+5. 当前 GQS 1.2 继续生成所需输入位于 `ABC_J/agent_training/inferred_gqs_v12_tuningfix_20260914/`，训练 split 清单位于
    `ABC_J/agent_training/pitch_eligible_gqs_v12_train/`。
 6. 源数据获取/解析脚本保留在 `scripts/`；`ABC_J/final/`、`ABC_J/round2/`、`ABC_J/candidates/`、
    `ABC_J/results/` 以及 `ABC_J/agent_training/inferred_*`、`gqs_*` 和 `reference_trajectories_*` 是保留的

@@ -34,7 +34,7 @@ def main() -> int:
         for row in records:
             rows += 1
             stage = row.get("agent_stage")
-            if stage in {"fingering_agent", "guqinization"}:
+            if stage in {"fingering_agent", "guqinization", "single_stage"}:
                 expected = public_system_for(stage, basic=stage == "fingering_agent")
                 for message in row.get("messages") or []:
                     if message.get("role") == "system":

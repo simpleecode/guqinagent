@@ -84,10 +84,38 @@ def _public_input(item: dict) -> dict:
             int(note["index"]): note.get("event_index")
             for note in notes if note.get("event_index") is not None
         }
+        notes_by_source = {
+            int(note["index"]): note for note in notes
+            if note.get("index") is not None
+        }
+        visible_actions = []
         for action in action_list:
             source = action.pop("source_index", None)
-            action["event_index"] = source_to_event.get(
-                int(source), source) if source is not None else None
+            if source is None:
+                action["event_index"] = None
+                visible_actions.append(action)
+                continue
+            source = int(source)
+            if source not in source_to_event:
+                note = notes_by_source.get(source) or {}
+                # Legacy phrase handoffs sometimes retain an empty action for
+                # a barline.  It is not an event and cannot appear in the
+                # public event-index protocol; omit only that non-sounding
+                # artifact.  A real note without event_index remains a hard
+                # schema failure below.
+                if (str(note.get("abc") or "") == "|"
+                        or str(note.get("duration") or "") == "小节线"
+                        or str(note.get("jianpu") or "") == "|"):
+                    continue
+                raise ValueError(
+                    f"public trajectory protocol requires event_index for source_index={source}"
+                )
+            action["event_index"] = source_to_event[source]
+            visible_actions.append(action)
+        if isinstance(result, list):
+            result[:] = visible_actions
+        else:
+            result["actions"] = visible_actions
         return result
 
     current_notes = phrase_context["current_phrase"]
@@ -189,7 +217,11 @@ def chord_jianpu_label(abc: Any, written: Any, jianpu_alt: Any = None) -> str:
     return written
 
 
-def _render_phrase_lines(notes: list[dict[str, Any]], actions: list[dict[str, Any]], *, readonly: bool = False) -> str:
+def _render_phrase_lines(
+    notes: list[dict[str, Any]], actions: list[dict[str, Any]], *,
+    readonly: bool = False,
+    pitch_warning_source_indices: set[int] | None = None,
+) -> str:
     event_to_source = {
         int(note["event_index"]): int(note["index"])
         for note in notes if note.get("event_index") is not None
@@ -199,21 +231,18 @@ def _render_phrase_lines(notes: list[dict[str, Any]], actions: list[dict[str, An
         if action.get("source_index") is not None:
             key = int(action["source_index"])
         elif action.get("event_index") is not None:
-            key = event_to_source.get(int(action["event_index"]), int(action["event_index"]))
+            event_index = int(action["event_index"])
+            if event_index not in event_to_source:
+                raise ValueError(f"unknown public event_index: {event_index}")
+            key = event_to_source[event_index]
         else:
             continue
         by_index[key] = action
     lines = ["序号｜简谱｜ABC｜时值｜谱面减字"]
+    pitch_warning_source_indices = pitch_warning_source_indices or set()
     for note in notes:
         source_index = int(note["index"])
-        # Agent-facing rows use the continuous event ordinal.  Older
-        # trajectories without it retain source_index as a compatibility
-        # fallback until regenerated.
         index = note.get("event_index")
-        if index is None and not (str(note.get("jianpu") or "").strip() == "|"
-                                  or str(note.get("abc") or "").strip() == "|"
-                                  or note.get("duration") == "小节线"):
-            index = source_index
         written = note.get("jianpu") or note.get("jianpu_alt") or "休止"
         # 和弦音（撮等）的简谱列显示完整双谱字（第二个谱字存储于 jianpu_alt）。
         jianpu = chord_jianpu_label(note.get("abc"), written, note.get("jianpu_alt"))
@@ -221,27 +250,33 @@ def _render_phrase_lines(notes: list[dict[str, Any]], actions: list[dict[str, An
         if note.get("duration") == "小节线" or note.get("abc") == "|":
             lines.append("小节线")
             continue
-        elif stored_action is None and (str(note.get("abc") or "").startswith("z")
-                                        or str(jianpu).startswith("0")):
+        if index is None:
+            raise ValueError(
+                f"public trajectory protocol requires event_index for source_index={source_index}"
+            )
+        # A stored empty action is how the plan represents a rest or tie.  In
+        # a read-only handoff it must retain that musical meaning, rather than
+        # being rendered as a generic empty glyph.
+        elif (stored_action is None or (readonly and not str(
+                stored_action.get("jianzi_text") or "").strip())) and (
+                    str(note.get("abc") or "").startswith("z")
+                    or str(jianpu).startswith("0")):
             action, left, right, techniques, surface = "休止", "—", "—", "—", "[—]"
-        elif stored_action is None and (str(note.get("abc") or "").startswith("-")
-                                        or "延音" in str(jianpu)):
+        elif (stored_action is None or (readonly and not str(
+                stored_action.get("jianzi_text") or "").strip())) and (
+                    str(note.get("abc") or "").startswith("-")
+                    or "延音" in str(jianpu)):
             action, left, right, techniques, surface = "延音", "—", "承接前音", "—", "[续音]"
         else:
             action, left, right, techniques, surface = _action_columns(
                 stored_action, readonly=readonly
             )
-            if note.get("notation_omitted") and readonly:
-                # 只读前段已知是再作省略；当前段起始时不得泄露这一判断，
-                # 应让 agent 从上下文自行决定，先显示待填写占位。
-                surface = f"[{OMITTED_PLACEHOLDER}]"
+        if source_index in pitch_warning_source_indices:
+            surface += ":warning:音高不匹配"
         lines.append(
             f'{index}｜{jianpu}｜{note.get("abc") or "-"}｜{note.get("duration") or "-"}｜'
             f'{surface}'
         )
-    if readonly and any(note.get("notation_omitted") for note in notes):
-        lines.append(f"注｜标注〔{OMITTED_PLACEHOLDER}〕的音为再作省略音：仍需完整指法，"
-                     "最终减字谱不显示其减字。")
     return "\n".join(lines)
 
 
@@ -271,7 +306,7 @@ def render_public_prompt(item: dict, stage: str) -> str:
         ('泛音区间｜此段开始时仍然处于泛音区间；无须在段首重复添加泛起；要结束泛音区间，使用泛止'
          if item.get("harmonic_region_at_start") else
          '泛音区间｜段首未处于泛音区间'),
-        "泛音区间提示｜常规写法：进入泛音区间时在减字开头添加“泛起”；结束时可在当前减字末尾添加“泛止”，也常在随后的延音行单独填写“泛止”，不要强行合并。",
+        "泛音区间提示｜常规写法：要进入泛音区间，在减字开头添加“泛起”；要结束泛音区间时，可在当前减字末尾添加“泛止”，也可在随后的延音行单独填写“泛止”。",
         "",
     ]
     if previous:
@@ -286,7 +321,13 @@ def render_public_prompt(item: dict, stage: str) -> str:
     lines.extend([
         f'【当前段 {context.get("current_phrase_id")}｜待编辑】',
         *([section_marker(public["notes"])] if section_marker(public["notes"]) else []),
-        _render_phrase_lines(public["notes"], public["baseline_plan"].get("actions") or []),
+        _render_phrase_lines(
+            public["notes"], public["baseline_plan"].get("actions") or [],
+            pitch_warning_source_indices=(
+                {int(index) for index in item.get("public_pitch_warning_source_indices") or []}
+                if stage in {"guqinization", "single_stage"} else set()
+            ),
+        ),
     ])
     older = context.get("older_history") or {}
     if older.get("available"):

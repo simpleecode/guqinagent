@@ -26,15 +26,24 @@ def write_jsonl(path: Path, rows: list[dict]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--teacher-dir", type=Path, required=True)
-    parser.add_argument("--inferred-dir", type=Path, required=True)
+    parser.add_argument("--inferred-dir", type=Path,
+                        help="allow every ID present in these inferred train/validation/test files")
+    parser.add_argument("--allowed-id-file", type=Path,
+                        help="newline-delimited allowlist from a selection export")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
+    if bool(args.inferred_dir) == bool(args.allowed_id_file):
+        raise SystemExit("provide exactly one of --inferred-dir or --allowed-id-file")
     if args.output_dir.exists():
         raise FileExistsError(f"output already exists: {args.output_dir}")
     allowed: set[str] = set()
-    for split in ("train", "validation", "test"):
-        path = args.inferred_dir / f"inferred_trajectories_{split}.jsonl"
-        allowed.update(item["trajectory_id"] for item in read_jsonl(path))
+    if args.allowed_id_file:
+        allowed.update(line.strip() for line in args.allowed_id_file.read_text(encoding="utf-8").splitlines()
+                       if line.strip())
+    else:
+        for split in ("train", "validation", "test"):
+            path = args.inferred_dir / f"inferred_trajectories_{split}.jsonl"
+            allowed.update(item["trajectory_id"] for item in read_jsonl(path))
     args.output_dir.mkdir(parents=True)
     report: dict = {"allowed_inferred_trajectory_ids": len(allowed), "files": {}}
     for filename, key in (("messages_train.jsonl", "sample_id"), ("teacher_trajectory_audit.jsonl", "sample_id"), ("fingering_intermediates.jsonl", "trajectory_id")):

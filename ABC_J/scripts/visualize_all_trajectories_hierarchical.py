@@ -136,7 +136,14 @@ def canon(value: str) -> str:
 
 def pitch_symbols(source_item: dict | None, actions: dict[int, str],
                   score_history: list[dict] | None = None) -> dict[int, str]:
-    """Return ✓/✗/○ for the selected final stage, using normalized tuning."""
+    """Return a compact, non-ambiguous pitch-audit display symbol.
+
+    ✓/✗ are resolved audit outcomes.  ``—`` means the score row has no new
+    sounding pitch (rest/tie); ``？`` means it is sounding notation for which
+    the deterministic parser cannot currently establish a reliable pitch.
+    Keeping those two cases separate avoids presenting skipped rows as a
+    neutral third verdict beside actual matches and mismatches.
+    """
     if not source_item:
         return {}
     input_data = source_item.get("input") or {}
@@ -212,14 +219,21 @@ def pitch_symbols(source_item: dict | None, actions: dict[int, str],
             "notes": notes,
         }, 50.0)
     except Exception:
-        return {int(note["index"]): "○" for note in notes}
+        return {int(note["index"]): "？" for note in notes}
     result: dict[int, str] = {}
     for detail in report.get("details") or []:
         index = detail.get("index")
         if index is None or int(index) not in current_indices:
             continue
         status = detail.get("status")
-        result[int(index)] = "✓" if status == "matched" else "✗" if status == "mismatched" else "○"
+        if status == "matched":
+            result[int(index)] = "✓"
+        elif status == "mismatched":
+            result[int(index)] = "✗"
+        elif detail.get("reason") == "no_sounding_jianpu":
+            result[int(index)] = "—"
+        else:
+            result[int(index)] = "？"
     return result
 
 
@@ -414,8 +428,8 @@ def main() -> int:
                 "finger": (group["stages"].get("fingering_agent") or {}).get("actions", {}).get(index, ""),
                 "guqin": (group["stages"].get("guqinization") or {}).get("actions", {}).get(index, ""),
                 "annotation": ann,
-                "finger_pitch": finger_pitch.get(index, "○"),
-                "guqin_pitch": guqin_pitch.get(index, "○"),
+                "finger_pitch": finger_pitch.get(index, "？"),
+                "guqin_pitch": guqin_pitch.get(index, "？"),
             }
             for key in ("finger", "guqin"):
                 value = row[key]
@@ -435,8 +449,8 @@ def main() -> int:
                 "finger": (group["stages"].get("fingering_agent") or {}).get("actions", {}).get(index, ""),
                 "guqin": (group["stages"].get("guqinization") or {}).get("actions", {}).get(index, ""),
                 "annotation": ann,
-                "finger_pitch": finger_pitch.get(index, "○"),
-                "guqin_pitch": guqin_pitch.get(index, "○"),
+                "finger_pitch": finger_pitch.get(index, "？"),
+                "guqin_pitch": guqin_pitch.get(index, "？"),
             }
             for key in ("finger", "guqin"):
                 value = row[key]
@@ -489,7 +503,7 @@ const stageLabel={{fingering_agent:'Fingering',guqinization:'Guqinizer'}};
 function stageInfo(t,s){{const x=t.stages[s]||{{}};return `<span><b>${{stageLabel[s]}}</b> · ${{x.messages||0}} 消息 · ${{x.tool_calls||0}} 工具调用 · ${{esc(x.termination||'')}}</span>`}}
 function trajectory(t,s){{const x=t.stages[s]||{{}};const turns=x.trajectory||[];if(!turns.length)return '<p class="empty">[无该阶段轨迹]</p>';return `<div class="trajectory">${{turns.map(m=>`<section class="turn"><div class="turn-head"><span>第 ${{m.turn}} 轮</span><span class="role">${{esc(m.role)}}</span>${{m.name?`<span>工具：${{esc(m.name)}}</span>`:''}}</div><pre class="turn-content">${{esc(m.content||'[空内容]')}}</pre>${{m.tool_calls?`<pre class="tool-call">工具调用\n${{esc(m.tool_calls)}}</pre>`:''}}</section>`).join('')}}</div>`}}
 function teacherTrace(t,s){{const x=t.stages[s]||{{}};const traces=x.teacher_io_trace||[];if(!traces.length)return '<p class="empty">[无私有教师调用审计]</p>';return `<div class="trajectory">${{traces.map((v,i)=>`<section class="turn"><div class="turn-head"><span>教师 API 第 ${{i+1}} 轮</span></div><pre class="turn-content">${{esc(JSON.stringify(v,null,2))}}</pre></section>`).join('')}}</div>`}}
-function pitchCell(value){{return `<td class="pitch ${{value==='✓'?'match':value==='✗'?'mismatch':'unresolved'}}" title="✓ 匹配｜✗ 不匹配｜○ 无法可靠解析">${{esc(value||'○')}}</td>`}}
+function pitchCell(value){{const cls=value==='✓'?'match':value==='✗'?'mismatch':value==='—'?'not-applicable':'unresolved';const title=value==='—'?'无新音高（休止或延音）':value==='？'?'有音高但当前无法可靠解析': '✓ 匹配｜✗ 不匹配';return `<td class="pitch ${{cls}}" title="${{title}}">${{esc(value||'？')}}</td>`}}
 function table(t){{return `<div class="table-wrap"><table><thead><tr><th>序号</th><th>简谱</th><th>Fingering 最终版</th><th>Guqinizer 最终版</th><th>标注版本</th><th>Fingering 音高</th><th>Guqinizer 音高</th></tr></thead><tbody>${{t.rows.map(r=>r.kind==='section'?`<tr class="structure section-row"><td colspan="7">段落标记｜${{esc(r.marker)}}</td></tr>`:r.kind==='bar'?`<tr class="structure bar-row"><td colspan="7">小节线</td></tr>`:`<tr><td class="idx">${{r.index}}</td><td class="jp">${{esc(r.jianpu)}}</td><td class="jz ${{r.finger_status}}">${{esc(r.finger||'[空]')}}</td><td class="jz ${{r.guqin_status}}">${{esc(r.guqin||'[空]')}}</td><td class="jz ${{r.annotation?'':'both_empty'}}">${{esc(r.annotation||'[空]')}}</td>${{pitchCell(r.finger_pitch)}}${{pitchCell(r.guqin_pitch)}}</tr>`).join('')}}</tbody></table></div>`}}
 function phrase(t,open){{const noop=t.no_op?'<span class="chip noop">no-op</span>':'';return `<details class="phrase" data-id="${{esc(t.id)}}" ${{open?'open':''}}><summary><span>${{esc(t.phrase_id)}}</span>${{noop}}<span class="count">${{t.rows.length}} 行 · ${{esc(t.id)}}</span></summary><div class="body"><p class="meta">曲谱：${{esc(t.score_key)}}${{t.title?'｜'+esc(t.title):''}} · 标注对比及两阶段最终结果</p><div class="stage-summary">${{stageInfo(t,'fingering_agent')}}${{stageInfo(t,'guqinization')}}</div><details><summary>Fingering 完整轨迹（逐轮）</summary>${{trajectory(t,'fingering_agent')}}</details><details><summary>Guqinizer 完整轨迹（逐轮）</summary>${{trajectory(t,'guqinization')}}</details><details><summary>Guqinizer 教师原始输入输出（私有审计）</summary>${{teacherTrace(t,'guqinization')}}</details>${{table(t)}}</div></details>`}}
 function draw(){{const q=search.value.trim().toLowerCase(); tree.innerHTML=''; const buckets=new Map(); for(const t of data){{const hit=!q||[t.id,t.score_key,t.phrase_id,t.title].join(' ').toLowerCase().includes(q);if(!hit)continue; if(!buckets.has(t.score_key))buckets.set(t.score_key,[]);buckets.get(t.score_key).push(t)}} if(!buckets.size){{tree.innerHTML='<p class="empty">没有匹配的曲谱或 phrase。</p>';return}} for(const [score,items] of buckets){{const title=items[0].title||'';const d=document.createElement('details');d.className='score';d.open=Boolean(q);d.innerHTML=`<summary>${{esc(score)}}${{title?'｜'+esc(title):''}} <span class="count">${{items.length}} 个 phrase</span></summary><div>${{items.map(t=>phrase(t,Boolean(q))).join('')}}</div>`;tree.appendChild(d)}}}}
