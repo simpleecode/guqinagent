@@ -1,0 +1,40 @@
+# Test-benchmark score whitelist generated 2026-09-26.
+# Criterion: reference notation pitch-match rate strictly > 70% at 50 cents.
+# Denominator: only rows the current pitch auditor can parse as matched or mismatched.
+S1tbvmY3
+S26yxv5q
+S5C2nqTc
+S9JJeSp7
+S9x6xrBV
+SApzZmDj
+SBAwX43Q
+SCH7FWX4
+SHdc8A58
+SKIU1Qgw
+SM6TcwyQ
+SMcjde29
+SPtSPxwY
+SQAVtRQT
+ST65Msa6
+STN1D392
+STYDv7xh
+SVGgjsQ3
+SYfRQ9Ao
+SaN3X9UQ
+ScGgTmDm
+SeBx4Lvv
+SeuXWX4b
+SgyrJScP
+ShD3V8pA
+SjLqLX8p
+SknHwPhW
+SlXTUkVF
+SpwPjVka
+SqiKz6Xp
+SqjvBphK
+Sru5SUZq
+StwrXbDa
+SvCEkGQB
+SxhX3fgD
+Sy0h59DY
+SzyUVJiY
