@@ -14,7 +14,9 @@ from collections import Counter
 from pathlib import Path
 
 
-STAGE_SUFFIX = re.compile(r"-(?:fingering_agent|guqinization)-teacher-tools$")
+STAGE_SUFFIX = re.compile(
+    r"-(?:fingering_agent|guqinization|single_stage)-teacher-tools$"
+)
 FILES = {
     "messages_train.jsonl": "sample_id",
     "teacher_trajectory_audit.jsonl": "sample_id",

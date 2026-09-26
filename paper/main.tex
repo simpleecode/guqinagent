@@ -1,0 +1,111 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype,booktabs,tabularx,amsmath,enumitem,graphicx,xcolor,hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+\newcommand{\system}{\textsc{GuqinAgent}}
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\title{\system: Tool-Interactive Jianzipu Generation\\with Executable Pitch and Performance Constraints}
+\author{Anonymous Authors}
+\date{}
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Jianzipu, the action-oriented notation of the Chinese guqin, jointly encodes strings, left-hand positions, right-hand strokes, ornaments, and stateful performance conventions. Generating it from a melodic score is therefore not mere text transduction: an output must agree with pitch, tuning, inherited state, and basic performability. We introduce \system, a tool-interactive formulation of constrained jianzipu generation. Our contributions are: (i) a benchmark and executable runtime that turn ABC and numbered-notation phrases into stateful editing tasks; (ii) a two-stage agent that separates pitch-grounded fingering from idiomatic guqin refinement; and (iii) targeted inverse trajectory construction that converts annotated scores into auditable, redacted tool-use supervision. The runtime exposes pitch candidates, stateful editing, and compact context retrieval, and supports structured event-level evaluation rather than string overlap. This draft presents the task and system; final numerical results will be added after benchmark evaluation.
+\end{abstract}
+
+\section{Introduction}
+The guqin is a seven-string zither whose notation specifies performance actions rather than only sounding notes. A jianzipu unit can state a string, a hui position, a left-hand finger, a right-hand stroke, and an ornament. Its meaning can depend on prior events: harmonic mode remains active until terminated, walking gestures inherit positions, and compound gestures may cover multiple events. Similar text can thus imply different pitches, while different surface forms can be musically equivalent.
+
+We formulate generation as interactive plan editing. The model observes a score phrase, queries deterministic tools when useful, and writes an event-indexed final notation plan. Pitch and state inconsistencies are exposed as actionable feedback, while idiomatic choices remain model decisions.
+
+\paragraph{Contributions.}
+\begin{enumerate}[leftmargin=1.5em]
+\item We introduce \emph{constrained jianzipu generation}, a benchmark and executable runtime for reproducible score-to-jianzipu evaluation.
+\item We design \system, a two-stage Fingering$\rightarrow$Guqinizer agent that distinguishes basic sound production from stylistic refinement.
+\item We develop targeted inverse trajectory construction, which replays annotations through the runtime and exports public, redacted supervision.
+\end{enumerate}
+
+\section{Task and Benchmark}
+Each phrase is $x=(m,e_{1:n},s)$: metadata $m$ includes mode and tuning, $e_{1:n}$ are aligned numbered-notation and ABC events, and $s$ is inherited performance state. Every event has a stable \emph{event index}, source notation, duration, structural type, and target pitch when defined. The output is a plan $y=(y_1,\ldots,y_n)$ where $y_i$ is jianzipu text or an explicit empty display value. Empty display values are not deletion commands; they can mean that a compound gesture or continuation covers a later event.
+
+The task is stateful. Let $S_i=\mathcal{T}(S_{i-1},y_i)$ be the deterministic notation-state transition. A plan must satisfy runtime invariants and is evaluated against an expert plan at structured-event level. We score pitch only where it is reliably resolvable, never treating unresolved notation as either correct or incorrect.
+
+\begin{table}[t]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Component & Contents \\
+\midrule
+Input & Metadata, tuning, numbered notation, ABC, event indices, and prior state. \\
+Output & Event-indexed jianzipu plan with explicit empty display values. \\
+Runtime & Pitch candidates, plan editing, compact context lookup, validation, and audit. \\
+Reference & Expert annotation, private to the offline teacher and evaluation pipeline. \\
+\bottomrule
+\end{tabularx}
+\caption{Benchmark representation. The student policy never receives the reference plan.}
+\end{table}
+
+The benchmark uses score-level splits. A high-confidence test subset retains scores with reference pitch-match rate strictly above $70\%$ under the current 50-cent auditor, calculated over parseable reference events only. The current test inventory has 44 scores; 39 meet this condition. The other scores remain available for diagnostic analysis rather than being silently treated as clean gold pitch labels.
+
+\section{Executable Runtime}
+The same runtime is used for teacher generation and inference. This avoids a train--test mismatch where a model learns parser artifacts unavailable at deployment.
+
+\paragraph{Pitch candidates.} \texttt{get\_pitch\_candidates} accepts one or more event indices, groups equal target MIDI values, and returns candidate string--hui realizations. It uses normalized score tuning rather than assuming standard tuning, and represents open strings, stopped tones, harmonics, inherited positions, and supported compound gestures. Candidates carry exact, approximate, or unavailable confidence labels.
+
+\paragraph{Stateful editing.} The only editing action is \texttt{edit\_plan(jianzi\_rows)}, an event-indexed batch update. The runtime replays notation state and returns a compact preview. High-confidence pitch contradictions are warnings, not automatic rewrites: some advanced gestures cannot be resolved from text alone. Replay state includes tuning, harmonic region entry and termination, inherited left-hand position, walking gestures, and compound-action coverage.
+
+\paragraph{Context retrieval.} \texttt{list\_context} returns a compact section-grouped phrase index; targeted retrieval supplies only the relevant prior phrase. This prevents a full-score directory from consuming the model's context window.
+
+\section{Two-Stage Guqin Agent}
+\paragraph{Fingering stage.} Starting from a blank plan, Fingering constructs a pitch-grounded basic realization: string, hui, left-hand contact, and elementary right-hand stroke. It may batch-query pitch candidates and fills relevant events without gratuitous final-stage ornamentation.
+
+\paragraph{Guqinizer stage.} Guqinizer receives the accepted Fingering plan, not a blank string. It may preserve correct material or revise it with ornaments, walking gestures, harmonic notation, compound actions, and display compression. It has access to the same candidate tool and current-plan audit, so every revision remains inspectable.
+
+This decomposition is an inductive bias, not a claim that basic and idiomatic notation have a unique boundary. We compare it with a single-stage policy that edits a blank plan directly to final notation under the same public tools.
+
+\section{Targeted Inverse Trajectory Construction}
+Annotations specify desired notation but not the tool interactions needed to produce it. We create trajectories by inverse execution: an offline teacher sees the annotation in a private channel, interacts with the student-visible runtime, and must produce a valid plan. The runtime records tool calls, responses, and accepted plans. The teacher is guided toward a viable basic plan in Stage 1 and idiomatic refinement in Stage 2; it need not mechanically copy the annotation.
+
+Before generation, we retain a phrase when it has at least two pitch-matched parseable events or at least half of its parseable events match. Fully empty references and suspicious long empty runs after ordinary attacks are excluded. After generation, private teacher reasoning is redacted into public reasoning grounded only in the score, prior public context, and tool results. The SFT export rejects private-reference fields.
+
+\begin{enumerate}[leftmargin=1.5em]
+\item Initialize a stage-specific editable plan.
+\item Let the teacher observe public runtime context and private annotation.
+\item Execute a bounded sequence of public tool calls and update the plan.
+\item Validate the final plan, retain accepted traces, and redact private reasoning.
+\end{enumerate}
+
+\section{Evaluation}
+We parse predictions and references into unified events containing source and event IDs, target pitch, string, left-hand position and finger, right-hand technique, tone type, ornaments, and necessary state. We do not use BLEU, ROUGE, or direct final-string equality as primary metrics. Instead, we report pitch accuracy at 50 cents and pitch MAE over jointly resolvable events; string accuracy; left- and right-hand fingering precision, recall, and F1; ornament precision, recall, and F1; deterministic rule-violation rate; and technique-usage statistics to expose collapsed or overused techniques. Each violation is stored with an event ID, relevant state, and explanation. Rules that cannot yet be determined reliably are excluded from automatic scoring and listed as expert-review TODOs.
+
+\section{Experiments}
+We will compare direct generation, a single-stage interactive agent, and the two-stage \system. Ablations will remove pitch candidates, stateful audit, or compact context retrieval. We ask whether tools improve pitch correctness and rule compliance, whether stage decomposition improves idiomatic notation, and whether inverse trajectories improve performance without simply increasing tool length.
+
+\begin{table}[t]
+\centering\small
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lcccccc}
+\toprule
+Method & Pitch Acc. $\uparrow$ & MAE $\downarrow$ & String $\uparrow$ & LH F1 $\uparrow$ & RH F1 $\uparrow$ & Rules $\downarrow$\\
+\midrule
+Direct & \todo{--} & \todo{--} & \todo{--} & \todo{--} & \todo{--} & \todo{--}\\
+Single-stage agent & \todo{--} & \todo{--} & \todo{--} & \todo{--} & \todo{--} & \todo{--}\\
+Two-stage \system & \todo{--} & \todo{--} & \todo{--} & \todo{--} & \todo{--} & \todo{--}\\
+\bottomrule
+\end{tabular}
+}
+\caption{Results template for the high-confidence test subset. Final numbers will include denominators and unresolved-event counts.}
+\end{table}
+
+\section{Limitations and Ethics}
+The auditor is conservative and incomplete: no warning is not proof of musical correctness, and unresolved notation is not a success. Fine-grained left-hand reachability, timbre, and lineage-specific style still require expert review or additional physical modeling. The digitized score collection may not represent all historical sources or playing traditions. We position \system as an assistive research system, not a replacement for performers or tradition bearers.
+
+\section{Conclusion}
+\system frames jianzipu generation as executable, stateful plan editing. Its benchmark makes score events, tuning, and notation state explicit; its two-stage architecture separates basic realization from idiomatic refinement; and its inverse trajectories create auditable public tool-use supervision from private annotations. Together, these components enable evaluation beyond text overlap and establish a practical basis for musically grounded notation agents.
+
+\bibliographystyle{plain}
+\bibliography{references}
+\end{document}

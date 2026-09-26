@@ -18,7 +18,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-GENERATOR = ROOT / "ABC_J" / "scripts" / "generate_teacher_tool_trajectories.py"
+TWO_STAGE_GENERATOR = ROOT / "ABC_J" / "scripts" / "generate_teacher_tool_trajectories.py"
+SINGLE_STAGE_GENERATOR = ROOT / "ABC_J" / "scripts" / "generate_single_stage_teacher_trajectories.py"
 FILES = ("messages_train.jsonl", "teacher_trajectory_audit.jsonl",
          "fingering_intermediates.jsonl", "teacher_rejected_io.jsonl",
          "checkpoint.jsonl")
@@ -105,7 +106,7 @@ def main() -> int:
     parser.add_argument("--max-tool-rounds", type=int, default=24)
     parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--allow-private-reasoning-leakage", action="store_true")
-    parser.add_argument("--stage", choices=("fingering_agent", "guqinization"))
+    parser.add_argument("--stage", choices=("fingering_agent", "guqinization", "single_stage"))
     parser.add_argument("--intermediate-input", type=Path)
     parser.add_argument("--include-guqinizer-no-op", action="store_true")
     parser.add_argument("--score-shard-count", type=int,
@@ -210,7 +211,8 @@ def main() -> int:
         id_file.write_text("\n".join(ids) + "\n", encoding="utf-8")
         log_path = worker_dir / "worker.log"
         log_handle = log_path.open("a", encoding="utf-8", newline="\n")
-        command = [sys.executable, str(GENERATOR),
+        generator = SINGLE_STAGE_GENERATOR if args.stage == "single_stage" else TWO_STAGE_GENERATOR
+        command = [sys.executable, str(generator),
                    "--input", str(args.input),
                    "--output-dir", str(worker_dir / "output"),
                    "--trajectory-id-file", str(id_file),
@@ -222,11 +224,15 @@ def main() -> int:
         if args.retry_failed:
             command.append("--retry-failed")
         if not args.shard_by_trajectory_id:
-            command.extend(("--score-shard-count", str(score_shard_count),
-                            "--score-shard-index", str(index)))
+            if args.stage == "single_stage":
+                command.extend(("--shard-count", str(score_shard_count),
+                                "--shard-index", str(index)))
+            else:
+                command.extend(("--score-shard-count", str(score_shard_count),
+                                "--score-shard-index", str(index)))
         if args.allow_private_reasoning_leakage:
             command.append("--allow-private-reasoning-leakage")
-        if args.stage:
+        if args.stage and args.stage != "single_stage":
             command.extend(("--stage", args.stage))
         if args.intermediate_input:
             command.extend(("--intermediate-input", str(args.intermediate_input)))

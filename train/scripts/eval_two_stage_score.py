@@ -160,11 +160,12 @@ def main() -> int:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from ABC_J.scripts.generate_teacher_tool_trajectories import (
-        RealToolRuntime, blank_plan_from_item, canonical_jianzi_text,
-        harmonic_region_at_phrase_start,
-        public_pitch_warning_source_indices,
-        public_system_for, public_tools_for, render_public_prompt,
-        validate_jianzi_only,
+        blank_plan_from_item, canonical_jianzi_text, public_system_for,
+        public_tools_for, render_public_prompt,
+    )
+    from agents.ToolRuntime import (
+        RealToolRuntime, harmonic_region_at_phrase_start,
+        public_pitch_warning_source_indices, validate_jianzi_only,
     )
     from agents.abc_to_jianzipu.trajectory_replay import replay_patches
     from scripts.adapter_loading import load_adapter_checked

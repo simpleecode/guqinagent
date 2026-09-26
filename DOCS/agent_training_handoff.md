@@ -2168,3 +2168,20 @@ Guqinizer。
 - Jobber `J00130`（`guqin-sft-longrerun-continue2-20260925`）已提交，申请 4 卡，当前 `queued`；
   等待四卡空闲，不抢占其他任务。日志：
   `~/code/training/runtime/gpu_queue/logs/J00130.log`。
+
+## 7.171 单阶段教师轨迹的过滤输入（2026-09-26）
+
+- 单阶段训练/样例生成必须以
+  `ABC_J/agent_training/pitch_eligible_two_or_half_v13_train/pitch_eligible_phrase_ids_train.txt`
+  作为唯一 phrase 白名单；不得直接遍历完整
+  `inferred_trajectories_train.jsonl`。
+- 该清单已同时施加“每段至少两个音高匹配或匹配率至少一半”、全空标注排除，以及普通减字后连续五个以上
+  空发音行排除。单阶段输出在脱敏、合并或 SFT 导出前必须再次按此清单 fail-closed 过滤。
+
+## 7.172 测试 bench 的高可信音高曲谱白名单（2026-09-26）
+
+- 测试源：`ABC_J/agent_training/inferred_gqs_v12_tuningfix_20260914/inferred_trajectories_test.jsonl`。
+- 用当前 `scripts/audit_training_phase_pitch_parse_stats.py` 复用的 50 cents 音高审计，按完整曲谱聚合标注减字；分母仅包含审计可判为 `matched` 或 `mismatched` 的音，未解析行不计入分母。
+- 严格条件为 `matched / parseable > 0.70`，44 首测试曲中保留 39 首。可直接给评测脚本使用的 ID 清单：
+  `ABC_J/agent_training/test_pitch_match_over70_20260926_score_ids.txt`。
+- 未入选：`S074gS1m`（51.69%）、`SdOedBkd`（47.62%）、`SWk1GWt2`（42.99%）、`SDcE3Geq`（31.42%），以及无可解析音的 `SCwngKTr`。
