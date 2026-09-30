@@ -160,12 +160,26 @@ def main() -> int:
         str(row["trajectory_id"]): row for row in checkpoint_rows
         if row.get("trajectory_id") is not None
     }
+    # Legacy checkpoints only record a phrase-level status.  A completed
+    # Fingering pass therefore cannot prove that Guqinizer has completed the
+    # same phrase.  When a stage is requested, derive resumability from the
+    # accepted public trajectory rows, whose provenance records both the
+    # source trajectory and agent stage.
+    stage_completed: set[str] = set()
+    if args.stage:
+        for row in read_jsonl(args.output_dir / "messages_train.jsonl"):
+            if row.get("agent_stage") != args.stage:
+                continue
+            source_id = (row.get("provenance") or {}).get("source_trajectory_id")
+            if source_id is not None:
+                stage_completed.add(str(source_id))
     if args.retry_failed:
         remaining = [trajectory_id for trajectory_id in source_ids
-                     if latest_checkpoint.get(trajectory_id, {}).get("status") == "attempted_with_failure"]
+                     if trajectory_id not in stage_completed
+                     and latest_checkpoint.get(trajectory_id, {}).get("status") == "attempted_with_failure"]
         completed = set(source_ids) - set(remaining)
     else:
-        completed = set(latest_checkpoint)
+        completed = stage_completed if args.stage else set(latest_checkpoint)
         remaining = [trajectory_id for trajectory_id in source_ids if trajectory_id not in completed]
     if args.trajectory_id_file:
         wanted = {line.strip() for line in args.trajectory_id_file.read_text(encoding="utf-8").splitlines()
