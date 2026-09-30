@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .aggregate import metrics, per_piece
-from .parser import structured_events
+from .parser import structured_events, structured_events_for_score
 from .rules import violations
 
 
@@ -40,13 +40,38 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     references = load_jsonl(args.reference, "sample_id")
     all_events: list[dict[str, Any]] = []
     unavailable: list[str] = []
+    state_replay_incomplete_scores: list[str] = []
+    matched: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for sample_id, prediction in predictions.items():
         reference = references.get(sample_id)
         if reference is None:
             unavailable.append(sample_id)
             continue
-        events, _ = structured_events(prediction, reference, args.pitch_tolerance)
-        all_events.extend(events)
+        matched.append((prediction, reference))
+
+    reference_ids_by_score: dict[str, set[str]] = {}
+    for sample_id, reference in references.items():
+        reference_ids_by_score.setdefault(str(reference.get("score_key") or ""), set()).add(sample_id)
+    matched_by_score: dict[str, list[tuple[dict[str, Any], dict[str, Any]]]] = {}
+    for pair in matched:
+        score_key = str(pair[1].get("score_key") or "")
+        matched_by_score.setdefault(score_key, []).append(pair)
+    for score_key, samples in matched_by_score.items():
+        matched_ids = {str(reference["sample_id"]) for _, reference in samples}
+        if matched_ids == reference_ids_by_score.get(score_key, set()):
+            events, _ = structured_events_for_score(samples, args.pitch_tolerance)
+            all_events.extend(events)
+            continue
+        state_replay_incomplete_scores.append(score_key)
+        for prediction, reference in samples:
+            events, _ = structured_events(prediction, reference, args.pitch_tolerance)
+            # Mode accuracy requires a full-score replay.  Do not report
+            # phrase-reset results as if they were valid state comparisons.
+            for event in events:
+                event["prediction"]["tone_type"] = None
+                event["reference"]["tone_type"] = None
+                event["tone_type_unavailable_reason"] = "incomplete_score_prediction"
+            all_events.extend(events)
     all_violations = violations(all_events)
     output = args.output_root / args.experiment
     output.mkdir(parents=True, exist_ok=True)
@@ -57,6 +82,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
               "created_at": datetime.now(timezone.utc).isoformat()}
     summary = {"schema_version": "guqin-final-eval-1.0", "prediction_samples": len(predictions),
                "matched_samples": len(predictions) - len(unavailable), "unmatched_prediction_ids": unavailable,
+               "tone_type_replay_incomplete_scores": sorted(state_replay_incomplete_scores),
                "events": len(all_events), "metrics": metrics(all_events, all_violations, args.pitch_tolerance)}
     (output / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

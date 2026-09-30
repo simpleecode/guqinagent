@@ -9,6 +9,44 @@ from .ornament import ornament_metrics, technique_usage
 from .pitch import paired_cents
 
 
+TONE_TYPES = ("stopped", "open", "harmonic")
+
+
+def tone_type_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compare replay-derived 按/散/泛 state and its corpus distribution."""
+    comparable = [event for event in events
+                  if event["reference"].get("tone_type") in TONE_TYPES]
+    accuracy = rates(field_counts(comparable, "tone_type"))
+    reference_counts = Counter(event["reference"]["tone_type"] for event in comparable)
+    prediction_counts = Counter(event["prediction"].get("tone_type") for event in comparable
+                                if event["prediction"].get("tone_type") in TONE_TYPES)
+    total_reference = sum(reference_counts.values())
+    total_prediction = sum(prediction_counts.values())
+    reference_distribution = {
+        mode: reference_counts[mode] / total_reference if total_reference else None
+        for mode in TONE_TYPES
+    }
+    prediction_distribution = {
+        mode: prediction_counts[mode] / total_prediction if total_prediction else None
+        for mode in TONE_TYPES
+    }
+    similarity = None
+    if total_reference and total_prediction:
+        similarity = 1 - 0.5 * sum(
+            abs(reference_distribution[mode] - prediction_distribution[mode])
+            for mode in TONE_TYPES
+        )
+    return {
+        **accuracy,
+        "reference_counts": dict(reference_counts),
+        "prediction_counts": dict(prediction_counts),
+        "reference_distribution": reference_distribution,
+        "prediction_distribution": prediction_distribution,
+        "distribution_similarity": similarity,
+        "distribution_similarity_definition": "1 - total_variation_distance",
+    }
+
+
 def metrics(events: list[dict[str, Any]], violations: list[dict[str, Any]],
             tolerance_cents: float) -> dict[str, Any]:
     cents = [value for event in events for value in paired_cents(event.get("pitch_audit") or {})]
@@ -23,8 +61,16 @@ def metrics(events: list[dict[str, Any]], violations: list[dict[str, Any]],
         "string": rates(field_counts(events, "string")),
         "left_hand_fingering": rates(field_counts(events, "left_finger")),
         "right_hand_fingering": rates(field_counts(events, "right_finger")),
+        "tone_type": tone_type_metrics(events),
         "ornament": ornament_metrics(events),
-        "technique_usage": technique_usage(events),
+        # One paper-facing technique statistic: count named, playable actions
+        # from final notation.  This includes 撮 exactly once, whether it also
+        # has an ornament-like semantic role, and excludes state markers such
+        # as 泛起/泛止.  Ornament P/R/F1 above remains an event-level semantic
+        # correctness metric, not a competing technique-distribution metric.
+        "performance_technique_usage": technique_usage(
+            events, field="fingering_techniques"
+        ),
         "rule_violation_rate": len({(v["piece_id"], v["phrase_id"], v["event_id"]) for v in violations}) /
                                len(pitch_events) if pitch_events else None,
         "rule_violations": len(violations),

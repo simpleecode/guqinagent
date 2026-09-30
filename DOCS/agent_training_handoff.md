@@ -2185,3 +2185,19 @@ Guqinizer。
 - 严格条件为 `matched / parseable > 0.70`，44 首测试曲中保留 39 首。可直接给评测脚本使用的 ID 清单：
   `ABC_J/agent_training/test_pitch_match_over70_20260926_score_ids.txt`。
 - 未入选：`S074gS1m`（51.69%）、`SdOedBkd`（47.62%）、`SWk1GWt2`（42.99%）、`SDcE3Geq`（31.42%），以及无可解析音的 `SCwngKTr`。
+- 公开推理 bench 的 `train/eval_inputs_v2_text_protocol/test_runtime.jsonl` 只含其中 37 首：音高源中的 `S0ejf3Pz` 与 `SbgkbNBF` 并没有对应公开输入，不能在无标注评测时临时补入。实际 bench 清单为
+  `train/eval_inputs_v2_text_protocol/test_pitch_match_over70_20260926_score_ids.txt`。
+
+## 7.173 单阶段 v13 全量 SFT（2026-09-28）
+
+- 数据：`train/data/guqin_agent_sft_single_stage_v13_20260928/guqin_agent_train.jsonl`；来自严格按
+  `ABC_J/agent_training/pitch_eligible_two_or_half_v13_train/pitch_eligible_phrase_ids_train.txt`
+  过滤后的 3,604 条脱敏单阶段教师轨迹。SFT 数据 SHA-256：
+  `74408fbd1c4895c8ffe04cffb4bacd0b6606c63708a66fb133fcc038752032f5`。
+- 配置：`train/configs/qwen35_9b_lora_4xa100_bs2_acc1_ctx8192_single_stage_v13_20260928.yaml`；Qwen3.5-9B，QLoRA 4-bit、bf16、Liger、`cutoff_len=8192`，4×A100 40GB，单卡 batch 2、梯度累积 1、有效 batch 8、3 epoch / 1,353 steps。
+- 训练因云端余额中断后，从 `checkpoint-1300` 继续并完成至 `checkpoint-1353`。最终
+  `train_loss=0.0181616`，总训练时间 `952.42s`（15:52），吞吐 `1.421 step/s`。
+- 远端输出：`/data/guqin-agent/outputs/qwen35_9b_lora_4xa100_bs2_acc1_ctx8192_single_stage_v13_20260928/`；末尾可恢复 checkpoint 为 `checkpoint-1353/`。
+- 本地归档：`train/artifacts/qwen35_9b_lora_4xa100_bs2_acc1_ctx8192_single_stage_v13_20260928/`，含最终 `adapter_model.safetensors`、adapter 配置、`trainer_state.json`、`training_loss.png`、`train_results.json` 和 `all_results.json`。adapter SHA-256：
+  `b327d97a90477c5b4b393596781540738d9f1a16ce508febcfa22a2eac436502`。
+- 新服务器的非交互 SSH 环境缺少 `/data/miniconda/envs/torch/bin`，会导致 LLaMA Factory 子进程找不到 `torchrun`。启动命令必须先设置：`export PATH=/data/miniconda/envs/torch/bin:$PATH`。

@@ -2,6 +2,7 @@ import unittest
 
 from evaluation.fingering import field_counts, rates
 from evaluation.ornament import ornament_metrics, technique_usage
+from evaluation.techniques import extract_fingering_techniques
 
 
 class MetricsTests(unittest.TestCase):
@@ -49,3 +50,9 @@ class MetricsTests(unittest.TestCase):
         self.assertEqual(density["reference_events"], 2)
         self.assertAlmostEqual(density["prediction_rate"], 0.5)
         self.assertAlmostEqual(density["reference_rate"], 0.5)
+
+    def test_state_markers_are_not_performance_techniques(self):
+        names = [item["name"] for item in extract_fingering_techniques(
+            "泛起大指九徽挑五弦泛止撮"
+        )]
+        self.assertEqual(names, ["挑", "撮"])

@@ -249,6 +249,125 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         if warning.get("code") == "jianzi_pitch_mismatch"
         and warning.get("source_index") is not None
     }
+    walk_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "walk_span_too_large"
+        and warning.get("source_index") is not None
+    }
+    walk_endpoint_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "walk_endpoint_same_as_start"
+        and warning.get("source_index") is not None
+    }
+    walk_direction_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "walk_direction_reversed"
+        and warning.get("source_index") is not None
+    }
+    resonance_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "open_to_stopped_same_string"
+        and warning.get("source_index") is not None
+    }
+    pluck_pair_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "nonadjacent_pluck_pair"
+        and warning.get("source_index") is not None
+    }
+    same_string_cuo_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "same_string_cuo_pair"
+        and warning.get("source_index") is not None
+    }
+    same_finger_reach_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "same_finger_reach_too_large"
+        and warning.get("source_index") is not None
+    }
+    low_hui_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "low_hui_stopped_too_cramped"
+        and warning.get("source_index") is not None
+    }
+
+    def warning_suffix(index: int) -> str:
+        parts: list[str] = []
+        pitch_warning = pitch_warnings.get(index)
+        if pitch_warning:
+            parts.append(
+                ":warning:音高不匹配（当前可能仍处于泛音状态；若此音应为按音，请明确写“按音”或先泛止）"
+                if pitch_warning.get("possible_harmonic_state_mismatch")
+                else ":warning:音高不匹配"
+            )
+        walk_warning = walk_warnings.get(index)
+        if walk_warning:
+            parts.append(
+                ":warning:走手跨度过大（{technique}｜{start}→{end}｜{cents:g} cents；"
+                "建议选择其他弦徽且此处不使用走手）".format(
+                    technique=walk_warning.get("technique") or "走手",
+                    start=hui_label(walk_warning.get("from_hui")),
+                    end=hui_label(walk_warning.get("to_hui")),
+                    cents=float(walk_warning.get("span_cents") or 0),
+                )
+            )
+        endpoint_warning = walk_endpoint_warnings.get(index)
+        if endpoint_warning:
+            parts.append(":warning:走手终点与起点相同")
+        direction_warning = walk_direction_warnings.get(index)
+        if direction_warning:
+            parts.append(":warning:走手方向错误")
+        resonance_warning = resonance_warnings.get(index)
+        if resonance_warning:
+            strings = "、".join(
+                f"{value}弦" for value in resonance_warning.get("strings") or []
+            )
+            parts.append(
+                f":warning:散音后紧接同弦按音（{strings}；会止住散音，可能破坏韵味）"
+            )
+        pluck_pair_warning = pluck_pair_warnings.get(index)
+        if pluck_pair_warning:
+            strings = "＋".join(
+                f"{value}弦" for value in pluck_pair_warning.get("strings") or []
+            )
+            technique = pluck_pair_warning.get("technique") or "泼"
+            parts.append(
+                f":warning:{technique}双弦不相邻（{strings}；双弦{technique}应使用相邻弦）"
+            )
+        same_string_cuo_warning = same_string_cuo_warnings.get(index)
+        if same_string_cuo_warning:
+            string = (same_string_cuo_warning.get("strings") or ["?"])[0]
+            parts.append(f":warning:撮的两根弦不能相同（{string}弦）")
+        same_finger_warning = same_finger_reach_warnings.get(index)
+        if same_finger_warning:
+            parts.append(
+                ":warning:同指跨位过大（{finger}｜{from_hui}{from_string}弦→"
+                "{to_hui}{to_string}弦；建议考虑换指或手指组合）".format(
+                    finger=same_finger_warning.get("finger") or "同指",
+                    from_hui=hui_label(same_finger_warning.get("from_hui")),
+                    from_string=same_finger_warning.get("from_string") or "?",
+                    to_hui=hui_label(same_finger_warning.get("to_hui")),
+                    to_string=same_finger_warning.get("to_string") or "?",
+                )
+            )
+        low_hui_warning = low_hui_warnings.get(index)
+        if low_hui_warning:
+            string = low_hui_warning.get("string") or "?"
+            boundary = (
+                "1—4弦尽量避免四徽及以内按音"
+                if isinstance(string, int) and string <= 4
+                else "5弦尽量避免四徽以内按音"
+            )
+            parts.append(f":warning:低徽按音过紧（{boundary}）")
+        return "".join(parts)
+
     for index in sorted(changed):
         action = by_index.get(index)
         visible_index = event_index_for_source(item, index) if item is not None else None
@@ -278,22 +397,45 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         display = ("待填写" if explicit is None else
                    ("已置空" if explicit == "" else "已填写"))
         jianpu = pitch_label(item, index) if item is not None else ""
-        warning = pitch_warnings.get(index)
-        warning_suffix = (
-            ":warning:音高不匹配（当前可能仍处于泛音状态；若此音应为按音，请明确写“按音”或先泛止）"
-            if warning and warning.get("possible_harmonic_state_mismatch")
-            else ":warning:音高不匹配" if warning else ""
-        )
         lines.append(
-            f'{visible_index}｜{jianpu}｜{display}｜{surface}{warning_suffix}'
+            f'{visible_index}｜{jianpu}｜{display}｜{surface}{warning_suffix(index)}'
         )
     # ``edit_plan`` previews only the submitted rows above.  A cumulative
     # audit can nevertheless find pitch warnings inherited from the current
     # Base/earlier plan.  They must be shown to the model: otherwise the
     # acceptance gate keeps the turn alive for an issue it cannot identify.
-    unmodified_warning_indices = sorted(set(pitch_warnings) - changed)
+    unmodified_warning_indices = sorted(
+        (set(pitch_warnings) | set(walk_warnings) | set(walk_endpoint_warnings)
+         | set(walk_direction_warnings) | set(resonance_warnings)
+         | set(pluck_pair_warnings) | set(same_string_cuo_warnings)
+         | set(same_finger_reach_warnings)
+         | set(low_hui_warnings)) - changed
+    )
     if unmodified_warning_indices:
-        lines.append("仍有未修改的音高警告｜以下行未包含在本轮提交；请核对或查询候选：")
+        unmodified_codes = {
+            warning.get("code") for warning in (warnings or [])
+            if warning.get("source_index") in unmodified_warning_indices
+        }
+        if unmodified_codes == {"jianzi_pitch_mismatch"}:
+            lines.append("仍有未修改的音高警告｜以下行未包含在本轮提交；请核对或查询候选：")
+        elif unmodified_codes == {"walk_span_too_large"}:
+            lines.append("仍有未修改的走手警告｜以下行未包含在本轮提交；请核对前一按音与目标徽位：")
+        elif unmodified_codes == {"walk_endpoint_same_as_start"}:
+            lines.append("仍有未修改的走手警告｜以下行的走手终点与起点相同；请核对是否无需走手：")
+        elif unmodified_codes == {"walk_direction_reversed"}:
+            lines.append("仍有未修改的走手警告｜以下行的绰上/注下方向与徽位变化相反；请核对技法：")
+        elif unmodified_codes == {"open_to_stopped_same_string"}:
+            lines.append("仍有未修改的余韵警告｜以下行紧接同弦散音后按音；请核对是否需要换弦或保留余韵：")
+        elif unmodified_codes == {"nonadjacent_pluck_pair"}:
+            lines.append("仍有未修改的双弦警告｜以下行的拨/泼两弦不相邻；请核对右手可演奏性：")
+        elif unmodified_codes == {"same_string_cuo_pair"}:
+            lines.append("仍有未修改的撮警告｜以下行的两根弦相同；撮应由两根不同的弦组成：")
+        elif unmodified_codes == {"same_finger_reach_too_large"}:
+            lines.append("仍有未修改的同指跨位警告｜以下行与前一按音同指跨度过大；请考虑换指或手指组合：")
+        elif unmodified_codes == {"low_hui_stopped_too_cramped"}:
+            lines.append("仍有未修改的低徽按音警告｜以下行按音位置过紧；请考虑更高徽位、换弦或其他指法：")
+        else:
+            lines.append("仍有未修改的警告｜以下行未包含在本轮提交；请核对：")
     for index in unmodified_warning_indices:
         action = by_index.get(index)
         visible_index = event_index_for_source(item, index) if item is not None else None
@@ -301,21 +443,15 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         if action is None:
             lines.append(
                 f'{visible_index}｜{pitch_label(item, index) if item is not None else ""}｜'
-                "未找到动作｜-:warning:音高不匹配"
+                f"未找到动作｜-{warning_suffix(index)}"
             )
             continue
         surface = render_jianzi_surface(
             action, omitted_placeholder=OMITTED_PLACEHOLDER
         ) or "—"
-        warning = pitch_warnings[index]
-        warning_suffix = (
-            ":warning:音高不匹配（当前可能仍处于泛音状态；若此音应为按音，请明确写“按音”或先泛止）"
-            if warning.get("possible_harmonic_state_mismatch")
-            else ":warning:音高不匹配"
-        )
         lines.append(
             f'{visible_index}｜{pitch_label(item, index) if item is not None else ""}｜'
-            f'未修改｜{surface}{warning_suffix}'
+            f'未修改｜{surface}{warning_suffix(index)}'
         )
     if errors:
         lines.append("错误｜" + json.dumps(errors, ensure_ascii=False, separators=(",", ":")))
@@ -689,7 +825,15 @@ class RealToolRuntime:
                     ) + "｜提交值与当前减字相同"
                 remaining_warnings = [
                     warning for warning in preview_warnings
-                    if warning.get("code") != "jianzi_pitch_mismatch"
+                if warning.get("code") not in {
+                        "jianzi_pitch_mismatch", "walk_span_too_large",
+                        "walk_endpoint_same_as_start", "walk_direction_reversed",
+                        "open_to_stopped_same_string",
+                        "nonadjacent_pluck_pair",
+                        "same_string_cuo_pair",
+                        "same_finger_reach_too_large",
+                        "low_hui_stopped_too_cramped",
+                    }
                 ]
                 if remaining_warnings:
                     preview_text += "\n警告｜" + json.dumps(
@@ -973,6 +1117,111 @@ def validate_jianzi_only(
                     "possible_harmonic_state_mismatch": bool(
                         detail.get("possible_harmonic_state_mismatch")
                     ),
+                })
+        for detail in AUDIT.walk_span_warnings({
+            "metadata": deepcopy(item["input"].get("metadata") or {}),
+            "open_midi": deepcopy(
+                (item["input"].get("normalized_tuning") or {}).get("open_midi")
+            ),
+            "notes": notes,
+        }):
+            source_index = detail.get("index")
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": "walk_span_too_large",
+                    "technique": detail.get("technique"),
+                    "string": detail.get("string"),
+                    "from_hui": detail.get("from_hui"),
+                    "to_hui": detail.get("to_hui"),
+                    "span_cents": detail.get("span_cents"),
+                    "threshold_cents": detail.get("threshold_cents"),
+                })
+        for detail in AUDIT.walk_motion_warnings({
+            "metadata": deepcopy(item["input"].get("metadata") or {}),
+            "open_midi": deepcopy(
+                (item["input"].get("normalized_tuning") or {}).get("open_midi")
+            ),
+            "notes": notes,
+        }):
+            source_index = detail.get("index")
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": detail.get("code"),
+                    "technique": detail.get("technique"),
+                    "string": detail.get("string"),
+                    "from_hui": detail.get("from_hui"),
+                    "to_hui": detail.get("to_hui"),
+                    "suggested_technique": detail.get("suggested_technique"),
+                })
+        for detail in AUDIT.open_to_stopped_transition_warnings({
+            "metadata": deepcopy(item["input"].get("metadata") or {}),
+            "open_midi": deepcopy(
+                (item["input"].get("normalized_tuning") or {}).get("open_midi")
+            ),
+            "notes": notes,
+        }):
+            source_index = detail.get("index")
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": "open_to_stopped_same_string",
+                    "strings": list(detail.get("strings") or []),
+                })
+        for detail in AUDIT.nonadjacent_pluck_pair_warnings({"notes": notes}):
+            source_index = detail.get("index")
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": "nonadjacent_pluck_pair",
+                    "technique": detail.get("technique"),
+                    "strings": list(detail.get("strings") or []),
+                })
+        for detail in AUDIT.same_string_cuo_warnings({"notes": notes}):
+            source_index = detail.get("index")
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": "same_string_cuo_pair",
+                    "strings": list(detail.get("strings") or []),
+                })
+        for detail in AUDIT.same_finger_reach_warnings({
+            "metadata": deepcopy(item["input"].get("metadata") or {}),
+            "open_midi": deepcopy(
+                (item["input"].get("normalized_tuning") or {}).get("open_midi")
+            ),
+            "notes": notes,
+        }):
+            source_index = detail.get("index")
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": "same_finger_reach_too_large",
+                    "finger": detail.get("finger"),
+                    "from_string": detail.get("from_string"),
+                    "from_hui": detail.get("from_hui"),
+                    "to_string": detail.get("to_string"),
+                    "to_hui": detail.get("to_hui"),
+                    "hui_delta": detail.get("hui_delta"),
+                    "string_delta": detail.get("string_delta"),
+                    "distance": detail.get("distance"),
+                    "threshold": detail.get("threshold"),
+                })
+        for detail in AUDIT.low_hui_stopped_warnings({
+            "metadata": deepcopy(item["input"].get("metadata") or {}),
+            "open_midi": deepcopy(
+                (item["input"].get("normalized_tuning") or {}).get("open_midi")
+            ),
+            "notes": notes,
+        }):
+            source_index = detail.get("index")
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": "low_hui_stopped_too_cramped",
+                    "string": detail.get("string"),
+                    "hui": detail.get("hui"),
                 })
     except Exception as exc:
         # Tool/parser availability never blocks creative notation generation.

@@ -232,6 +232,294 @@ class EditableProtocolTests(unittest.TestCase):
             result["result"]["text"],
         )
 
+    def test_edit_plan_warns_on_an_octave_sized_standalone_walk(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "4"},
+                    {"index": 1, "event_index": 1, "jianpu": "4̇"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "大指七徽勾3弦"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        runtime = RealToolRuntime(item, {}, basic_fingering=False)
+        result = runtime.invoke("edit_plan", {"jianzi_rows": [[1, "绰上四徽"]]})
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            "1｜4̇｜已填写｜[绰上四徽]:warning:走手跨度过大（绰上｜七徽→四徽｜1200 cents",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_warns_on_large_same_finger_reach(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "4"},
+                    {"index": 1, "event_index": 1, "jianpu": "1̇"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "大指七徽挑七弦"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        result = RealToolRuntime(item, {}, basic_fingering=False).invoke(
+            "edit_plan", {"jianzi_rows": [[1, "大指十二徽二分挑七弦"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            ":warning:同指跨位过大（大指｜七徽7弦→十二徽二分7弦；"
+            "建议考虑换指或手指组合）",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_does_not_treat_stopped_component_as_open(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "2 2̇"},
+                    {"index": 1, "event_index": 1, "jianpu": "2̇"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0,
+                 "jianzi_text": "撮（大指五徽三弦按音＋六弦散音）"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        result = RealToolRuntime(item, {}, basic_fingering=False).invoke(
+            "edit_plan", {"jianzi_rows": [[1, "大指五徽挑三弦"]]}
+        )
+        self.assertNotIn("散音后紧接同弦按音", result["result"]["text"])
+
+    def test_edit_plan_warns_on_cramped_low_hui_stopped_note(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "4"},
+                    {"index": 1, "event_index": 1, "jianpu": "5"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "大指四徽挑四弦"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        result = RealToolRuntime(item, {}, basic_fingering=False).invoke(
+            "edit_plan", {"jianzi_rows": [[1, "大指四徽挑五弦"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            ":warning:低徽按音过紧（1—4弦尽量避免四徽及以内按音）",
+            result["result"]["text"],
+        )
+        self.assertNotIn(
+            "1｜5｜已填写｜[大指四徽挑五弦]:warning:低徽按音过紧",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_warns_on_cramped_stopped_component_in_cuo(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [{"index": 0, "event_index": 0, "jianpu": "4 1̇"}],
+            },
+            "baseline_plan": {"actions": [{"source_index": 0, "jianzi_text": ""}]},
+        }
+        result = RealToolRuntime(item, {}, basic_fingering=False).invoke(
+            "edit_plan", {"jianzi_rows": [[0, "撮（大指三徽二分四弦按音＋二弦散音）"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            ":warning:低徽按音过紧（1—4弦尽量避免四徽及以内按音）",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_warns_on_a_walk_over_five_hundred_cents(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "4"},
+                    {"index": 1, "event_index": 1, "jianpu": "1̇"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "大指七徽勾3弦"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        runtime = RealToolRuntime(item, {}, basic_fingering=False)
+        result = runtime.invoke("edit_plan", {"jianzi_rows": [[1, "绰上五徽"]]})
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            "1｜1̇｜已填写｜[绰上五徽]:warning:走手跨度过大（绰上｜七徽→五徽｜702 cents",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_warns_on_near_five_hundred_cent_walk(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "3"},
+                    {"index": 1, "event_index": 1, "jianpu": "5"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "大指五徽挑四弦"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        result = RealToolRuntime(item, {}, basic_fingering=False).invoke(
+            "edit_plan", {"jianzi_rows": [[1, "绰上四徽"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            ":warning:走手跨度过大（绰上｜五徽→四徽｜498 cents",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_warns_when_walk_endpoint_equals_start(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "4"},
+                    {"index": 1, "event_index": 1, "jianpu": "4"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "大指七徽勾3弦"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        result = RealToolRuntime(item, {}, basic_fingering=False).invoke(
+            "edit_plan", {"jianzi_rows": [[1, "绰上七徽"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            "1｜4｜已填写｜[绰上七徽]:warning:走手终点与起点相同",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_warns_when_walk_direction_is_reversed(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "4"},
+                    {"index": 1, "event_index": 1, "jianpu": "4"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "大指七徽勾3弦"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        result = RealToolRuntime(item, {}, basic_fingering=False).invoke(
+            "edit_plan", {"jianzi_rows": [[1, "绰上七徽六分"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            ":warning:走手方向错误",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_warns_when_same_string_is_stopped_after_open_note(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "5̣"},
+                    {"index": 1, "event_index": 1, "jianpu": "5"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 0, "jianzi_text": "散挑4弦"},
+                {"source_index": 1, "jianzi_text": ""},
+            ]},
+        }
+        runtime = RealToolRuntime(item, {}, basic_fingering=False)
+        result = runtime.invoke("edit_plan", {"jianzi_rows": [[1, "名指七徽勾4弦"]]})
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            "1｜5｜已填写｜[名指七徽勾4弦]:warning:散音后紧接同弦按音（4弦；会止住散音，可能破坏韵味）",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_warns_on_nonadjacent_pobo_pair(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "5"},
+                ],
+            },
+            "baseline_plan": {"actions": [{
+                "source_index": 0, "jianzi_text": "",
+            }]},
+        }
+        runtime = RealToolRuntime(item, {}, basic_fingering=False)
+        result = runtime.invoke(
+            "edit_plan", {"jianzi_rows": [[0, "泼剌（大指七徽六弦按音＋一弦散音）"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(
+            ":warning:泼剌双弦不相邻（6弦＋1弦；双弦泼剌应使用相邻弦）",
+            result["result"]["text"],
+        )
+
+    def test_edit_plan_warns_when_cuo_uses_same_string_twice(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {
+                    "open_midi": [48, 50, 53, 55, 57, 60, 62],
+                },
+                "notes_without_jianzi": [
+                    {"index": 0, "event_index": 0, "jianpu": "5"},
+                ],
+            },
+            "baseline_plan": {"actions": [{"source_index": 0, "jianzi_text": ""}]},
+        }
+        result = RealToolRuntime(item, {}, basic_fingering=False).invoke(
+            "edit_plan",
+            {"jianzi_rows": [[0, "撮（大指五徽三弦按音＋三弦散音）"]]},
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn(":warning:撮的两根弦不能相同（3弦）", result["result"]["text"])
+
     def test_edit_plan_reports_identical_rows_as_unchanged(self) -> None:
         item = {
             "input": {

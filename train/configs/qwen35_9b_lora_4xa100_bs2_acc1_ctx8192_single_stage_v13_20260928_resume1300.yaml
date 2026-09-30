@@ -1,0 +1,51 @@
+### Resume single-stage v13 full-trajectory SFT on 4 x A100 40GB from step 1300.
+
+### model
+model_name_or_path: /data/models/Qwen3.5-9B
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_target: all
+quantization_bit: 4
+quantization_method: bitsandbytes
+
+### dataset
+dataset: guqin_agent_train
+dataset_dir: /data/guqin-agent/data/guqin_agent_sft_single_stage_v13_20260928
+template: qwen3_5
+train_on_prompt: false
+mask_history: false
+cutoff_len: 8192
+max_samples: null
+overwrite_cache: true
+preprocessing_num_workers: 16
+
+### output
+output_dir: /data/guqin-agent/outputs/qwen35_9b_lora_4xa100_bs2_acc1_ctx8192_single_stage_v13_20260928
+logging_steps: 5
+save_steps: 100
+save_total_limit: 3
+plot_loss: true
+overwrite_output_dir: false
+report_to: none
+
+### train
+# Effective batch size = 4 GPUs x 2 samples/GPU x 1 accumulation = 8.
+per_device_train_batch_size: 2
+gradient_accumulation_steps: 1
+learning_rate: 2.0e-4
+num_train_epochs: 3.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.03
+bf16: true
+fp16: false
+gradient_checkpointing: true
+use_unsloth_gc: true
+flash_attn: auto
+enable_liger_kernel: true
+ddp_timeout: 180000000
+
+resume_from_checkpoint: /data/guqin-agent/outputs/qwen35_9b_lora_4xa100_bs2_acc1_ctx8192_single_stage_v13_20260928/checkpoint-1300

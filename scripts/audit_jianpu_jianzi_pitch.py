@@ -69,6 +69,30 @@ RIGHT_HAND_TECHNIQUES = (
 LEFT_HAND_FINGERS = ("大指", "名指", "中指", "食指", "跪指")
 ORNAMENTS = {"吟", "猱", "撞", "逗", "往来", "复", "掐起", "带起", "抓起", "爪起", "滔起"}
 
+# ``绰上`` / ``注下`` are connected left-hand movements, not arbitrary
+# repositioning instructions.  At 400 cents or more the inherited,
+# connected-walk interpretation should be reviewed.
+WALK_SPAN_WARNING_CENTS = 400.0
+# A single left-hand finger making a large simultaneous change in both string
+# and hui is mechanically demanding.  This is an advisory rather than an
+# impossibility rule: expert fingering can sometimes justify it, but the
+# notation agent should consciously consider a finger combination instead of
+# carrying the same finger by default.
+SAME_FINGER_REACH_WARNING_DISTANCE = 4.0
+
+# Low numbered hui are physically cramped on the treble/middle strings.  This
+# is an ergonomic advisory, not an invalidation rule: an experienced player
+# can occasionally use one, but the notation agent should choose it
+# deliberately.  Hui numbering grows toward the bridge, hence "fourth hui or
+# above" in the playing sense below means a numeric position <= 4.
+LOW_HUI_STOPPED_LIMITS = {
+    # Strings 1--4: fourth hui, its fractions, and all lower-numbered hui.
+    "strings_1_to_4_max_hui": 4.0,
+    # String 5: only positions strictly lower than fourth hui; fourth hui is
+    # intentionally allowed, matching the requested boundary.
+    "string_5_max_exclusive_hui": 4.0,
+}
+
 
 def parse_string_numbers(text: str) -> list[int]:
     """Parse ordinary and compact string-number spellings.
@@ -754,6 +778,395 @@ def parse_jianzi(
         normalized["harmonic_hui"] = None
         normalized["sound_mode"] = None
     return pitches, reason
+
+
+def _standalone_walk_transitions(data: dict):
+    """Yield parseable inherited 绰上/注下 start/end state transitions.
+
+    This follows the *same* state machine as ``audit``.  Only a standalone
+    walk with an explicit destination and an inherited stopped string is
+    yielded. A prefixed technique on a newly articulated note (for example
+    ``绰上五徽挑六弦``) is intentionally excluded because it is not the
+    state-inheriting ``direction_only`` form parsed below.  Both pitch-span
+    and direction validators must use this single replay so they cannot
+    disagree about what the walk inherited.
+    """
+    metadata = data.get("metadata") or {}
+    supplied_open_midi = data.get("open_midi")
+    if (isinstance(supplied_open_midi, list)
+            and len(supplied_open_midi) == 7
+            and all(isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    for value in supplied_open_midi)):
+        open_midi = [float(value) for value in supplied_open_midi]
+    else:
+        open_midi = parse_open_midi(metadata)
+
+    context = new_context()
+    for note in data.get("notes", []):
+        text = str(note.get("jianzi") or "").strip()
+        is_standalone_walk = (
+            text.startswith(("绰上", "注下"))
+            and not parse_string_numbers(text)
+            and first_token(text, RIGHT_HAND_TECHNIQUES) is None
+        )
+        previous_string = context.get("active_left_string")
+        previous_hui = context.get("active_left_hui")
+        destination = parse_hui(text) if is_standalone_walk else None
+
+        # Always advance the shared parser state, including on a row that is
+        # not comparable.  The next walk must inherit exactly what pitch audit
+        # would inherit.
+        actual, reason = parse_jianzi(text, open_midi, context)
+        if (not is_standalone_walk or destination is None
+                or previous_string is None or previous_hui is None
+                or reason is not None or not actual):
+            continue
+        start_pitch, start_error = position_pitch(
+            int(previous_string), previous_hui, open_midi, "stopped"
+        )
+        end_pitch, end_error = position_pitch(
+            int(previous_string), destination, open_midi, "stopped"
+        )
+        if start_error or end_error or start_pitch is None or end_pitch is None:
+            continue
+        yield {
+            "index": note.get("index"),
+            "technique": "绰上" if text.startswith("绰上") else "注下",
+            "string": int(previous_string),
+            "from_hui": previous_hui,
+            "to_hui": destination,
+            "span_cents": round(abs(float(end_pitch) - float(start_pitch)) * 100.0, 1),
+        }
+
+
+def walk_span_warnings(data: dict, threshold_cents: float = WALK_SPAN_WARNING_CENTS) -> list[dict]:
+    """Return deterministic warnings for implausibly large 绰上/注下 walks."""
+    warnings: list[dict] = []
+    for transition in _standalone_walk_transitions(data):
+        span_cents = float(transition["span_cents"])
+        if span_cents >= threshold_cents:
+            warnings.append({
+                **transition,
+                "code": "walk_span_too_large",
+                "span_cents": round(span_cents, 1),
+                "threshold_cents": float(threshold_cents),
+            })
+    return warnings
+
+
+def walk_motion_warnings(data: dict) -> list[dict]:
+    """Warn on no-op and direction-reversed inherited 绰上/注下 movements.
+
+    Numerically increasing hui positions are downward (``注下``); decreasing
+    positions are upward (``绰上``).  This check is deliberately independent
+    of pitch matching: a same-pitch or short movement can still be a
+    musically meaningless no-op or use the wrong named technique.
+    """
+    warnings: list[dict] = []
+    for transition in _standalone_walk_transitions(data):
+        # ``徽外`` is a valid pitch position but has no ordered numeric hui
+        # coordinate, so it cannot support a deterministic up/down judgment.
+        try:
+            start = float(transition["from_hui"])
+            end = float(transition["to_hui"])
+        except (TypeError, ValueError):
+            continue
+        technique = transition["technique"]
+        if abs(end - start) < 1e-9:
+            warnings.append({**transition, "code": "walk_endpoint_same_as_start"})
+        elif ((technique == "绰上" and end > start)
+              or (technique == "注下" and end < start)):
+            warnings.append({
+                **transition,
+                "code": "walk_direction_reversed",
+                "suggested_technique": "注下" if technique == "绰上" else "绰上",
+            })
+    return warnings
+
+
+def open_to_stopped_transition_warnings(data: dict) -> list[dict]:
+    """Warn when the next sounded row stops the same string just opened.
+
+    This is deliberately a notation/continuity advisory rather than a pitch
+    error: pressing the formerly open string immediately damps its resonance
+    and can spoil the intended lingering sound.  Only explicit, parseable
+    ``散`` → same-string positioned notes are considered; rest, sustain, and
+    otherwise ambiguous rows clear the pending open-string state.
+    """
+    metadata = data.get("metadata") or {}
+    supplied_open_midi = data.get("open_midi")
+    if (isinstance(supplied_open_midi, list)
+            and len(supplied_open_midi) == 7
+            and all(isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    for value in supplied_open_midi)):
+        open_midi = [float(value) for value in supplied_open_midi]
+    else:
+        open_midi = parse_open_midi(metadata)
+
+    context = new_context()
+    pending_open_strings: set[int] = set()
+    warnings: list[dict] = []
+    for note in data.get("notes", []):
+        text = str(note.get("jianzi") or "").strip()
+        is_bar = (str(note.get("abc") or "").strip() == "|"
+                  or str(note.get("jianpu") or "").strip() == "|"
+                  or note.get("duration") == "小节线")
+        if is_bar:
+            # A barline is structural, not an intervening sound.
+            continue
+
+        actual, reason = parse_jianzi(text, open_midi, context)
+        strings = set(parse_string_numbers(text))
+        # In a compound 撮/泼/剌, ``散音`` applies only to its explicitly
+        # named open-string component.  The other named string is stopped;
+        # treating all strings in the surface as open (or stopped) creates a
+        # false warning on the following note, e.g. 撮(三弦按音＋六弦散音)
+        # followed by 大指五徽挑三弦.
+        compound_open_match = re.search(
+            r"[撮泼剌][^）)]*?([一二三四五六七1-7])弦散音", text
+        )
+        compound_open_strings = (
+            {string_number(compound_open_match.group(1))}
+            if compound_open_match else set()
+        )
+        explicit_open_strings = (
+            compound_open_strings
+            if compound_open_match else (strings if "散" in text else set())
+        )
+        explicit_stopped_strings = (
+            strings - compound_open_strings
+            if compound_open_match and parse_hui(text) is not None
+            else (strings if parse_hui(text) is not None and "散" not in text else set())
+        )
+        shared = sorted(pending_open_strings & explicit_stopped_strings)
+        if shared and actual and reason is None:
+            warnings.append({
+                "index": note.get("index"),
+                "code": "open_to_stopped_same_string",
+                "strings": shared,
+            })
+
+        # Only a plainly notated open-string sound can carry into the very
+        # next event. Any other row, including a rest or an unparseable glyph,
+        # ends this one-step continuity check.
+        pending_open_strings = explicit_open_strings if actual and reason is None else set()
+    return warnings
+
+
+def nonadjacent_pluck_pair_warnings(data: dict) -> list[dict]:
+    """Warn when a two-string 拨/泼 gesture names non-adjacent strings.
+
+    ``拨``/``泼`` (including 拨剌/泼剌) are neighboring-string gestures.
+    Do not infer missing strings or judge compound gestures with more than two
+    declared strings; this only catches the explicit two-string notation that
+    is mechanically impossible as a single paired stroke.
+    """
+    warnings: list[dict] = []
+    for note in data.get("notes", []):
+        text = str(note.get("jianzi") or "").strip()
+        match = re.search(r"(拨|泼)(剌)?", text)
+        if not match:
+            continue
+        strings = list(dict.fromkeys(parse_string_numbers(text)))
+        if len(strings) != 2 or abs(strings[0] - strings[1]) <= 1:
+            continue
+        warnings.append({
+            "index": note.get("index"),
+            "code": "nonadjacent_pluck_pair",
+            "technique": match.group(0),
+            "strings": strings,
+        })
+    return warnings
+
+
+def same_string_cuo_warnings(data: dict) -> list[dict]:
+    """Warn when both explicitly written components of 撮 use one string."""
+    warnings: list[dict] = []
+    for note in data.get("notes", []):
+        text = str(note.get("jianzi") or "").strip()
+        if "撮" not in text:
+            continue
+        # Inspect only the parenthesized component description. Other string
+        # references elsewhere in the row (e.g. a preceding instruction) are
+        # not part of the two-string 撮.
+        match = re.search(r"撮\s*[（(]([^）)]*)[）)]", text)
+        if not match:
+            continue
+        components = parse_string_numbers(match.group(1))
+        if len(components) == 2 and components[0] == components[1]:
+            warnings.append({
+                "index": note.get("index"),
+                "code": "same_string_cuo_pair",
+                "strings": [components[0]],
+            })
+    return warnings
+
+
+def same_finger_reach_warnings(
+    data: dict,
+    threshold: float = SAME_FINGER_REACH_WARNING_DISTANCE,
+) -> list[dict]:
+    """Warn when adjacent stopped attacks make an implausibly large same-finger reach.
+
+    The reach measure gives string travel half the weight of hui travel:
+    ``abs(current_hui - previous_hui) + abs(current_string - previous_string) / 2``.
+    We only judge two adjacent, singly parseable stopped *attacks* with a
+    resolved named left-hand finger.  Bars are structural and do not break the
+    sequence; rests, sustains, walks, compounds, open strings, harmonics, and
+    ambiguous/unparseable rows do.  This keeps the warning advisory and avoids
+    guessing at complex multi-stop ergonomics.
+    """
+    metadata = data.get("metadata") or {}
+    supplied_open_midi = data.get("open_midi")
+    if (isinstance(supplied_open_midi, list)
+            and len(supplied_open_midi) == 7
+            and all(isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    for value in supplied_open_midi)):
+        open_midi = [float(value) for value in supplied_open_midi]
+    else:
+        open_midi = parse_open_midi(metadata)
+
+    context = new_context()
+    previous: dict | None = None
+    warnings: list[dict] = []
+    for note in data.get("notes", []):
+        text = str(note.get("jianzi") or "").strip()
+        is_bar = (str(note.get("abc") or "").strip() == "|"
+                  or str(note.get("jianpu") or "").strip() == "|"
+                  or note.get("duration") == "小节线")
+        if is_bar:
+            continue
+
+        actual, reason = parse_jianzi(text, open_midi, context)
+        strings = parse_string_numbers(text)
+        finger = context.get("left_finger")
+        hui = context.get("active_left_hui")
+        string = context.get("active_left_string")
+        is_stopped_attack = (
+            reason is None
+            and len(actual) == 1
+            and len(strings) == 1
+            and first_token(text, RIGHT_HAND_TECHNIQUES) is not None
+            and context.get("sound_mode") == "stopped"
+            and finger in LEFT_HAND_FINGERS
+            and isinstance(string, int)
+            and isinstance(hui, (int, float))
+        )
+        if not is_stopped_attack:
+            previous = None
+            continue
+
+        current = {
+            "index": note.get("index"),
+            "finger": str(finger),
+            "string": int(string),
+            "hui": float(hui),
+        }
+        if previous is not None and current["finger"] == previous["finger"]:
+            hui_delta = abs(current["hui"] - previous["hui"])
+            string_delta = abs(current["string"] - previous["string"])
+            distance = hui_delta + string_delta / 2.0
+            if distance >= threshold:
+                warnings.append({
+                    "index": current["index"],
+                    "code": "same_finger_reach_too_large",
+                    "finger": current["finger"],
+                    "from_string": previous["string"],
+                    "from_hui": previous["hui"],
+                    "to_string": current["string"],
+                    "to_hui": current["hui"],
+                    "hui_delta": round(hui_delta, 3),
+                    "string_delta": int(string_delta),
+                    "distance": round(distance, 3),
+                    "threshold": float(threshold),
+                })
+        previous = current
+    return warnings
+
+
+def low_hui_stopped_warnings(data: dict) -> list[dict]:
+    """Warn about mechanically cramped low-hui stopped notes.
+
+    This only evaluates a parseable, explicitly attacked stopped note.  Open
+    strings, harmonics, rests/sustains, and ambiguous/compound surfaces are
+    not guessed at.  The requested ergonomic boundaries are:
+
+    * strings 1--4: hui <= 4 (including fractional fourth-hui positions);
+    * string 5: hui < 4;
+    * strings 6--7: no warning from this rule.
+    """
+    metadata = data.get("metadata") or {}
+    supplied_open_midi = data.get("open_midi")
+    if (isinstance(supplied_open_midi, list)
+            and len(supplied_open_midi) == 7
+            and all(isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    for value in supplied_open_midi)):
+        open_midi = [float(value) for value in supplied_open_midi]
+    else:
+        open_midi = parse_open_midi(metadata)
+
+    context = new_context()
+    warnings: list[dict] = []
+
+    def append_if_cramped(index: object, string: int, hui: float | str) -> None:
+        if not isinstance(hui, (int, float)):
+            return
+        hui_value = float(hui)
+        is_cramped = (
+            (1 <= string <= 4 and hui_value <= LOW_HUI_STOPPED_LIMITS["strings_1_to_4_max_hui"])
+            or (string == 5 and hui_value < LOW_HUI_STOPPED_LIMITS["string_5_max_exclusive_hui"])
+        )
+        if is_cramped:
+            warnings.append({
+                "index": index,
+                "code": "low_hui_stopped_too_cramped",
+                "string": int(string),
+                "hui": hui_value,
+                "strings_1_to_4_max_hui": LOW_HUI_STOPPED_LIMITS["strings_1_to_4_max_hui"],
+                "string_5_max_exclusive_hui": LOW_HUI_STOPPED_LIMITS["string_5_max_exclusive_hui"],
+            })
+
+    for note in data.get("notes", []):
+        text = str(note.get("jianzi") or "").strip()
+        actual, reason = parse_jianzi(text, open_midi, context)
+        strings = parse_string_numbers(text)
+        hui = context.get("active_left_hui")
+        string = context.get("active_left_string")
+
+        # A 撮/泼/剌 written as explicit parenthesized components can contain
+        # one stopped component plus one open component. It has no scalar
+        # sound_mode after parsing by design, but its stopped component is
+        # perfectly unambiguous for this local ergonomic check.
+        compound = re.search(r"[撮泼剌]\s*[（(]([^）)]*)[）)]", text)
+        if compound and "泛" not in text:
+            for component in re.split(r"[＋+]", compound.group(1)):
+                if "按音" not in component:
+                    continue
+                component_strings = parse_string_numbers(component)
+                component_hui = parse_hui(component)
+                if len(component_strings) == 1 and component_hui is not None:
+                    append_if_cramped(note.get("index"), component_strings[0], component_hui)
+            continue
+
+        is_explicit_stopped_attack = (
+            reason is None
+            and len(actual) == 1
+            and len(strings) == 1
+            and first_token(text, RIGHT_HAND_TECHNIQUES) is not None
+            and "泛" not in text
+            and context.get("sound_mode") == "stopped"
+            and isinstance(string, int)
+            and int(string) in strings
+            and isinstance(hui, (int, float))
+        )
+        if not is_explicit_stopped_attack:
+            continue
+        append_if_cramped(note.get("index"), int(string), hui)
+    return warnings
 
 
 def best_pairing(expected: list[float], actual: list[float]) -> list[dict]:

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Evaluate held-out scores with the production two-stage public agent loop.
+"""Evaluate held-out scores with the production public agent loop.
 
-For each score the order is strictly:
-Base -> Guqinizer -> next phrase.  No annotation/reference plan is loaded.
-The finalized Guqinizer plan becomes the read-only previous phrase and the
-only expandable history for later phrases in that score.
+``--workflow two_stage`` runs Base -> Guqinizer -> next phrase.  ``--workflow
+single_stage`` runs the direct-final agent used by the single-stage teacher
+corpus, from a blank plan -> next phrase.  No annotation/reference plan is
+loaded in either workflow; the model's finalized plan is the only read-only
+history passed to the following phrase.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ if str(ROOT) not in sys.path:
 
 # 1.2: public evaluation inputs now carry continuous event_index values.
 # Older prediction files must not be resumed against that different protocol.
-EVAL_SCHEMA_VERSION = "agent-two-stage-eval-prediction-1.2"
+EVAL_SCHEMA_VERSION = "agent-eval-prediction-1.3"
 
 
 def first_json(text: str) -> Any:
@@ -99,6 +100,12 @@ def visible_reasoning(text: str) -> str:
     try:
         value = first_json(text)
         if isinstance(value, dict):
+            # vLLM's OpenAI-compatible response separates ordinary assistant
+            # content from tool calls.  Preserve that neutral terminology in
+            # evaluation traces; ``decision_summary`` is reserved for the
+            # teacher-trajectory protocol below.
+            if isinstance(value.get("assistant_content"), str):
+                return value["assistant_content"].strip()
             if isinstance(value.get("decision_summary"), str):
                 return value["decision_summary"].strip()
             if isinstance(value.get("tool_calls"), list):
@@ -136,13 +143,48 @@ def main() -> int:
     parser.add_argument("--score-key", help="evaluate one score; omit for every score in the input")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--base-model", required=True)
-    parser.add_argument("--adapter", required=True)
+    parser.add_argument(
+        "--vllm-url",
+        help="optional vLLM OpenAI-compatible base URL, e.g. http://127.0.0.1:8101/v1",
+    )
+    parser.add_argument(
+        "--vllm-model", default="guqin-sft",
+        help="served model/LoRA alias when --vllm-url is set",
+    )
+    parser.add_argument("--vllm-timeout-seconds", type=float, default=1800)
+    parser.add_argument(
+        "--vllm-max-model-len", type=int, default=16384,
+        help="vLLM server context limit; caps each request's output budget dynamically",
+    )
+    parser.add_argument(
+        "--adapter",
+        help="optional LoRA adapter; omit to evaluate the unadapted base model",
+    )
     parser.add_argument("--max-new-tokens", type=int, default=6144)
     parser.add_argument("--max-rounds", type=int, default=8)
     parser.add_argument("--attempts", type=int, default=2)
     parser.add_argument(
+        "--generation-batch-size", type=int, default=1,
+        help=("batch ready generation turns from independent scores. "
+              "Each score remains phrase-sequential; default 1 preserves the "
+              "original serial loop."),
+    )
+    parser.add_argument(
         "--disable-thinking", action="store_true",
         help="render Qwen3.5 generation prompts with enable_thinking=False",
+    )
+    parser.add_argument(
+        "--workflow", choices=("two_stage", "single_stage"), default="two_stage",
+        help=("agent workflow: two_stage is Base→Guqinizer; single_stage is the "
+              "direct-final public prompt and tool surface used to construct the "
+              "single-stage training corpus"),
+    )
+    # Compatibility for existing launch commands.  Keep the canonical
+    # user-facing switch above so a run's workflow is explicit in its command.
+    parser.add_argument(
+        "--single-stage", dest="workflow", action="store_const", const="single_stage",
+        default=argparse.SUPPRESS,
+        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--constrain-walk-hui", action="store_true",
@@ -156,6 +198,19 @@ def main() -> int:
                         help="gracefully stop after N fully processed scores; useful for first-score verification")
     parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args()
+    args.single_stage = args.workflow == "single_stage"
+    if args.generation_batch_size < 1:
+        raise SystemExit("--generation-batch-size must be positive")
+    if args.generation_batch_size > 1 and args.constrain_walk_hui:
+        raise SystemExit(
+            "cross-score batching is not yet compatible with --constrain-walk-hui; "
+            "use batch size 1 or disable the constraint"
+        )
+    if args.vllm_url and args.constrain_walk_hui:
+        raise SystemExit(
+            "--constrain-walk-hui requires an in-process logits processor and is "
+            "not available through the vLLM HTTP backend"
+        )
 
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -196,7 +251,10 @@ def main() -> int:
     if args.preflight_only:
         probe = next(iter(by_score.values()))[0]
         probe["baseline_plan"] = blank_plan_from_item(probe)
-        for stage, basic in (("fingering_agent", True), ("guqinization", False)):
+        stages = (("single_stage", False),) if args.single_stage else (
+            ("fingering_agent", True), ("guqinization", False)
+        )
+        for stage, basic in stages:
             tokenizer.apply_chat_template(
                 [{"role": "system", "content": public_system_for(stage, basic=basic)},
                  {"role": "user", "content": render_public_prompt(probe, stage)}],
@@ -207,22 +265,156 @@ def main() -> int:
         print(json.dumps({"preflight": "ok", "scores": len(by_score),
                           "phrases": len(selected)}, ensure_ascii=False))
         return 0
-    model = AutoModelForCausalLM.from_pretrained(
-        args.base_model, trust_remote_code=True, torch_dtype=torch.bfloat16,
-        device_map="auto", quantization_config=BitsAndBytesConfig(
-            load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
-        ),
-    )
-    model = load_adapter_checked(model, args.adapter)
+    model = None
+    if not args.vllm_url:
+        model = AutoModelForCausalLM.from_pretrained(
+            args.base_model, trust_remote_code=True, torch_dtype=torch.bfloat16,
+            device_map="auto", quantization_config=BitsAndBytesConfig(
+                load_in_4bit=True, bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
+            ),
+        )
+        if args.adapter:
+            model = load_adapter_checked(model, args.adapter)
     generation_eos_ids = qwen35_eos_token_ids(tokenizer)
     id_texts_cache: dict[int, str] | None = None
+
+    def generate_vllm(messages: list[dict], tools: list[dict], sampled: bool):
+        """Submit one complete tool turn to the shared continuous-batching server."""
+        import time
+        import urllib.error
+        import urllib.request
+
+        # The local template accepts tool arguments as mappings, whereas the
+        # OpenAI-compatible HTTP API requires their JSON-string representation.
+        # Keep the local conversation untouched and convert only the wire copy.
+        wire_messages = deepcopy(messages)
+        for wire_message in wire_messages:
+            for tool_call in wire_message.get("tool_calls") or []:
+                function = tool_call.get("function") or {}
+                if not isinstance(function.get("arguments"), str):
+                    function["arguments"] = json.dumps(
+                        function.get("arguments") or {}, ensure_ascii=False
+                    )
+        wire_tools = openai_tools(tools)
+        # Token counting uses Qwen's native template, which requires tool
+        # arguments to remain mappings.  Only the OpenAI wire payload uses
+        # the JSON-string form above.
+        rendered = tokenizer.apply_chat_template(
+            messages, tools=wire_tools, add_generation_prompt=True,
+            enable_thinking=not args.disable_thinking, return_tensors="pt",
+        )
+        # Qwen's remote tokenizer returns a BatchEncoding here, while other
+        # tokenizer implementations return a tensor directly.
+        input_ids = getattr(rendered, "input_ids", rendered)
+        prompt_tokens = int(input_ids.shape[-1])
+        available_output = args.vllm_max_model_len - prompt_tokens
+        if available_output < 1:
+            raise RuntimeError(
+                f"vLLM prompt already exceeds context: {prompt_tokens} >= "
+                f"{args.vllm_max_model_len}"
+            )
+        request_max_tokens = min(args.max_new_tokens, available_output)
+        payload = {
+            "model": args.vllm_model,
+            "messages": wire_messages,
+            "tools": wire_tools,
+            "tool_choice": "auto",
+            "max_tokens": request_max_tokens,
+            "temperature": 0.25 if sampled else 0.0,
+            "repetition_penalty": 1.04,
+            "chat_template_kwargs": {
+                "enable_thinking": not args.disable_thinking,
+            },
+        }
+        if prompt_tokens > 8192:
+            context_dir = args.output.parent / "context_over_8192"
+            context_dir.mkdir(parents=True, exist_ok=True)
+            context_path = context_dir / f"request_{int(time.time() * 1000)}.json"
+            context_path.write_text(json.dumps({
+                "kind": "prompt_over_8192",
+                "prompt_tokens": prompt_tokens,
+                "requested_max_tokens": request_max_tokens,
+                "model_context_limit": args.vllm_max_model_len,
+                "request": payload,
+            }, ensure_ascii=False, indent=2), encoding="utf-8")
+        request = urllib.request.Request(
+            args.vllm_url.rstrip("/") + "/chat/completions",
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        last_error = None
+        for retry in range(5):
+            try:
+                with urllib.request.urlopen(
+                    request, timeout=args.vllm_timeout_seconds
+                ) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as error:
+                body = error.read().decode("utf-8", errors="replace")
+                if error.code == 400:
+                    debug_dir = args.output.parent / (args.output.stem + "_debug")
+                    debug_dir.mkdir(parents=True, exist_ok=True)
+                    debug_path = debug_dir / f"request_{int(time.time() * 1000)}.json"
+                    debug_path.write_text(json.dumps({
+                        "error": body,
+                        "prompt_tokens": prompt_tokens,
+                        "requested_max_tokens": request_max_tokens,
+                        "request": payload,
+                    }, ensure_ascii=False, indent=2), encoding="utf-8")
+                last_error = RuntimeError(
+                    f"vLLM HTTP {error.code}: {body[:1200]}"
+                )
+                if error.code < 500 and error.code != 429:
+                    raise last_error from error
+            except (urllib.error.URLError, TimeoutError) as error:
+                last_error = error
+            if retry < 4:
+                time.sleep(min(8.0, 0.5 * (2 ** retry)))
+        else:
+            raise RuntimeError(f"vLLM request failed after 5 attempts: {last_error}")
+
+        choices = result.get("choices") or []
+        if not choices:
+            raise RuntimeError(f"vLLM returned no choices: {result}")
+        choice = choices[0]
+        message = choice.get("message") or {}
+        calls = []
+        for tool_call in message.get("tool_calls") or []:
+            function = tool_call.get("function") or {}
+            arguments = function.get("arguments") or {}
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError as error:
+                    raise RuntimeError(
+                        f"vLLM returned invalid tool arguments: {arguments[:500]}"
+                    ) from error
+            calls.append({"name": function.get("name"), "arguments": arguments})
+        content = message.get("content") or ""
+        if calls:
+            # Keep the evaluator trace parseable while preserving the OpenAI
+            # distinction between ordinary assistant content and tool calls.
+            # ``decision_summary`` belongs only to teacher trajectories.
+            raw = json.dumps({
+                "assistant_content": content,
+                "tool_calls": calls,
+            }, ensure_ascii=False)
+        else:
+            raw = content
+        usage = result.get("usage") or {}
+        generated_tokens = int(usage.get("completion_tokens") or 0)
+        return raw, choice.get("finish_reason") == "length", generated_tokens, None
 
     def generate(
         messages: list[dict], tools: list[dict], sampled: bool,
         constraint_table=None,
     ):
         nonlocal id_texts_cache
+        if args.vllm_url:
+            return generate_vllm(messages, tools, sampled)
         encoded = tokenizer.apply_chat_template(
             messages, tools=openai_tools(tools), add_generation_prompt=True,
             enable_thinking=not args.disable_thinking,
@@ -259,11 +451,105 @@ def main() -> int:
             processor,
         )
 
-    def run_stage(item: dict, stage: str, historical: dict) -> dict:
+    def generate_batch(requests: list[dict]) -> list[tuple[str, bool, int, None] | dict]:
+        """Generate one ready turn per independent score in a single batch.
+
+        A request owns its complete agent state, so only the model forward pass
+        is shared. Tool execution and the subsequent state transition remain
+        strictly per request.  Walk constraints are intentionally rejected at
+        argument parsing because their logits processor has a single sequence
+        state machine rather than a batch-indexed one.
+        """
+        if not requests:
+            return []
+        if args.vllm_url:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=len(requests)) as executor:
+                futures = [executor.submit(
+                    generate_vllm, request["messages"], request["tools"],
+                    bool(request["sampled"]),
+                ) for request in requests]
+                results = []
+                for future in futures:
+                    try:
+                        results.append(future.result())
+                    except Exception as exc:
+                        # One malformed model tool call must not tear down an
+                        # entire worker shard.  The state machine feeds this
+                        # back as a normal corrective user observation.
+                        results.append({"generation_error": (
+                            f"{type(exc).__name__}: {exc}"
+                        )})
+                return results
+        sampled = {bool(request["sampled"]) for request in requests}
+        if len(sampled) != 1:
+            raise ValueError("batch must contain requests with the same sampling mode")
+        encoded_rows = []
+        for request in requests:
+            encoded_rows.append(tokenizer.apply_chat_template(
+                request["messages"], tools=openai_tools(request["tools"]),
+                add_generation_prompt=True, enable_thinking=not args.disable_thinking,
+                return_tensors="pt", return_dict=True,
+            ))
+        max_length = max(int(row["input_ids"].shape[-1]) for row in encoded_rows)
+        pad_id = tokenizer.pad_token_id
+        if pad_id is None:
+            pad_id = tokenizer.eos_token_id
+        input_ids = torch.full(
+            (len(encoded_rows), max_length), int(pad_id), dtype=torch.long,
+        )
+        attention_mask = torch.zeros((len(encoded_rows), max_length), dtype=torch.long)
+        for index, row in enumerate(encoded_rows):
+            ids = row["input_ids"][0]
+            mask = row.get("attention_mask")
+            length = int(ids.shape[-1])
+            input_ids[index, max_length - length:] = ids
+            if mask is None:
+                attention_mask[index, max_length - length:] = 1
+            else:
+                attention_mask[index, max_length - length:] = mask[0]
+        options = {
+            "max_new_tokens": args.max_new_tokens,
+            "do_sample": sampled.pop(),
+            "repetition_penalty": 1.04,
+            "pad_token_id": tokenizer.eos_token_id,
+            "eos_token_id": generation_eos_ids,
+        }
+        if options["do_sample"]:
+            options["temperature"] = 0.25
+        with torch.inference_mode():
+            output = model.generate(
+                input_ids=input_ids.to(model.device),
+                attention_mask=attention_mask.to(model.device),
+                **options,
+            )
+        eos_ids = {int(value) for value in generation_eos_ids}
+        results = []
+        for row in output:
+            generated = row[max_length:]
+            values = [int(value) for value in generated.tolist()]
+            actual = len(values)
+            for position, value in enumerate(values):
+                if value in eos_ids:
+                    actual = position + 1
+                    break
+            new_tokens = generated[:actual]
+            decoded = tokenizer.decode(new_tokens, skip_special_tokens=False)
+            results.append((
+                trim_qwen35_assistant_turn(decoded),
+                actual >= args.max_new_tokens,
+                actual,
+                None,
+            ))
+        return results
+
+    def run_stage_steps(item: dict, stage: str, historical: dict):
+        """Yield one model-generation request at a time for a stage."""
         basic = stage == "fingering_agent"
         tools = public_tools_for(stage, basic=basic)
         constrain = args.constrain_walk_hui and not basic
-        if stage == "guqinization":
+        if stage in {"guqinization", "single_stage"}:
             item["public_pitch_warning_source_indices"] = sorted(
                 public_pitch_warning_source_indices(item, historical=historical)
             )
@@ -309,10 +595,41 @@ def main() -> int:
                         for action in current_replay.actions
                     }
                     constraint_table = build_walk_constraints(item, current_text)
-                raw, truncated, generated_tokens, processor = generate(
-                    messages, tools, sampled=attempt > 0,
-                    constraint_table=constraint_table,
-                )
+                generation = yield {
+                    "messages": messages,
+                    "tools": tools,
+                    "sampled": attempt > 0,
+                    "constraint_table": constraint_table,
+                }
+                if isinstance(generation, dict) and generation.get("generation_error"):
+                    error = str(generation["generation_error"])
+                    round_entry = {
+                        "round": round_number,
+                        "raw_output": "",
+                        "truncated": False,
+                        "tool_calls": [],
+                        "tool_results": [],
+                        "generation_error": error,
+                    }
+                    trace.append(round_entry)
+                    print(json.dumps({
+                        "event": "eval_generation_error",
+                        "sample_id": item.get("trajectory_id"),
+                        "stage": stage,
+                        "attempt": attempt + 1,
+                        "round": round_number,
+                        "error": error,
+                    }, ensure_ascii=False), flush=True)
+                    messages.append({
+                        "role": "user",
+                        "content": (
+                            "上一轮工具调用未能执行：模型输出的工具参数不是完整合法的 JSON，"
+                            f"错误为 {error}。未执行任何工具，也未修改曲谱。"
+                            "请重新调用一个工具；参数必须是完整 JSON，尤其确认数组、花括号和引号均已闭合。"
+                        ),
+                    })
+                    continue
+                raw, truncated, generated_tokens, processor = generation
                 calls = parse_calls(raw)
                 round_entry = {
                     "round": round_number, "raw_output": raw,
@@ -425,7 +742,7 @@ def main() -> int:
                         complete, report = validate_jianzi_only(
                             item, runtime.accumulated_patches,
                             toward_reference=False,
-                            require_complete=basic,
+                            require_complete=basic or stage == "single_stage",
                             # Keep this acceptance/pitch-gate audit in the
                             # same musical state as RealToolRuntime.edit_plan.
                             # In particular, phrase-spanning harmonic state
@@ -480,6 +797,23 @@ def main() -> int:
             last_trace = trace
         return {"ok": False, "trace": last_trace}
 
+    def run_stage(item: dict, stage: str, historical: dict) -> dict:
+        """Original serial execution path, implemented via the same state machine."""
+        steps = run_stage_steps(item, stage, historical)
+        try:
+            request = next(steps)
+            while True:
+                try:
+                    result = generate(
+                        request["messages"], request["tools"], request["sampled"],
+                        request["constraint_table"],
+                    )
+                except Exception as exc:
+                    result = {"generation_error": f"{type(exc).__name__}: {exc}"}
+                request = steps.send(result)
+        except StopIteration as stopped:
+            return stopped.value
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     completed: dict[str, dict] = {}
     if args.resume and args.output.exists():
@@ -492,13 +826,157 @@ def main() -> int:
                     f"resume output uses incompatible schema {prior.get('schema_version')!r}; "
                     "use a new --output path so pre-fix generations are not reused"
                 )
+            final_stage_key = "single_stage" if args.single_stage else "guqinizer"
             if (
                 prior.get("protocol_valid")
-                and isinstance((prior.get("guqinizer") or {}).get("plan"), dict)
+                and isinstance((prior.get(final_stage_key) or {}).get("plan"), dict)
             ):
                 completed[str(prior["sample_id"])] = prior
 
+    def run_batched_scores(score_keys: list[str]) -> int:
+        """Dynamically batch ready turns while preserving each score's order."""
+        progress_enabled = not args.no_progress and tqdm is not None
+        score_progress = tqdm(total=len(score_keys), desc="曲谱", unit="首", file=sys.stdout,
+                              dynamic_ncols=True) if progress_enabled else None
+        phrase_progress = tqdm(total=sum(len(by_score[key]) for key in score_keys),
+                                desc="phrase", unit="条", file=sys.stdout,
+                                dynamic_ncols=True) if progress_enabled else None
+        states = {
+            key: {"score_key": key, "phrases": by_score[key], "position": 0,
+                  "previous": None, "historical": {}, "finished": False}
+            for key in score_keys
+        }
+
+        def finish(state: dict) -> None:
+            if not state["finished"]:
+                state["finished"] = True
+                if score_progress:
+                    score_progress.update(1)
+
+        def prepare(state: dict):
+            while state["position"] < len(state["phrases"]):
+                item = state["phrases"][state["position"]]
+                sample_id = str(item["trajectory_id"])
+                handoff = item["input"].setdefault("phrase_handoff", {})
+                handoff.pop("previous_phrase", None)
+                if state["previous"]:
+                    previous = state["previous"]
+                    handoff["previous_phrase"] = {
+                        "phrase_id": previous["phrase_id"], "status": "confirmed_readonly",
+                        "notes": previous["input"]["notes_without_jianzi"],
+                        "actions": previous["reference_plan"]["actions"],
+                    }
+                item["harmonic_region_at_start"] = harmonic_region_at_phrase_start(
+                    item, state["historical"]
+                )
+                prior = completed.get(sample_id)
+                if prior:
+                    final_key = "single_stage" if args.single_stage else "guqinizer"
+                    final_plan = deepcopy(prior[final_key]["plan"])
+                    item["baseline_plan"] = final_plan
+                    item["reference_plan"] = final_plan
+                    state["previous"] = item
+                    state["historical"][(state["score_key"], item["phrase_id"])] = item
+                    state["position"] += 1
+                    if phrase_progress:
+                        phrase_progress.update(1)
+                    continue
+                item["baseline_plan"] = blank_plan_from_item(item)
+                first_stage = "single_stage" if args.single_stage else "fingering_agent"
+                steps = run_stage_steps(item, first_stage, state["historical"])
+                return {"state": state, "item": item, "stage": first_stage,
+                        "steps": steps, "request": next(steps), "base": None}
+            finish(state)
+            return None
+
+        def write_record(session: dict, base: dict, guqinizer: dict | None, output) -> bool:
+            state, item = session["state"], session["item"]
+            single_stage = args.single_stage
+            final = (guqinizer if single_stage else guqinizer) or {"ok": False}
+            valid = bool(final.get("ok")) if single_stage else bool(base.get("ok") and final.get("ok"))
+            record = {
+                "schema_version": EVAL_SCHEMA_VERSION,
+                "sample_id": str(item["trajectory_id"]), "split": item.get("split"),
+                "score_key": state["score_key"], "phrase_id": item["phrase_id"],
+                "input_sha256": source_meta.get(str(item["trajectory_id"]), {}).get("input_sha256"),
+                "protocol_valid": valid,
+            }
+            if single_stage:
+                record["single_stage"] = final
+            else:
+                record["base"] = base
+                if guqinizer is not None:
+                    record["guqinizer"] = guqinizer
+            if valid:
+                final_plan = final["plan"]
+                record["jianzi_rows"] = [
+                    [int(action["source_index"]), str(action.get("jianzi_text") or "")]
+                    for action in final_plan.get("actions", [])
+                ]
+                record["parse_error"] = None
+            else:
+                final_plan = None
+                record["jianzi_rows"] = []
+                record["parse_error"] = (
+                    "single_stage_failed" if single_stage else
+                    ("base_stage_failed" if not base.get("ok") else "guqinizer_stage_failed")
+                )
+            output.write(json.dumps(record, ensure_ascii=False) + "\n")
+            output.flush()
+            if phrase_progress:
+                phrase_progress.update(1)
+            if final_plan is None:
+                finish(state)
+                return False
+            item["reference_plan"] = final_plan
+            state["previous"] = item
+            state["historical"][(state["score_key"], item["phrase_id"])] = item
+            state["position"] += 1
+            return True
+
+        mode = "a" if args.resume else "w"
+        sessions = [session for state in states.values() if (session := prepare(state))]
+        with args.output.open(mode, encoding="utf-8", newline="\n") as output:
+            while sessions:
+                sampled = bool(sessions[0]["request"]["sampled"])
+                batch = [session for session in sessions
+                         if bool(session["request"]["sampled"]) == sampled][:args.generation_batch_size]
+                results = generate_batch([session["request"] for session in batch])
+                for session, result in zip(batch, results):
+                    try:
+                        session["request"] = session["steps"].send(result)
+                        continue
+                    except StopIteration as stopped:
+                        stage_result = stopped.value
+                    if session["stage"] == "fingering_agent" and stage_result.get("ok"):
+                        session["base"] = stage_result
+                        session["item"]["baseline_plan"] = stage_result["plan"]
+                        steps = run_stage_steps(session["item"], "guqinization",
+                                                session["state"]["historical"])
+                        session.update({"stage": "guqinization", "steps": steps,
+                                        "request": next(steps)})
+                        continue
+                    if session["stage"] == "single_stage":
+                        keep_score = write_record(session, None, stage_result, output)
+                    elif session["stage"] == "fingering_agent":
+                        keep_score = write_record(session, stage_result, None, output)
+                    else:
+                        keep_score = write_record(session, session["base"], stage_result, output)
+                    if keep_score and (next_session := prepare(session["state"])) is not None:
+                        session.update(next_session)
+                        continue
+                    sessions.remove(session)
+        if phrase_progress:
+            phrase_progress.close()
+        if score_progress:
+            score_progress.close()
+        return 0
+
     score_keys = sorted(by_score)
+    if args.generation_batch_size > 1:
+        if args.stop_after_scores is not None:
+            score_keys = score_keys[:args.stop_after_scores]
+        return run_batched_scores(score_keys)
     progress_enabled = not args.no_progress and tqdm is not None
     score_progress = tqdm(total=len(score_keys), desc="曲谱", unit="首", file=sys.stdout,
                           dynamic_ncols=True) if progress_enabled else None
@@ -533,7 +1011,8 @@ def main() -> int:
 
                 prior = completed.get(sample_id)
                 if prior:
-                    final_plan = deepcopy(prior["guqinizer"]["plan"])
+                    final_key = "single_stage" if args.single_stage else "guqinizer"
+                    final_plan = deepcopy(prior[final_key]["plan"])
                     item["baseline_plan"] = final_plan
                     item["reference_plan"] = final_plan
                     previous = item
@@ -543,6 +1022,41 @@ def main() -> int:
                     continue
 
                 item["baseline_plan"] = blank_plan_from_item(item)
+                if args.single_stage:
+                    direct = run_stage(item, "single_stage", historical)
+                    record = {
+                        "schema_version": EVAL_SCHEMA_VERSION,
+                        "sample_id": sample_id,
+                        "split": item.get("split"),
+                        "score_key": score_key,
+                        "phrase_id": item["phrase_id"],
+                        "input_sha256": source_meta.get(sample_id, {}).get("input_sha256"),
+                        "single_stage": direct,
+                        "protocol_valid": bool(direct.get("ok")),
+                    }
+                    if record["protocol_valid"]:
+                        final_plan = direct["plan"]
+                        record["jianzi_rows"] = [
+                            [int(action["source_index"]), str(action.get("jianzi_text") or "")]
+                            for action in final_plan.get("actions", [])
+                        ]
+                        record["parse_error"] = None
+                    else:
+                        final_plan = None
+                        record["jianzi_rows"] = []
+                        record["parse_error"] = "single_stage_failed"
+                    output.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    output.flush()
+                    if phrase_progress:
+                        phrase_progress.update(1)
+                    if final_plan is None:
+                        # Do not feed a later phrase an incomplete predecessor.
+                        break
+                    item["reference_plan"] = final_plan
+                    previous = item
+                    historical[(score_key, item["phrase_id"])] = item
+                    continue
+
                 base = run_stage(item, "fingering_agent", historical)
                 record = {
                     "schema_version": EVAL_SCHEMA_VERSION,
