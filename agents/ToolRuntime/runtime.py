@@ -126,28 +126,63 @@ def render_grouped_candidate_table(target: float, candidates: list[dict],
         lines[0] += f"｜简谱｜{jianpu_values[0]}"
     return "\n".join(lines)
 
+def harmonic_scope_after_phrases(
+    phrases: list[tuple[list[dict], list[dict]]],
+) -> bool:
+    """Replay harmonic scope with the same bare-rest boundary as pitch audit."""
+    active = False
+    for notes, actions in phrases:
+        by_index = {
+            int(action["source_index"]): action
+            for action in actions if action.get("source_index") is not None
+        }
+        # Older archived trajectory rows occasionally lack phrase notes.  They
+        # cannot contribute a rest boundary, but their explicit markers still
+        # remain meaningful state evidence.
+        if not notes:
+            for action in sorted(actions, key=lambda row: int(row.get("source_index", -1))):
+                text = str(action.get("text") or action.get("jianzi_text") or "")
+                for marker in re.findall(r"泛起|泛止", text):
+                    active = marker == "泛起"
+            continue
+        for note in notes:
+            source_index = note.get("index")
+            action = by_index.get(int(source_index)) if source_index is not None else None
+            text = str((action or {}).get("text") or (action or {}).get("jianzi_text") or "")
+            for marker in re.findall(r"泛起|泛止", text):
+                active = marker == "泛起"
+            # This mirrors ``audit``: a score-level blank rest ends a prior
+            # harmonic phrase even when the source omitted an explicit 泛止.
+            if "休止" in str(note.get("jianpu") or "") and not text:
+                active = False
+    return active
+
+
 def harmonic_region_at_phrase_start(
     item: dict, historical: dict[tuple[str, str], dict]
 ) -> bool:
-    """Replay confirmed 泛起/泛止 markers before the current phrase."""
-    current_start = int(item["input"]["event_range"]["start"])
+    """Replay confirmed harmonic state before the current phrase."""
+    def phrase_start(row: dict) -> int:
+        """Accept both runtime and archived trajectory event-range schemas."""
+        event_range = row["input"]["event_range"]
+        return int(event_range.get("start", event_range.get("start_index")))
+
+    current_start = phrase_start(item)
     earlier = sorted(
         (row for (score_key, _), row in historical.items()
          if score_key == item["score_key"]
-         and int(row["input"]["event_range"]["start"]) < current_start),
-        key=lambda row: int(row["input"]["event_range"]["start"]),
+         and phrase_start(row) < current_start),
+        key=phrase_start,
     )
-    active = False
-    for row in earlier:
-        actions = sorted(
-            row.get("reference_plan", {}).get("actions", []),
-            key=lambda action: int(action["source_index"]),
+    phrases = [
+        (
+            list(row["input"].get("notes_without_jianzi")
+                 or row["input"].get("phrase_notes") or []),
+            list(row.get("reference_plan", {}).get("actions") or []),
         )
-        for action in actions:
-            text = str(action.get("text") or action.get("jianzi_text") or "")
-            for marker in re.findall(r"泛起|泛止", text):
-                active = marker == "泛起"
-    return active
+        for row in earlier
+    ]
+    return harmonic_scope_after_phrases(phrases)
 
 def pitch_audit_notes(
     item: dict, actions_by_source: dict[int, dict],
@@ -199,11 +234,7 @@ def pitch_audit_notes(
     all_prefix_actions = [action for _, actions in prefix_phrases for action in actions]
     seed_allowed = item.get("harmonic_region_at_start")
     if seed_allowed is None:
-        seed_allowed = True
-        for action in all_prefix_actions:
-            text = str(action.get("text") or action.get("jianzi_text") or "")
-            for marker in re.findall(r"泛起|泛止", text):
-                seed_allowed = marker == "泛起"
+        seed_allowed = harmonic_scope_after_phrases(prefix_phrases)
     seed_hui = next(
         (action.get("hui") for action in reversed(all_prefix_actions)
          if seed_allowed and action.get("mode") == "harmonic"

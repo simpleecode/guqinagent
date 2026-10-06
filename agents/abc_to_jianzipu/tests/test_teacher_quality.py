@@ -747,6 +747,25 @@ class EditableProtocolTests(unittest.TestCase):
         }
         self.assertFalse(harmonic_region_at_phrase_start(item, historical))
 
+    def test_harmonic_region_bare_rest_ends_scope_before_next_phrase(self) -> None:
+        item = {"score_key": "s", "input": {"event_range": {"start": 10}}}
+        historical = {
+            ("s", "p1"): {
+                "input": {
+                    "event_range": {"start": 0},
+                    "notes_without_jianzi": [
+                        {"index": 1, "jianpu": "5"},
+                        {"index": 2, "jianpu": "0（休止）"},
+                    ],
+                },
+                "reference_plan": {"actions": [
+                    {"source_index": 1, "text": "泛起食指七徽勾4弦"},
+                    {"source_index": 2, "text": ""},
+                ]},
+            },
+        }
+        self.assertFalse(harmonic_region_at_phrase_start(item, historical))
+
     def test_pitch_audit_replays_previous_harmonic_hui(self) -> None:
         item = {
             "input": {
@@ -767,19 +786,19 @@ class EditableProtocolTests(unittest.TestCase):
         self.assertEqual(rows[0]["jianzi"], "泛起勾1弦六徽")
         self.assertEqual(rows[-1]["jianzi"], "勾二弦六徽")
 
-    def test_harmonic_audit_keeps_mode_across_rest_and_inherited_hui(self) -> None:
+    def test_harmonic_audit_bare_rest_ends_mode_and_inheritance(self) -> None:
         report = AUDIT.audit({
             "metadata": {},
             "open_midi": [48.0, 50.0, 53.0, 55.0, 57.0, 60.0, 62.0],
             "notes": [
                 {"index": -1, "jianpu": None, "jianzi": "泛起勾1弦九徽"},
                 {"index": 1, "jianpu": "0（休止）", "jianzi": ""},
-                {"index": 2, "jianpu": "5", "jianzi": "名指九徽勾1弦"},
+                {"index": 2, "jianpu": "1", "jianzi": "名指九徽勾1弦"},
             ],
         }, 50.0)
         detail = next(row for row in report["details"] if row["index"] == 2)
         self.assertEqual(detail["status"], "matched")
-        self.assertEqual(detail["pairs"][0]["jianzi_midi"], 67.0)
+        self.assertEqual(detail["pairs"][0]["jianzi_midi"], 60.0)
 
     def test_harmonic_audit_accepts_chinese_or_arabic_string_surface(self) -> None:
         open_midi = [48.0, 50.0, 53.0, 55.0, 57.0, 60.0, 62.0]
