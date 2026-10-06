@@ -57,6 +57,15 @@ class JianpuDecodeTests(unittest.TestCase):
 
 
 class JianziDecodeTests(unittest.TestCase):
+    def test_modern_compound_capture_layout(self):
+        glyph = {"std": {
+            "a": "pc:", "d": "4", "e": "s:", "f": "9", "g": "6",
+        }}
+        self.assertEqual(
+            MODULE.decode_jianzi_glyph(glyph)["cn"],
+            "撮（4弦散音＋食指九徽6弦按音）",
+        )
+
     def test_verified_right_hand_codes(self):
         glyph = {
             "std": {

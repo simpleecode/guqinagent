@@ -190,7 +190,7 @@ DECOR_TAG = {
     ":jinfu":  "进复",       # jìn-fù
     ":dou":    "逗",         # dòu
     ":man":    "慢",         # màn (slow)
-    ":huan":   "换",         # huàn
+    ":huan":   "唤",         # huàn
     ":ful":    "拂",         # fú
     ":laful":  "历拂",       # lì-fú
     ":tfu":    "拖拂",
@@ -728,6 +728,39 @@ def decode_jianzi_glyph(jian: dict) -> dict:
             "ppl:": "泼剌", "pfc:": "反撮",
         }.get(p.get("a"))
         if compound_tech:
+            # Newer mobile-runtime captures use a compact compound layout
+            # distinct from the older b/c/d/f/g arrangement below:
+            #   a=compound, d=open string, e=left finger, f=hui, g=stopped string.
+            # Example: ``pc:, 4, s, 9, 6`` is
+            # ``撮（4弦散音＋食指九徽6弦按音）``.  Reading it with the old
+            # layout produced impossible surfaces such as ``96弦按音`` and
+            # cascaded false pitch mismatches in following inherited notes.
+            modern_left_finger = str(p.get("e") or "").rstrip(":")
+            modern_compound_layout = (
+                modern_left_finger in LEFT_FINGER
+                and p.get("f") not in (None, "")
+                and p.get("g") not in (None, "")
+                and not p.get("b")
+                and not p.get("c")
+            )
+            if modern_compound_layout:
+                stopped_lf = LEFT_FINGER[modern_left_finger]
+                stopped_hui = hui_label(p.get("f", ""))
+                open_string = p.get("d", "")
+                stopped_string = p.get("g", "")
+                first = f"{open_string}弦散音" if open_string else ""
+                second = (
+                    f"{stopped_lf} {stopped_hui} {stopped_string}弦按音"
+                    if stopped_hui and stopped_string else ""
+                )
+                first_cn = f"{open_string}弦散音" if open_string else ""
+                second_cn = (
+                    f"{stopped_lf}{stopped_hui}{stopped_string}弦按音"
+                    if stopped_hui and stopped_string else ""
+                )
+                decoded["readable"] = f"{compound_tech}（{first} + {second}）"
+                decoded["cn"] = f"{compound_tech}（{first_cn}＋{second_cn}）"
+                return decoded
             # Build the two sounding notes. The stopped note needs a left
             # finger + hui; if those are absent both strings are open.
             if lf and hui and stopped_string:

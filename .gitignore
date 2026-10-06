@@ -12,7 +12,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-.venv/
+.venv*/
 venv/
 *.egg-info/
 
@@ -22,6 +22,23 @@ venv/
 *.tmp
 *.bak
 *.partial.jsonl
+
+# Scratch directories and one-off dumps
+/tmp/
+paper/tmp/
+.zcode/
+
+# Untracked doc images kept only for the private lab notebook
+DOCS/image/
+
+# LaTeX build products (main.tex/main.pdf stay tracked)
+*.aux
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.out
 
 # Large raw-score collection and intermediate/review artifacts
 ABC_J/final/
@@ -44,6 +61,8 @@ ABC_J/agent_training/evaluation_text_protocol_v2/*
 # Training/runtime data and generated evaluation outputs
 train/data/
 train/runtime/
+train/artifacts/
+train/eval_score/
 train/eval_outputs_v3_two_stage/
 train/eval_inputs_v2_text_protocol/*
 !train/eval_inputs_v2_text_protocol/test.jsonl
@@ -79,5 +98,6 @@ DOCS/实验日记.md
 ABC_J/modern/
 
 # jianpa crawl/convert artifacts
+/jianpa/
 jianpa/cache/
 jianpa/out/
