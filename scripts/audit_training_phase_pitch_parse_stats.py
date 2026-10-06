@@ -156,6 +156,28 @@ def build_pitch_audit(source: dict[str, Any], accepted_plan: dict[str, Any],
     report["details"] = report["details"][-len(audit_notes):] if audit_notes else []
     for row, note in zip(report["details"], audit_notes):
         row["jianzi_original"] = note["jianzi_original"]
+    # ``audit`` computed its summary over prefix + current phrase.  Prefix is
+    # state-only input, so retaining that aggregate would make the per-phase
+    # report look healthier (or worse) than the actual supervised phrase.
+    current = report["details"]
+    compared = [row for row in current if row.get("status") in {"matched", "mismatched"}]
+    matched = [row for row in compared if row.get("status") == "matched"]
+    errors = [
+        abs(float(pair["error_cents"]))
+        for row in compared
+        for pair in (row.get("pairs") or [])
+        if pair.get("error_cents") is not None
+    ]
+    report["summary"] = {
+        "total_notes": len(current),
+        "compared_notes": len(compared),
+        "matched_notes": len(matched),
+        "mismatched_notes": len(compared) - len(matched),
+        "skipped_notes": sum(row.get("status") == "skipped" for row in current),
+        "match_rate": (len(matched) / len(compared)) if compared else None,
+        "compared_pitch_pairs": len(errors),
+        "mean_absolute_error_cents": (sum(errors) / len(errors)) if errors else None,
+    }
     return report
 
 
