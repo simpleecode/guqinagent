@@ -758,8 +758,35 @@ def decode_jianzi_glyph(jian: dict) -> dict:
         lf = LEFT_FINGER.get(p.get("b", ""), p.get("b", ""))
         lf2 = LEFT_FINGER.get(p.get("f", ""), p.get("f", ""))
         hui = hui_label(p.get("c", ""))
+        hui2 = hui
         stopped_string = p.get("d", "")
         open_string = p.get("g", "")
+        # Runtime captures retain the original object slots under raw_fields.
+        # Their compacted a…h aliases lose ``off_1c`` (the second left-hand
+        # finger) and shift the second hui into ``f``.  Decode the raw layout
+        # first when it is available:
+        #   off_c/finger1, off_10/hui1, off_14/string1,
+        #   off_1c/finger2, off_20/hui2, off_24/string2.
+        # Treating off_20 as finger2 yielded surfaces such as
+        # ``撮（食指七徽1弦按音＋7七徽4弦按音）`` and discarded the real
+        # two-stop information before pitch auditing.
+        raw_fields = std.get("raw_fields") or {}
+        raw_compound_layout = (
+            isinstance(raw_fields, dict)
+            and raw_fields.get("off_8") in {"pc:", "pp:", "pl:", "pt:", "pet:", "pst:", "ppl:", "pfc:"}
+            and raw_fields.get("off_c") not in (None, "")
+            and raw_fields.get("off_10") not in (None, "")
+            and raw_fields.get("off_14") not in (None, "")
+        )
+        if raw_compound_layout:
+            lf = LEFT_FINGER.get(raw_fields.get("off_c", ""), raw_fields.get("off_c", ""))
+            hui = hui_label(raw_fields.get("off_10", ""))
+            stopped_string = raw_fields.get("off_14", "")
+            second_finger_code = raw_fields.get("off_1c", "")
+            lf2 = LEFT_FINGER.get(second_finger_code, second_finger_code)
+            hui2 = hui_label(raw_fields.get("off_20", ""))
+            open_string = raw_fields.get("off_24", "")
+            close_tag = COMPOUND_CLOSE.get(raw_fields.get("off_28", ""), "")
         compound_tech = {
             "pc:": "撮", "pp:": "泼", "pl:": "剌",
             "pt:": "弹", "pet:": "双弹", "pst:": "三弹",
@@ -812,7 +839,6 @@ def decode_jianzi_glyph(jian: dict) -> dict:
             # Second note: open string, or a second stopped note (pt: family
             # uses f as a second left finger at the same/own hui).
             if open_string and lf2:
-                hui2 = hui_label(p.get("c", "")) if p.get("c") else ""
                 second = f"{lf2} {hui2} {open_string}弦按音".strip()
                 second_cn = f"{lf2}{hui2}{open_string}弦按音"
             elif open_string:

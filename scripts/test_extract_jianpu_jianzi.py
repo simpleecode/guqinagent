@@ -68,6 +68,19 @@ class JianpuDecodeTests(unittest.TestCase):
 
 
 class JianziDecodeTests(unittest.TestCase):
+    def test_runtime_raw_compound_layout_preserves_second_finger_and_hui(self):
+        glyph = {"std": {
+            "a": "pc:", "b": "s", "c": "7", "d": "1", "f": "7", "g": "4",
+            "raw_fields": {
+                "off_8": "pc:", "off_c": "s", "off_10": "7", "off_14": "1",
+                "off_18": "", "off_1c": "d", "off_20": "7", "off_24": "4", "off_28": "",
+            },
+        }}
+        self.assertEqual(
+            MODULE.decode_jianzi_glyph(glyph)["cn"],
+            "撮（食指七徽1弦按音＋大指七徽4弦按音）",
+        )
+
     def test_modern_compound_capture_layout(self):
         glyph = {"std": {
             "a": "pc:", "d": "4", "e": "s:", "f": "9", "g": "6",

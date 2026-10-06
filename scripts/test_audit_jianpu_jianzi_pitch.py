@@ -68,6 +68,22 @@ class AuditPitchTests(unittest.TestCase):
         self.assertEqual(context["active_left_string"], 5)
         self.assertAlmostEqual(context["stopped_hui"], 7.0)
 
+    def test_harmonic_compound_updates_hui_for_following_abbreviated_pluck(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("泛起名指五徽挑6弦", self.opens, context)
+        MODULE.parse_jianzi(
+            "撮（食指四徽3弦按音＋中指四徽1弦按音）",
+            self.opens,
+            context,
+        )
+
+        pitches, reason = MODULE.parse_jianzi("挑2弦", self.opens, context)
+        expected, error = MODULE.position_pitch(2, 4.0, self.opens, "harmonic")
+        self.assertIsNone(reason)
+        self.assertIsNone(error)
+        self.assertEqual(context["harmonic_hui"], 4.0)
+        self.assertEqual(pitches, [expected])
+
     def test_slide_without_inherited_string_is_skipped(self):
         pitches, reason = MODULE.parse_jianzi(
             "注下七徽九分", self.opens, MODULE.new_context()

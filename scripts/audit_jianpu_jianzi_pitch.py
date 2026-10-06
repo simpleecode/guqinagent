@@ -406,6 +406,15 @@ def _parse_jianzi(
             context["left_finger"] = None
             for string, hui, _pitch, finger in parsed_components:
                 remember_left_position(context, string, hui, finger)
+            # In a 泛起…泛止 span, a two-string compound can explicitly move
+            # the harmonic touch point.  It has no single stopped-string
+            # position to retain, but subsequent shorthand such as “挑2弦”
+            # must inherit its shared hui.  Previously this early-return
+            # branch retained the preceding harmonic_hui (e.g. 五徽 after a
+            # new 四徽撮), producing a spurious 500-cent mismatch.
+            component_huis = {hui for _string, hui, _pitch, _finger in parsed_components}
+            if context.get("harmonic_scope") and len(component_huis) == 1:
+                context["harmonic_hui"] = next(iter(component_huis))
             return [part[2] for part in parsed_components], None
 
     # 爪起（亦写抓起）不是保持按位再次发声，而是承接前一个由大指
