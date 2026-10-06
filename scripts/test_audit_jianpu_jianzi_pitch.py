@@ -510,6 +510,18 @@ class AuditPitchTests(unittest.TestCase):
         row = MODULE.audit(data, 50)["details"][1]
         self.assertNotEqual(row.get("reason"), "harmonic_hui_missing")
 
+    def test_bare_rest_ends_prior_harmonic_scope(self):
+        report = MODULE.audit({
+            "metadata": {"tonic": "1=C", "tonic_degree1_midi": 60},
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 0, "jianpu": "5", "jianzi": "泛起名指九徽挑5弦"},
+                {"index": 1, "jianpu": "0（休止）", "jianzi": ""},
+                {"index": 2, "jianpu": "3", "jianzi": "名指九徽勾5弦"},
+            ],
+        }, 50.0)
+        self.assertEqual(report["details"][2]["status"], "matched")
+
 
 
     def test_single_symbol_cuo_passes_on_main_note(self):

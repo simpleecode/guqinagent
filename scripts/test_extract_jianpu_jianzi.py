@@ -55,6 +55,17 @@ class JianpuDecodeTests(unittest.TestCase):
         self.assertTrue(decoded["barline"])
         self.assertEqual(MODULE.jianpu_to_abc(decoded)[0], "|")
 
+    def test_runtime_accidental_overrides_compact_note_token(self):
+        decoded = MODULE.decode_note({
+            "index": 1,
+            "note": "s4'",
+            "note_decoded": {
+                "pitch": {"value": "4", "octave": 1, "accidental": "sharp"},
+            },
+        })
+        self.assertEqual(decoded["jianpu"]["pitch_name"], "♯4̇")
+        self.assertEqual(decoded["jianpu"]["accidental"], 1)
+
 
 class JianziDecodeTests(unittest.TestCase):
     def test_modern_compound_capture_layout(self):

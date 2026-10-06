@@ -381,6 +381,44 @@ def decode_jianpu_token(token: str) -> dict:
     return info
 
 
+RUNTIME_ACCIDENTAL_OFFSETS = {
+    "def": 0,
+    "natural": 0,
+    "sharp": 1,
+    "flat": -1,
+    "double_sharp": 2,
+    "double_flat": -2,
+}
+
+
+def apply_runtime_pitch_fields(decoded: dict, runtime_pitch: dict | None) -> None:
+    """Overlay the authoritative runtime pitch spelling onto a raw token.
+
+    The compact ``note`` token holds duration, degree and octave, but some
+    mobile scores omit an accidental there (``s4'``) while the adjacent
+    decoded runtime object correctly stores it as ``sharp``.  Reading only
+    the token silently turns #4 into 4 and produces a false pitch-audit
+    failure.
+    """
+    if not isinstance(runtime_pitch, dict) or decoded.get("rest"):
+        return
+    try:
+        pitch = int(runtime_pitch.get("value"))
+        octave = int(runtime_pitch.get("octave", decoded.get("octave", 0)))
+        if octave >= 2**63:
+            octave -= 2**64
+    except (TypeError, ValueError):
+        return
+    if pitch not in range(1, 8):
+        return
+    accidental_name = str(runtime_pitch.get("accidental", "def"))
+    accidental = RUNTIME_ACCIDENTAL_OFFSETS.get(accidental_name, 0)
+    decoded.update(pitch=pitch, octave=octave, accidental=accidental)
+    decoded["pitch_name"] = _pitch_name(
+        pitch, octave, accidental, decoded.get("ornament", False)
+    )
+
+
 TONIC_SEMITONES = {"C": 0, "D": 2, "E": 4, "F": 5, "G": 7, "A": 9, "B": 11}
 DEGREE_SEMITONES = {1: 0, 2: 2, 3: 4, 4: 5, 5: 7, 6: 9, 7: 11}
 
@@ -825,8 +863,10 @@ def decode_jianzi_glyph(jian: dict) -> dict:
 
 def decode_note(note: dict) -> dict:
     jianpu = decode_jianpu_token(note.get("note", ""))
+    decoded_note = note.get("note_decoded") or {}
+    apply_runtime_pitch_fields(jianpu, decoded_note.get("pitch"))
     alt_jianpu = None
-    alt_pitch = (note.get("note_decoded") or {}).get("alt_pitch")
+    alt_pitch = decoded_note.get("alt_pitch")
     if isinstance(alt_pitch, dict) and not jianpu.get("rest"):
         alt_digit = alt_pitch.get("off_8")
         try:
@@ -841,6 +881,7 @@ def decode_note(note: dict) -> dict:
                 jianpu.get("duration_code", ""), alt_digit, suffix
             )
             candidate = decode_jianpu_token(alt_token)
+            apply_runtime_pitch_fields(candidate, alt_pitch)
             if (candidate.get("pitch"), candidate.get("octave", 0)) != (
                     jianpu.get("pitch"), jianpu.get("octave", 0)):
                 alt_jianpu = candidate

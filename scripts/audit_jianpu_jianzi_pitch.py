@@ -260,6 +260,11 @@ def parse_tonic_midi(metadata: dict) -> float:
 
 def parse_open_midi(metadata: dict) -> list[float]:
     rows = metadata.get("tuning", {}).get("open_strings") or []
+    # Standalone captures produced by extract_jianpu_jianzi preserve the
+    # compact runtime tuning under `tuning` and put its audited expansion in
+    # `tuning_interpretation`.  Both describe the same captured pitches.
+    if not rows:
+        rows = metadata.get("tuning_interpretation", {}).get("open_strings") or []
     if len(rows) != 7:
         raise ValueError("metadata.tuning.open_strings must contain 7 strings")
     result = []
@@ -1363,18 +1368,14 @@ def audit(data: dict, tolerance_cents: float) -> dict:
         counts[row["status"]] += 1
         details.append(row)
         if "休止" in str(note.get("jianpu", "")) and not note.get("jianzi"):
-            # A bare rest releases stopped/open-string hand positions, but it
-            # does not end 泛起…泛止.  Preserve the harmonic span and its hui;
-            # only an explicit 泛止 may close it.
-            harmonic_scope = bool(context.get("harmonic_scope") or context.get("harmonic"))
-            harmonic_hui = context.get("harmonic_hui")
+            # A score-level rest is a phrase boundary: the former 泛起 span
+            # cannot silently carry into the next articulated phrase.  Keep
+            # an explicitly written ``泛起…`` on a rest row parseable above,
+            # but a bare rest clears every inherited sound state.  Otherwise
+            # later ordinary stopped notes are incorrectly raised as
+            # harmonics (typically by an octave).
             context.clear()
             context.update(new_context())
-            if harmonic_scope:
-                context["harmonic"] = True
-                context["harmonic_scope"] = True
-                context["sound_mode"] = "harmonic"
-                context["harmonic_hui"] = harmonic_hui
 
     compared = counts["matched"] + counts["mismatched"]
     return {
