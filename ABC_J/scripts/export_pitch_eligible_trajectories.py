@@ -48,9 +48,15 @@ def audit_module():
     return _AUDIT_MODULE
 
 
-def classify_canonical(row: dict[str, Any]) -> dict[str, Any]:
+def classify_canonical(row: dict[str, Any], *, prefix: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     module = audit_module()
-    return module.classify(module.build_pitch_audit(row, row.get("reference_plan") or {}, 50.0))
+    earlier = [
+        (prior, prior.get("reference_plan") or {})
+        for prior in (prefix or [])
+    ]
+    return module.classify(module.build_pitch_audit(
+        row, row.get("reference_plan") or {}, 50.0, prefix=earlier,
+    ))
 
 
 def validate_normalized_tuning(row: dict[str, Any], source: Path) -> None:
@@ -174,13 +180,26 @@ def main() -> int:
             source = args.inferred_dir / f"inferred_trajectories_{split}.jsonl"
             if not source.exists():
                 raise FileNotFoundError(source)
-            for row in read_jsonl(source):
+            rows = list(read_jsonl(source))
+            rows_by_score: dict[str, list[dict[str, Any]]] = {}
+            for row in rows:
+                rows_by_score.setdefault(str(row.get("score_key") or ""), []).append(row)
+            classifications: dict[str, dict[str, Any]] = {}
+            for score_rows in rows_by_score.values():
+                score_rows.sort(key=lambda row: int(((row.get("input") or {}).get("event_range") or {}).get("start", 0)))
+                prefix: list[dict[str, Any]] = []
+                for row in score_rows:
+                    trajectory_id = str(row.get("trajectory_id") or "")
+                    if trajectory_id:
+                        classifications[trajectory_id] = classify_canonical(row, prefix=prefix)
+                    prefix.append(row)
+            for row in rows:
                 phrase_id = str(row.get("trajectory_id") or "")
                 if not phrase_id:
                     raise ValueError(f"missing trajectory_id in {source}")
                 validate_normalized_tuning(row, source)
                 source_rows[split].append(row)
-                result = classify_canonical(row)
+                result = classifications[phrase_id]
                 grouped[split][phrase_id] = {stage: result for stage in STAGES}
     else:
         stats = json.loads(args.stats.read_text(encoding="utf-8"))

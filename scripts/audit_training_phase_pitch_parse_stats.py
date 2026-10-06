@@ -104,9 +104,8 @@ def base_trajectory_id(sample_id: str) -> str:
     return sample_id
 
 
-def build_pitch_audit(source: dict[str, Any], accepted_plan: dict[str, Any],
-                      tolerance_cents: float) -> dict[str, Any]:
-    """Run the existing pitch audit against a plan's text-only final state."""
+def audit_notes_for_plan(source: dict[str, Any], accepted_plan: dict[str, Any]) -> list[dict[str, Any]]:
+    """Render one phrase's final plan into canonical pitch-audit rows."""
     phrase = (source.get("input") or {}).get("phrase_handoff") or {}
     notes = phrase.get("current_phrase") or (source.get("input") or {}).get(
         "notes_without_jianzi"
@@ -132,11 +131,29 @@ def build_pitch_audit(source: dict[str, Any], accepted_plan: dict[str, Any],
             "jianzi_original": raw_text,
             "lyric": note.get("lyric", ""),
         })
+    return audit_notes
+
+
+def build_pitch_audit(source: dict[str, Any], accepted_plan: dict[str, Any],
+                      tolerance_cents: float,
+                      prefix: list[tuple[dict[str, Any], dict[str, Any]]] | None = None,
+                      ) -> dict[str, Any]:
+    """Audit one plan, replaying optional earlier phrases for state inheritance.
+
+    泛起/泛止和省略徽位都是跨行状态；phrase 边界不是乐谱状态边界。  The
+    returned report intentionally contains *only* the current phrase, while
+    ``prefix`` is fed to the shared auditor solely to reconstruct its state.
+    """
+    audit_notes = audit_notes_for_plan(source, accepted_plan)
+    prefix_notes = []
+    for earlier_source, earlier_plan in prefix or []:
+        prefix_notes.extend(audit_notes_for_plan(earlier_source, earlier_plan))
     data = {
         "metadata": (source.get("input") or {}).get("metadata") or {},
-        "notes": audit_notes,
+        "notes": prefix_notes + audit_notes,
     }
     report = PITCH_AUDIT.audit(data, tolerance_cents)
+    report["details"] = report["details"][-len(audit_notes):] if audit_notes else []
     for row, note in zip(report["details"], audit_notes):
         row["jianzi_original"] = note["jianzi_original"]
     return report
