@@ -415,6 +415,17 @@ def _parse_jianzi(
             component_huis = {hui for _string, hui, _pitch, _finger in parsed_components}
             if context.get("harmonic_scope") and len(component_huis) == 1:
                 context["harmonic_hui"] = next(iter(component_huis))
+            component_fingers = {
+                finger for _string, _hui, _pitch, finger in parsed_components
+                if finger
+            }
+            # A same-finger compound has no unique active string, but it does
+            # establish a usable common hui for a following shorthand such as
+            # “勾2弦”.  Retaining that shared position avoids a false octave
+            # mismatch while still leaving active_left_string unresolved.
+            if len(component_huis) == 1 and len(component_fingers) == 1:
+                context["active_left_hui"] = next(iter(component_huis))
+                context["left_finger"] = next(iter(component_fingers))
             return [part[2] for part in parsed_components], None
 
     # 爪起（亦写抓起）不是保持按位再次发声，而是承接前一个由大指
@@ -1377,14 +1388,17 @@ def audit(data: dict, tolerance_cents: float) -> dict:
         counts[row["status"]] += 1
         details.append(row)
         if "休止" in str(note.get("jianpu", "")) and not note.get("jianzi"):
-            # A score-level rest is a phrase boundary: the former 泛起 span
-            # cannot silently carry into the next articulated phrase.  Keep
-            # an explicitly written ``泛起…`` on a rest row parseable above,
-            # but a bare rest clears every inherited sound state.  Otherwise
-            # later ordinary stopped notes are incorrectly raised as
-            # harmonics (typically by an octave).
+            # A bare rest ends the sounding/harmonic state, but it does not
+            # erase where the left hand is currently placed.  The next note
+            # may omit its hui and legitimately inherit that stopped
+            # position.  Clearing active_left_hui here turns ordinary open-
+            # looking shorthand after a rest into a false octave error.
             context.clear()
             context.update(new_context())
+            context["active_left_hui"] = context_before_note.get("active_left_hui")
+            context["active_left_string"] = context_before_note.get("active_left_string")
+            context["left_finger"] = context_before_note.get("left_finger")
+            context["left_positions"] = dict(context_before_note.get("left_positions") or {})
 
     compared = counts["matched"] + counts["mismatched"]
     return {
