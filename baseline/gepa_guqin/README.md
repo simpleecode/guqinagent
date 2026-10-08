@@ -14,15 +14,24 @@ cache/断点续跑、API/token 计数。
 **最终配置下的三臂 pilot**(固定 dev split seed 42:train 145 / val 56,
 证据在 `runs/pilot_final_20261008/`):
 
-| 臂 | dev val 分数 | 备注 |
+| 臂 | dev val 分数 | 成本(actor calls / tokens in+out) |
 |---|---|---|
-| vanilla ReAct(无手册) | 0.4699 | 56/56 协议通过,160 calls,213K in/95K out tokens |
-| ReAct + Handbook(= GEPA 种子) | **0.8513** | 手册增益 +0.381 |
-| GEPA + Handbook(200 budget) | 运行中(快照见 gepa_run_log_partial.txt) | 种子评测 56/56 完成后进入迭代 |
+| vanilla ReAct(无手册) | 0.4699 | 160 / 213K + 95K |
+| ReAct + Handbook(= GEPA 种子) | **0.8513** | 含于 GEPA 臂种子评测 |
+| GEPA + Handbook(200 budget,3 提案) | **0.8513(未超越种子)** | 2480 / 4.03M + 1.23M |
 
-**待办**:等 GEPA 臂跑完确认其能再提升 → 决定正式运行预算(1200/1500/2000)
-→ `scripts/run_formal_2000.sh`(预算自行改)→ `run_final_eval` 两条基线 +
-`evaluation.run_eval` 出密封 test 论文数字。
+结论:**手册增益确认(+0.381)**;GEPA 在此小尺度(56 val、3 次提案,
+0.8428/0.8002/0.8317 均未过接受线)未再提升,不足以支撑 2000 预算决策。
+另注意:242 次指标调用消耗 2480 次 actor 调用 —— 自身 handoff 语义下
+minibatch 抽到长曲靠后短语会拖完整条前缀(前缀不占指标预算但占 API 成本)。
+
+**建议的下一步(交接给学弟)**:
+1. 先做 minibatch 采样优化(优先抽前缀已缓存/位置靠前的短语),把每次
+   迭代的 API 成本从 ~10 calls/metric-call 压回 ~4;
+2. 用更大 minibatch(6)与 600–800 预算在中尺度 dev split 上重试 GEPA,
+   若仍无法超越 0.8513 则以 "ReAct + Handbook" 为论文的 prompt-only 基线,
+   GEPA 作为负结果/消融报告;
+3. 正式密封 test 数字用 `run_final_eval`(带/不带 `--prompt-json`)。
 
 **数据依赖(不在 git 内)**:新划分数据在
 `ABC_J/agent_training/renderfix_train_test_20261007/pitch_eligible_two_or_half/`

@@ -1,0 +1,17 @@
+{
+  "api_usage": {
+    "actor_calls": 2480,
+    "actor_tokens_in": 4026952,
+    "actor_tokens_out": 1229040,
+    "reflection_calls": 3,
+    "reflection_tokens_in": 21585,
+    "reflection_tokens_out": 6012
+  },
+  "leakage_audit": {
+    "feedback_leaks": 0,
+    "record_soft_hits": 0,
+    "unresolved_trajectory": 0
+  },
+  "total_evals": 242,
+  "model": "glm-5.3"
+}
