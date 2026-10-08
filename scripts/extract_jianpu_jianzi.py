@@ -338,6 +338,41 @@ def decode_jianpu_token(token: str) -> dict:
         info["pitch"] = None
         info["pitch_name"] = "－（延音）"
         return info
+    # The mobile score uses ``y:`` for appoggiaturas.  Most older captures
+    # contain a single note (for example ``y:1'/2'``), but some scores encode
+    # a complete ornamental run in the same token (``y:3'/2'/1'/6/5``).  The
+    # former parser recognised only the first form; the latter consequently
+    # fell through to the generic non-pitch path and was rendered as a rest.
+    # A run has at least three slash-separated pitch atoms.  Keep the legacy
+    # two-part form intact because its final numeric component is a divisor.
+    if token.startswith("y:"):
+        atoms = token[2:].split("/")
+        run = []
+        if len(atoms) >= 3:
+            for atom in atoms:
+                match = re.fullmatch(r"([1-7])([',]*)", atom)
+                if not match:
+                    run = []
+                    break
+                degree, marks = match.groups()
+                octave = marks.count("'") - marks.count(",")
+                run.append({"pitch": int(degree), "octave": octave})
+        if run:
+            info.update({
+                "ornament": True,
+                "duration_code": "y",
+                "duration_name": "装饰音",
+                # Keep a primary pitch for callers that expect the old
+                # scalar fields, while exposing the full source run.
+                "pitch": run[0]["pitch"],
+                "octave": run[0]["octave"],
+                "ornament_pitches": run,
+            })
+            def _ornament_name(item):
+                dot = "̇" * item["octave"] if item["octave"] > 0 else "̣" * (-item["octave"])
+                return str(item["pitch"]) + dot
+            info["pitch_name"] = " ".join(_ornament_name(item) for item in run) + "（饰）"
+            return info
     grace = re.match(r"^y:([1-7])([',]*)(?:/(\d+))?'?$", token)
     if grace:
         pitch, octave_marks, divisor = grace.groups()
@@ -520,7 +555,17 @@ def jianpu_to_abc(jianpu: dict, tonic="C", octave_lowering=0,
     if jianpu.get("barline"):
         return "|", previous_pitch
     if jianpu.get("ornament"):
-        ornament = jianpu_abc_pitch(jianpu, tonic, octave_lowering, degree1_midi)
+        ornament_pitches = jianpu.get("ornament_pitches") or []
+        if ornament_pitches:
+            ornament = "".join(
+                jianpu_abc_pitch(
+                    {**jianpu, **item, "ornament": False},
+                    tonic, octave_lowering, degree1_midi,
+                )
+                for item in ornament_pitches
+            )
+        else:
+            ornament = jianpu_abc_pitch(jianpu, tonic, octave_lowering, degree1_midi)
         return ("{" + ornament + "}" if ornament else "{}"), previous_pitch
     duration = {"": "4", "q": "2", "s": "", "d": "/2"}.get(
         jianpu.get("duration_code", ""), "4"

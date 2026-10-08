@@ -16,9 +16,15 @@ SLIDE_DIRECTION = {"绰": "上", "注": "下"}
 POSITIONLESS_CONTINUATIONS = {"吟"}
 
 
-def hui_label(hui: float | None) -> str:
+def hui_label(hui: float | str | None) -> str:
     if hui is None:
         return ""
+    # ``徽外`` / ``徽外半`` are valid symbolic positions beyond 十三徽.
+    # They are stored as strings so that pitch, parsing, and rendering retain
+    # their traditional surface form; trying to coerce them to an integer
+    # breaks prompt rendering before teacher generation even reaches the API.
+    if isinstance(hui, str):
+        return hui
     whole = int(hui)
     fraction = round((hui - whole) * 10)
     label = f"{ZH.get(whole, str(whole))}徽"

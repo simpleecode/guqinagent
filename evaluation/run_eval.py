@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .aggregate import metrics, per_piece
+from .aggregate import final_warning_stats, metrics, per_piece
 from .parser import structured_events, structured_events_for_score
 from .rules import violations
 
@@ -83,7 +83,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     summary = {"schema_version": "guqin-final-eval-1.0", "prediction_samples": len(predictions),
                "matched_samples": len(predictions) - len(unavailable), "unmatched_prediction_ids": unavailable,
                "tone_type_replay_incomplete_scores": sorted(state_replay_incomplete_scores),
-               "events": len(all_events), "metrics": metrics(all_events, all_violations, args.pitch_tolerance)}
+               "events": len(all_events), "metrics": metrics(all_events, all_violations, args.pitch_tolerance),
+               "final_warning": final_warning_stats(list(predictions.values()))}
     (output / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_jsonl(output / "per_event.jsonl", all_events)

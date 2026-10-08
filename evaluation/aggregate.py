@@ -12,6 +12,31 @@ from .pitch import paired_cents
 TONE_TYPES = ("stopped", "open", "harmonic")
 
 
+def final_warning_stats(predictions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Count phrases whose final edit_plan preview still contains warnings."""
+    total = 0
+    warned = 0
+    for prediction in predictions:
+        total += 1
+        stage = prediction.get("guqinizer") or prediction.get("base") or {}
+        last_text = ""
+        for trace_item in stage.get("trace") or []:
+            for result in trace_item.get("tool_results") or []:
+                if result.get("name") == "edit_plan":
+                    payload = result.get("result") or {}
+                    if isinstance(payload, dict):
+                        nested = payload.get("result") if isinstance(payload.get("result"), dict) else payload
+                        last_text = str(nested.get("text") or "")
+        if ":warning:" in last_text:
+            warned += 1
+    return {
+        "phrases": total,
+        "warning_phrases": warned,
+        "warning_rate": warned / total if total else None,
+        "definition": "phrases whose final edit_plan preview contains at least one :warning:",
+    }
+
+
 def tone_type_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
     """Compare replay-derived 按/散/泛 state and its corpus distribution."""
     comparable = [event for event in events

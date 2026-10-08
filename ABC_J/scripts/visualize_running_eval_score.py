@@ -27,6 +27,7 @@ if str(ROOT) not in sys.path:
 from ABC_J.scripts.generate_teacher_tool_trajectories import (  # noqa: E402
     blank_fingering_plan, public_system_for,
 )
+from agents.ToolRuntime.runtime import pitch_audit_notes  # noqa: E402
 from agents.abc_to_jianzipu.teacher_trajectory import render_public_prompt  # noqa: E402
 from scripts.audit_jianpu_jianzi_pitch import audit as audit_pitch  # noqa: E402
 
@@ -37,6 +38,28 @@ def esc(value: object) -> str:
 
 def pretty(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def assistant_content(raw: object) -> str:
+    """Show only the public assistant text from vLLM's wire wrapper."""
+    text = "" if raw is None else str(raw)
+    try:
+        value = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return text
+    if isinstance(value, dict) and "assistant_content" in value:
+        return str(value.get("assistant_content") or "")
+    return text
+
+
+def tool_result_text(entry: dict) -> str:
+    """Render tool text as text, preserving its embedded line breaks."""
+    value = entry.get("result")
+    if isinstance(value, dict):
+        nested = value.get("result") if isinstance(value.get("result"), dict) else value
+        if isinstance(nested, dict) and "text" in nested:
+            return str(nested.get("text") or "").replace("\\n", "\n")
+    return pretty(value)
 
 
 def pull(remote: str, local: Path) -> None:
@@ -66,6 +89,34 @@ def actions_by_index(stage: dict | None, field: str = "jianzi_text") -> dict[int
 
 def pitch_class(symbol: str) -> str:
     return {"✓": "matched", "✗": "mismatched"}.get(symbol, "unresolved")
+
+
+def final_warnings(stage: dict | None, event_to_source: dict[int, int] | None = None) -> dict[int, list[str]]:
+    """Extract final-preview warnings, converting displayed event indexes to source indexes."""
+    import re
+
+    if not stage:
+        return {}
+    last_text = ""
+    for trace_item in stage.get("trace") or []:
+        for result in trace_item.get("tool_results") or []:
+            if result.get("name") != "edit_plan":
+                continue
+            payload = result.get("result") or {}
+            if isinstance(payload, dict):
+                nested = payload.get("result") if isinstance(payload.get("result"), dict) else payload
+                last_text = str(nested.get("text") or "")
+    warnings: dict[int, list[str]] = {}
+    for line in last_text.splitlines():
+        match = re.match(r"^(\d+)｜.*?:warning:(.+)$", line)
+        if not match:
+            continue
+        values = [item.strip() for item in match.group(2).split(":warning:") if item.strip()]
+        if values:
+            displayed_index = int(match.group(1))
+            source_index = (event_to_source or {}).get(displayed_index, displayed_index)
+            warnings[source_index] = values
+    return warnings
 
 
 def prompt_block(stage: str, system_prompt: str, user_prompt: str) -> str:
@@ -99,14 +150,14 @@ def stage_trace(stage: dict | None, title: str, prompt_html: str = "") -> str:
         # already visible in ②; echoing them here mislabels the input.
         result_blocks = "".join(
             f"<div class='round-step'><b>③ 工具返回（下一轮模型输入）｜{esc(entry.get('name') or '?')}</b>"
-            f"<pre>{esc(pretty(entry.get('result')))}</pre></div>"
+            f"<pre>{esc(tool_result_text(entry))}</pre></div>"
             for entry in results
         ) or "<div class='round-step'><b>③ 工具返回（下一轮模型输入）</b><pre>（本轮无工具执行）</pre></div>"
         sections.append(
             "<article class='round'>"
             f"<h4>第 {esc(round_no)} 轮<span>assistant → tool{esc(suffix)}</span></h4>"
             "<div class='round-step'><b>① 模型输出</b>"
-            f"<pre>{esc(raw)}</pre></div>"
+            f"<pre>{esc(assistant_content(raw))}</pre></div>"
             "<div class='round-step'><b>② 解析出的工具调用</b>"
             f"<pre>{esc(pretty(calls))}</pre></div>"
             + result_blocks +
@@ -161,21 +212,25 @@ def stage_prompts(
     return base_system, base_user, guqin_system, guqin_user
 
 
-def pitch_symbols(source: dict, actions: dict[int, str]) -> dict[int, str]:
-    """Audit the final text against the phrase's normalized tuning.
+def pitch_symbols(
+    source: dict, actions: dict[int, str],
+    historical: dict[tuple[str, str], dict] | None = None,
+) -> dict[int, str]:
+    """Audit final text with the same prior-phrase state as ``edit_plan``.
 
     The symbols deliberately follow the full-trajectory viewer: ✓ is a
     resolved pitch match, ✗ is a mismatch, and ○ means the notation cannot be
-    judged reliably (including display-only or non-sounding rows).
+    judged reliably (including display-only or non-sounding rows).  In
+    particular, a phrase can begin inside a 泛音 region opened in an earlier
+    phrase, so auditing only its own rows would incorrectly read later
+    shorthand as stopped notes an octave too low.
     """
     input_data = source.get("input") or {}
-    notes = []
-    for note in input_data.get("notes_without_jianzi") or []:
-        if note.get("index") is None:
-            continue
-        row = dict(note)
-        row["jianzi"] = actions.get(int(note["index"]), "")
-        notes.append(row)
+    action_rows = {
+        int(index): {"jianzi_text": value}
+        for index, value in actions.items()
+    }
+    notes = pitch_audit_notes(source, action_rows, historical=historical)
     try:
         report = audit_pitch({
             "metadata": dict(input_data.get("metadata") or {}),
@@ -194,12 +249,22 @@ def pitch_symbols(source: dict, actions: dict[int, str]) -> dict[int, str]:
     }
 
 
-def compare_table(source: dict, base: dict | None, guqinizer: dict | None, annotation: dict[int, str]) -> str:
+def compare_table(
+    source: dict, base: dict | None, guqinizer: dict | None,
+    annotation: dict[int, str], historical: dict[tuple[str, str], dict],
+) -> str:
     notes = ((source.get("input") or {}).get("notes_without_jianzi") or [])
     base_map = actions_by_index(base)
     gq_map = actions_by_index(guqinizer)
-    base_pitch = pitch_symbols(source, base_map)
-    gq_pitch = pitch_symbols(source, gq_map)
+    final_stage = guqinizer if guqinizer and isinstance(guqinizer.get("plan"), dict) else base
+    event_to_source = {
+        int(note["event_index"]): int(note["index"])
+        for note in notes
+        if note.get("event_index") is not None and note.get("index") is not None
+    }
+    warning_map = final_warnings(final_stage, event_to_source)
+    base_pitch = pitch_symbols(source, base_map, historical)
+    gq_pitch = pitch_symbols(source, gq_map, historical)
     # GQS 1.2: the model writes continuous 音序 (bars occupy no ordinal);
     # internal bookkeeping stays on source indexes, display uses 音序 like
     # visualize_all_trajectories_hierarchical.py.
@@ -230,13 +295,14 @@ def compare_table(source: dict, base: dict | None, guqinizer: dict | None, annot
             f"<td class='{base_class}'>{esc(base_text)}</td>"
             f"<td class='{gq_class}'>{esc(gq_text)}</td><td class='annotation'>{esc(target)}</td>"
             f"<td class='pitch {pitch_class(base_pitch.get(index, '○'))}' title='✓ 匹配｜✗ 不匹配｜○ 无法可靠解析'>{base_pitch.get(index, '○')}</td>"
-            f"<td class='pitch {pitch_class(gq_pitch.get(index, '○'))}' title='✓ 匹配｜✗ 不匹配｜○ 无法可靠解析'>{gq_pitch.get(index, '○')}</td></tr>"
+            f"<td class='pitch {pitch_class(gq_pitch.get(index, '○'))}' title='✓ 匹配｜✗ 不匹配｜○ 无法可靠解析'>{gq_pitch.get(index, '○')}</td>"
+            f"<td class='warning'>{esc('；'.join(warning_map.get(index, [])))}</td></tr>"
         )
     return (
         "<div class='table-wrap'><table><thead><tr>"
         "<th>序号</th><th>简谱</th><th>ABC</th><th>时值</th>"
             "<th>Base/Fingering 最终</th><th>Guqinizer 当前最终</th><th>标注</th>"
-            "<th>Fingering 音高</th><th>Guqinizer 音高</th>"
+            "<th>Fingering 音高</th><th>Guqinizer 音高</th><th>最终 warning</th>"
         "</tr></thead><tbody>" + "".join(rows) + "</tbody></table></div>"
     )
 
@@ -332,8 +398,14 @@ def main() -> int:
         if str(r.get("score_key")) == args.score
     }
     source_by_id = {str(r.get("sample_id")): r for r in source_rows}
+    reference_rows = load_jsonl(args.references)
+    historical = {
+        (str(row.get("score_key")), str(row.get("phrase_id"))): row
+        for row in reference_rows
+        if row.get("score_key") is not None and row.get("phrase_id") is not None
+    }
     reference_by_id: dict[str, dict[int, str]] = {}
-    for row in load_jsonl(args.references):
+    for row in reference_rows:
         if str(row.get("score_key")) != args.score:
             continue
         ref_map: dict[int, str] = {}
@@ -390,7 +462,7 @@ def main() -> int:
             f"<details class='phrase'{' open' if (sample_id == args.focus_sample or (not args.focus_sample and position == max(0, completed - 1))) else ''}>"
             f"<summary><code>{esc(sample_id)}</code>｜{status}</summary>"
             f"<p>当前段：{esc(source.get('phrase_id'))}；这是评估运行时输入，不含私有标注。</p>"
-            f"<h3>当前结果 vs 标注</h3>{compare_table(runtime, base, guqinizer, annotation)}"
+            f"<h3>当前结果 vs 标注</h3>{compare_table(runtime, base, guqinizer, annotation, historical)}"
             f"<h3>两阶段轨迹</h3>{stage_trace(base, 'Base/Fingering', base_prompt_html)}"
             f"{stage_trace(guqinizer, 'Guqinizer', guqin_prompt_html)}"
             f"<details><summary>原始评估记录</summary><pre>{esc(pretty(prediction))}</pre></details>"

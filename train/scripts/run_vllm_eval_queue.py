@@ -189,6 +189,16 @@ def main() -> int:
     parser.add_argument("--max-new-tokens", type=int, default=6144)
     parser.add_argument("--max-rounds", type=int, default=8)
     parser.add_argument("--attempts", type=int, default=2)
+    parser.add_argument("--max-guqinizer-passes", type=int, default=3)
+    parser.add_argument(
+        "--guqinizer-only-baseline", type=Path,
+        help=("finalized two-stage prediction JSONL used as frozen history and "
+              "the starting plan for --sample-id refinement"),
+    )
+    parser.add_argument(
+        "--sample-id", action="append", default=[],
+        help="sample_id to refine with Guqinizer only; repeatable",
+    )
     parser.add_argument(
         "--workflow", choices=("two_stage", "single_stage"), default="two_stage",
         help=("agent workflow: two_stage is Base→Guqinizer; single_stage uses the "
@@ -200,12 +210,26 @@ def main() -> int:
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--port", type=int, default=8217)
+    parser.add_argument(
+        "--server-count", type=int, default=1,
+        help=("number of single-GPU vLLM replicas; input workers are round-robin "
+              "across replicas"),
+    )
     parser.add_argument("--max-model-len", type=int, default=16384)
     parser.add_argument("--max-num-seqs", type=int, default=8)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.84)
     args = parser.parse_args()
     if args.workers < args.max_num_seqs:
         raise SystemExit("workers must be >= max-num-seqs so there are waiting clients")
+    if args.server_count < 1:
+        raise SystemExit("--server-count must be positive")
+    visible_devices = [device.strip() for device in
+                       os.environ.get("CUDA_VISIBLE_DEVICES", "").split(",")
+                       if device.strip()]
+    if visible_devices and args.server_count > len(visible_devices):
+        raise SystemExit(
+            f"--server-count={args.server_count} exceeds visible GPUs {visible_devices}"
+        )
 
     rows = [json.loads(line) for line in args.input.read_text(encoding="utf-8").splitlines() if line.strip()]
     if not rows:
@@ -219,6 +243,7 @@ def main() -> int:
         "event": "vllm_eval_start", "phrases": len(rows),
         "scores": len({str(row["score_key"]) for row in rows}),
         "workers": len(active), "max_num_seqs": args.max_num_seqs,
+        "server_count": args.server_count,
         "workflow": args.workflow,
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES"),
     }, ensure_ascii=False), flush=True)
@@ -239,60 +264,83 @@ def main() -> int:
     evaluator_copy = Path(__file__).with_name("eval_two_stage_score_vllm_runtime.py")
     patch_evaluator(Path(__file__).with_name("eval_two_stage_score.py"), evaluator_copy)
     conda = Path.home() / "miniconda3" / "bin" / "conda"
-    server_log = output_dir / "vllm_server.log"
     served_model_name = "guqin-sft" if args.adapter else "qwen35-base"
-    command = [
-        str(conda), "run", "--no-capture-output", "-n", args.vllm_env,
-        "vllm", "serve", args.base_model,
-        "--served-model-name", served_model_name,
-        "--port", str(args.port), "--dtype", "bfloat16",
-        "--quantization", "bitsandbytes",
-        "--max-model-len", str(args.max_model_len),
-        "--max-num-seqs", str(args.max_num_seqs),
-        "--gpu-memory-utilization", str(args.gpu_memory_utilization),
-        "--enforce-eager", "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_xml",
-    ]
-    if args.adapter:
-        command.extend([
-            "--enable-lora", "--lora-modules", f"guqin-sft={args.adapter}",
-            "--max-lora-rank", "8", "--max-loras", "1",
-        ])
     env = os.environ.copy()
     env["TOKENIZERS_PARALLELISM"] = "false"
-    server_file = server_log.open("w", encoding="utf-8")
-    server = subprocess.Popen(
-        command, stdout=server_file, stderr=subprocess.STDOUT, env=env,
-        start_new_session=True,
-    )
-    base_url = f"http://127.0.0.1:{args.port}/v1"
+    servers: list[tuple[subprocess.Popen, object, Path]] = []
+    base_urls: list[str] = []
+    for server_index in range(args.server_count):
+        server_port = args.port + server_index
+        server_log = output_dir / (
+            "vllm_server.log" if args.server_count == 1
+            else f"vllm_server_{server_index:02d}.log"
+        )
+        command = [
+            str(conda), "run", "--no-capture-output", "-n", args.vllm_env,
+            "vllm", "serve", args.base_model,
+            "--served-model-name", served_model_name,
+            "--port", str(server_port), "--dtype", "bfloat16",
+            "--quantization", "bitsandbytes",
+            "--max-model-len", str(args.max_model_len),
+            "--max-num-seqs", str(args.max_num_seqs),
+            "--gpu-memory-utilization", str(args.gpu_memory_utilization),
+            "--enforce-eager", "--enable-auto-tool-choice", "--tool-call-parser", "qwen3_xml",
+        ]
+        if args.adapter:
+            command.extend([
+                "--enable-lora", "--lora-modules", f"guqin-sft={args.adapter}",
+                "--max-lora-rank", "8", "--max-loras", "1",
+            ])
+        server_env = env.copy()
+        if visible_devices:
+            server_env["CUDA_VISIBLE_DEVICES"] = visible_devices[server_index]
+        server_file = server_log.open("w", encoding="utf-8")
+        server = subprocess.Popen(
+            command, stdout=server_file, stderr=subprocess.STDOUT, env=server_env,
+            start_new_session=True,
+        )
+        servers.append((server, server_file, server_log))
+        base_urls.append(f"http://127.0.0.1:{server_port}/v1")
     clients: dict[int, subprocess.Popen] = {}
     log_files = {}
     try:
-        wait_healthy(base_url, server, server_log)
-        with urllib.request.urlopen(base_url + "/models", timeout=10) as response:
-            models = json.loads(response.read().decode("utf-8"))
-        model_ids = {entry.get("id") for entry in models.get("data", [])}
-        if served_model_name not in model_ids:
-            raise RuntimeError(
-                f"served model {served_model_name!r} missing: {sorted(model_ids)}"
-            )
+        for server_index, (server, _, server_log) in enumerate(servers):
+            base_url = base_urls[server_index]
+            wait_healthy(base_url, server, server_log)
+            with urllib.request.urlopen(base_url + "/models", timeout=10) as response:
+                models = json.loads(response.read().decode("utf-8"))
+            model_ids = {entry.get("id") for entry in models.get("data", [])}
+            if served_model_name not in model_ids:
+                raise RuntimeError(
+                    f"served model {served_model_name!r} missing on replica "
+                    f"{server_index}: {sorted(model_ids)}"
+                )
         print(json.dumps({
-            "event": "vllm_ready", "models": sorted(model_ids),
-            "client_workers": len(active), "server_log": str(server_log),
+            "event": "vllm_ready", "models": [served_model_name],
+            "client_workers": len(active), "server_count": len(servers),
+            "server_logs": [str(server_log) for _, _, server_log in servers],
         }, ensure_ascii=False), flush=True)
 
         for index, shard in active:
             cmd = [
                 sys.executable, str(evaluator_copy),
                 "--input", str(input_paths[index]), "--output", str(output_paths[index]),
-                "--base-model", args.base_model, "--vllm-url", base_url,
+                "--base-model", args.base_model,
+                "--vllm-url", base_urls[index % args.server_count],
                 "--vllm-model", served_model_name,
                 "--vllm-max-model-len", str(args.max_model_len),
                 "--max-new-tokens", str(args.max_new_tokens),
                 "--max-rounds", str(args.max_rounds), "--attempts", str(args.attempts),
+                "--max-guqinizer-passes", str(args.max_guqinizer_passes),
                 "--resume",
             ]
             cmd.extend(["--workflow", args.workflow])
+            if args.guqinizer_only_baseline:
+                cmd.extend([
+                    "--guqinizer-only-baseline", str(args.guqinizer_only_baseline),
+                ])
+                for sample_id in args.sample_id:
+                    cmd.extend(["--sample-id", sample_id])
             log_file = log_paths[index].open("w", encoding="utf-8")
             log_files[index] = log_file
             clients[index] = subprocess.Popen(
@@ -382,17 +430,18 @@ def main() -> int:
                 process.kill()
         for log_file in log_files.values():
             log_file.close()
-        if server.poll() is None:
-            os.killpg(server.pid, signal.SIGINT)
-            try:
-                server.wait(timeout=30)
-            except subprocess.TimeoutExpired:
-                os.killpg(server.pid, signal.SIGTERM)
+        for server, server_file, _ in servers:
+            if server.poll() is None:
+                os.killpg(server.pid, signal.SIGINT)
                 try:
-                    server.wait(timeout=10)
+                    server.wait(timeout=30)
                 except subprocess.TimeoutExpired:
-                    os.killpg(server.pid, signal.SIGKILL)
-        server_file.close()
+                    os.killpg(server.pid, signal.SIGTERM)
+                    try:
+                        server.wait(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(server.pid, signal.SIGKILL)
+            server_file.close()
         evaluator_copy.unlink(missing_ok=True)
 
 

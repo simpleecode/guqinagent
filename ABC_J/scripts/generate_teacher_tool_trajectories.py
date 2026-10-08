@@ -49,9 +49,10 @@ from agents.abc_to_jianzipu.trajectory_replay import (  # noqa: E402
     compare_replay_to_patch_targets, replay_patches,
 )
 from agents.ToolRuntime import (  # noqa: E402
-    RealToolRuntime, advance_pitch_warning_state, can_accept_empty_tool_turn,
+    RealToolRuntime, can_accept_empty_tool_turn,
     harmonic_region_at_phrase_start, infer_jianzi_text_patches,
-    public_pitch_warning_source_indices, validate_jianzi_only,
+    public_pitch_warning_source_indices, public_plan_warning_messages,
+    validate_jianzi_only,
 )
 from agents.ToolRuntime.runtime import (  # noqa: E402
     canonical_jianzi_text, compact_context_catalog, event_index_for_source,
@@ -210,6 +211,15 @@ TOOLS = [
         "additionalProperties": False}},
 ]
 
+# A warning is an actionable playability failure, rather than an invitation to
+# rationalize a known-bad result. Keep the remedies compact and concrete so
+# the same public rule is visible to every generation stage.
+WARNING_RESOLUTION_GUIDE = (
+    "逐类修复：音高不匹配先查候选后换为命中取音；走手跨度过大、终点同起点或方向错误时改用合适弦徽/方向或不用走手；"
+    "同指跨位过大时换指或用手指组合；低徽过紧时换更高徽位的同音弦；散音余韵时后一个按音换弦；"
+    "撮、泼、剌等双弦问题时改为两根不同且符合相邻性规则的弦。"
+)
+
 # New trajectories use one source of truth: the reduced-notation text.  The
 # older strings above remain only to keep historical source diffs readable;
 # this assignment is the complete public contract used at runtime.
@@ -220,15 +230,19 @@ PUBLIC_SYSTEM = {
         "基础初稿只使用泛音、按音、散音三种取音方式，右手只使用抹、挑、勾、剔、擘、托、打、摘、撮；"
         "填写或编辑曲谱只能使用 edit_plan.jianzi_rows；尽量为当前段每个发音事件填写减字，"
         "暂不主动加入绰、注、吟、猱、走手或其他复杂技法。"
-        "若工具在已填写的减字后标注音高、走手跨度、同指跨位、低徽按音、散音余韵或双弦可演奏性警告，应尽量核对并修正该行；若经判断无需改动则保留，并继续完成其他合法编辑。"
+        "每次 edit_plan 后应逐项评估工具回执中的 warning，并优先修复；不能只用空泛 reasoning 回避。"
+        "尤其“散音后紧接同弦按音”应优先将后一个按音改到不同弦，音高不匹配应查询候选并改为匹配取音。"
+        + WARNING_RESOLUTION_GUIDE
     ),
     "guqinization": (
         "你是减字谱润色 Agent。基于初稿、上下文与专业判断，修订走手、复合技法和显示范围。"
         "通过 edit_plan.jianzi_rows 进行编辑；其中只列出相对当前初稿确实需要改写的音，不用重发无需改变的行；"
         "空字符串表示将该行 jianzi_text 置空；不会删除声音或演奏状态。"
         f'"{OMITTED_PLACEHOLDER}"表示该音采用再作动作继承的减字（前一段或再作标记后）、因此谱面省略其减字。若前一减字已覆盖多个动作，后续行可用空字符串避免重复显示。'
-        "工具会给出高置信音高、走手跨度、同指跨位、低徽按音、散音余韵或双弦可演奏性辅助警告；若有警告，需要结合前后按音位置尽量修正。"
-        "当前段减字由只会基础指法的 Agent 初步填写；请在不破坏音高和可演奏性的前提下适当加入高级指法，使曲子更丰富、更有韵味。"
+        "工具会给出高置信音高、走手跨度、同指跨位、低徽按音、散音余韵或双弦可演奏性辅助警告；每次 edit_plan 后应逐项评估并优先修复 warning，不能只作空泛解释。"
+        "例如散音余韵警告须将后一个按音改到不同弦；音高不匹配须查询候选并改为匹配取音；其余演奏性警告须改写相关弦、徽位、指法或走手。"
+        + WARNING_RESOLUTION_GUIDE
+        + "当前段减字由只会基础指法的 Agent 初步填写；请在不破坏音高和可演奏性的前提下适当加入高级指法，使曲子更丰富、更有韵味。"
     ),
     "single_stage": (
         "你是减字谱 Agent。直接从简谱、ABC、时值与上下文，为当前段一次完成可演奏的最终减字谱；"
@@ -237,8 +251,9 @@ PUBLIC_SYSTEM = {
         "空字符串表示该行不重复显示减字，不删除声音或演奏状态；若前一复合减字已覆盖后续声音可使用。"
         "优先保证音高、左右手可演奏性与前后衔接，再按需要使用绰、注、吟、猱、历、撮等复杂技法，"
         "不要为了堆砌技法而改坏已经合理的取音。"
-        "若工具在已填写的减字后标注音高、走手跨度、同指跨位、低徽按音、散音余韵或双弦可演奏性警告，应尽量核对并修正该行；"
-        "若结合候选与音乐判断决定保留，也可说明理由后结束。"
+        "若工具在已填写的减字后标注音高、走手跨度、同指跨位、低徽按音、散音余韵或双弦可演奏性 warning，应逐项评估并优先修复，不要仅说明理由后结束。"
+        "其中“散音后紧接同弦按音”应优先将后一个按音改为不同弦；音高不匹配应查询候选并改为匹配取音。"
+        + WARNING_RESOLUTION_GUIDE
     ),
 }
 
@@ -494,8 +509,8 @@ def private_reference_semantics_rules(stage: str) -> list[str]:
         "决定要进入泛音区间的话，请给出理由"
     )
     warning_rule = (
-        '工具在已填写的减字后标注":warning:音高不匹配"时，应尽量核对该行的取音与减字并修正；'
-        '这是非阻塞警告，处理该行后继续完成其他合法编辑。'
+        '应逐项审阅 edit_plan 回执中的":warning:"并优先修复；'
+        '音高不匹配时先用 get_pitch_candidates 核对后改写，是否保留由完整音乐判断决定。'
     )
     if stage == "fingering_agent":
         return [
@@ -622,7 +637,7 @@ def parse_final(text: str, *, required_keys: set[str] | None = None) -> dict:
 
 
 def extract_decision_summary(payload: dict, *, forbidden_phrases: tuple[str, ...] = (),
-                             allow_private_reasoning_leakage: bool = False) -> str:
+                             allow_private_reasoning_leakage: bool = True) -> str:
     summary = str(payload.get("decision_summary") or "").strip()
     if not summary:
         raise ValueError("teacher response has no decision_summary")
@@ -770,7 +785,7 @@ def recover_explicit_noop_prose(text: str) -> dict | None:
 
 
 def parse_teacher_envelope(text: str, *, forbidden_phrases: tuple[str, ...] = (),
-                           allow_private_reasoning_leakage: bool = False) -> dict:
+                           allow_private_reasoning_leakage: bool = True) -> dict:
     """Parse the teacher's single JSON protocol for a batch of real tool calls."""
     payload = recover_labeled_teacher_envelope(text)
     if payload is None:
@@ -853,26 +868,11 @@ def parse_teacher_envelope(text: str, *, forbidden_phrases: tuple[str, ...] = ()
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def generate_one(client, model: str, item: dict, stage: str, targets: list[dict],
                  historical: dict, max_rounds: int, *,
                  objective: str,
                  retry_notes: list[str] | None = None,
-                 allow_private_reasoning_leakage: bool = False) -> tuple[dict, dict]:
+                 allow_private_reasoning_leakage: bool = True) -> tuple[dict, dict]:
     item = deepcopy(item)
     item["harmonic_region_at_start"] = harmonic_region_at_phrase_start(
         item, historical
@@ -912,11 +912,11 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
     ] if review_noop else [
         "私有标注可以用于内部决定哪里需要改、往什么方向改；decision_summary 会作为训练轨迹中的推理部分，用于训练模型推理出应该如何在没有参考标注时编辑完成专业的减字谱，因此不得提及 GQS、教师提示、系统提示、教师私有参考、最终标注、参考答案或目标答案等相关字眼，也不要出现不得写“与参考一致”“参考使用”或“按提示”等说法",
         "对新选或改写的按音、撮等双音/复合取声，在 decision_summary 的逐音或相邻音组分析中简短说明：左手为何选用该按指、该按位与另一按位能否同时落手；右手为何选该取声及其与目标弦的关系。理由以实际可演奏性、音高和前后衔接为主，避免空泛重复。",
-        "**尽量要逐音说明为什么选择该左右手动作/手指；逐小段说明选择该减字在情感表达上的考虑。一定要详细说明原因，因为这涉及到学生模型能否真正学会复杂指法的意义**",
+        "**尽量要逐音说明为什么选择该左右手动作/手指；逐小段说明选择该减字在情感表达上的考虑。一定要详细说明原因，因为这涉及到学生模型能否真正学会复杂指法的意义**。",
         "最终结束前每个演奏事件必须得到字符串；若前一减字已覆盖多个动作，后续行可用空字符串置空表示不重复显示。",
+        "edit_plan 回执出现 warning 时，应结合工具结果主动审阅并优先改写相关行；不要只作空泛解释。"
     ])
     # Keep the surface order explicit in the teacher-only prompt.  The model
-    # otherwise sometimes copies the semantic field order (finger/string/hui)
     # into prose-like strings that are not conventional jianzipu notation.
     jianzi_field_order_rule = (
         "【减字字段次序】先在心中按固定模板组织，再写入 edit_plan：前置技法→取音状态（如泛音）"
@@ -938,7 +938,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             "可以先提交一部分已经确定的音；未提交的音不会使这次预览失败。继续根据工具结果分批编辑，直到结束前当前段所有发音事件都有减字或明确空字符串。",
             "基础取音阶段只允许泛音、按音、散音，右手只用抹、挑、勾、剔、擘、托、打、摘、撮；不要主动填写绰上、注下、吟、猱、走手或其他复杂技法。",
             "只查询有明确音高的起音；小节线不要提交。休止和延音不查音高，但若谱面需要表达走猱、猱、吟、泛止等延续动作，可以提交减字。",
-            "针对工具给出的warning要进行分析并给出对应的解决方案，即使决定维持现状也至少要给出理由"
+            "针对工具给出的每个 warning 都要逐项分析并优先修复，不能仅作空泛解释；其中“散音后紧接同弦按音”应优先改写后一个按音为不同弦，音高不匹配应先查候选后改为匹配取音。"
         ] + private_reference_semantics_rules(stage) + private_instruction["rules"]
     elif not review_noop:
         private_instruction["rules"] = [
@@ -992,8 +992,12 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         item["public_pitch_warning_source_indices"] = sorted(
             public_pitch_warning_source_indices(item, historical=historical)
         )
+        item["public_plan_warning_messages_by_source"] = public_plan_warning_messages(
+            item, historical=historical
+        )
     else:
         item.pop("public_pitch_warning_source_indices", None)
+        item.pop("public_plan_warning_messages_by_source", None)
     user_payload = render_public_prompt(item, stage)
     api_messages: list[dict[str, Any]] = [
         {"role": "user", "content": user_payload}
@@ -1009,9 +1013,6 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
     final_payload = None
     accepted_preview: list[dict] | None = None
     no_edit_accepted = False
-    pitch_candidate_round: dict[int, int] = {}
-    pitch_repair_attempted: set[int] = set()
-    pending_pitch_warning_events: set[int] = set()
     submitted_edit_signatures: set[str] = set()
     teacher_io_trace: list[dict] = []
     for round_number in range(1, max_rounds + 1):
@@ -1067,6 +1068,11 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         results = []
         public_calls = []
         public_results = []
+        # ``edit_plan`` may be structurally valid while its preview still
+        # carries musical/playability warnings.  A valid preview is not a
+        # terminal preview in that case: preserve the complete raw receipt
+        # below and give the teacher another normal continuation turn.
+        preview_has_warning = False
         for call_number, teacher_call in enumerate(teacher_calls, 1):
             name = teacher_call["name"]
             arguments = dict(teacher_call["arguments"])
@@ -1074,10 +1080,6 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             result = runtime.invoke(name, arguments)
             audit_call = runtime.calls[-1]
             audit_payload = ((audit_call.get("result") or {}).get("result") or {})
-            if name == "get_pitch_candidates" and result.get("ok"):
-                for query in audit_payload.get("queries") or []:
-                    for event_index in query.get("event_indices") or []:
-                        pitch_candidate_round[int(event_index)] = round_number
             call = {"id": call_id, "type": "function",
                     "function": {"name": name,
                                  "arguments": json.dumps(arguments, ensure_ascii=False)}}
@@ -1088,36 +1090,14 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             results.append({"name": name, "arguments": arguments, "result": result})
             if (name == "edit_plan" and result.get("ok")
                     and result["result"].get("valid")):
+                if ":warning:" in str(result["result"].get("text") or ""):
+                    preview_has_warning = True
                 rows = arguments.get("jianzi_rows") or []
                 signature = json.dumps(rows, ensure_ascii=False,
                                        sort_keys=True, separators=(",", ":"))
                 repeated_submission = bool(rows) and signature in submitted_edit_signatures
                 if rows:
                     submitted_edit_signatures.add(signature)
-                edited_events = {
-                    int(row[0]) for row in arguments.get("jianzi_rows") or []
-                    if isinstance(row, list) and row
-                    and isinstance(row[0], int) and not isinstance(row[0], bool)
-                }
-                candidate_informed_edits = {
-                    event_index for event_index in edited_events
-                    if pitch_candidate_round.get(event_index, round_number) < round_number
-                }
-                current_warning_events = {
-                    runtime._source_to_event(int(warning["source_index"]))
-                    for warning in audit_payload.get("warnings") or []
-                    if warning.get("code") == "jianzi_pitch_mismatch"
-                    and warning.get("source_index") is not None
-                }
-                # A first edit may itself reveal a warning.  It cannot count
-                # as its own repair: require another model turn so the warning
-                # becomes visible in context before accepting the trajectory.
-                unresolved_pitch_warning_events = advance_pitch_warning_state(
-                    pending_pitch_warning_events,
-                    pitch_repair_attempted,
-                    current_warning_events,
-                    candidate_informed_edits,
-                )
                 # 必须当前批次重放有效：畸形批次不得借助“空累计＝距离持平”
                 # 的确认路径蒙混过关。
                 accumulated = runtime.accumulated_patches
@@ -1133,22 +1113,19 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
                     preview_matches = validate_jianzi_only(
                         item, accumulated, toward_reference=False,
                         require_complete=False, historical=historical)[0]
-                # A pitch warning is advisory.  It blocks acceptance only
-                # until the teacher has inspected candidates and attempted a
-                # later candidate-informed edit for that event.  Some
-                # musically valid techniques cannot be represented by the
-                # simple pitch parser, so requiring every warning to vanish
-                # causes an unproductive correction loop.
                 # A duplicate submission cannot provide new evidence or
                 # change the score.  Preserve the accepted accumulated plan
                 # rather than consuming more turns in an identical warning
                 # loop.
-                if repeated_submission and preview_matches:
+                if repeated_submission and preview_matches and not preview_has_warning:
                     accepted_preview = normalize_patches(accumulated)
-                elif unresolved_pitch_warning_events:
-                    accepted_preview = None
-                elif preview_matches:
+                elif preview_matches and not preview_has_warning:
                     accepted_preview = normalize_patches(accumulated)
+        # A turn can contain multiple edit calls.  Do not let an earlier clean
+        # call terminate the trajectory if a later preview in the same turn
+        # still reports a warning.
+        if preview_has_warning:
+            accepted_preview = None
         public_assistant = {"role": "assistant", "content": visible_summary}
         if public_calls:
             public_assistant["tool_calls"] = public_calls
@@ -1218,32 +1195,12 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
                 ),
             })
             break
-        unresolved_pitch_warning_events = (
-            pending_pitch_warning_events - pitch_repair_attempted
-        )
-        if unresolved_pitch_warning_events:
-            warning_indices = sorted(unresolved_pitch_warning_events)
-            queried = all(
-                index in pitch_candidate_round
-                for index in warning_indices
-            )
-            if queried:
-                instruction = (
-                    "编辑工具报出音高不匹配。你已经查看过这些音的候选；"
-                    f"请判断音序 {warning_indices} 是否需要修正。需要时只提交确实变化的行；"
-                    "若基于候选与音乐判断决定保留，可用 tool_calls=[] 结束并说明理由。"
-                )
-            else:
-                instruction = (
-                    "编辑工具报出音高不匹配。先查看这些音的候选，再决定是否修正："
-                    f"音序 {warning_indices}；下一轮调用 get_pitch_candidates，"
-                    "把这些音序放入 event_indices。看到真实候选后，可修正或保留并结束。"
-                )
-        else:
-            instruction = "根据这些真实工具结果继续；需要工具时输出 tool_calls。"
+        # The provider continuation surface requires a user turn after tool
+        # results. Deliberately pass only the raw results: the model decides
+        # whether a visible warning merits another edit, without an injected
+        # corrective instruction or hidden acceptance policy.
         api_messages.append({"role": "user", "content": json.dumps({
             "tool_results": results,
-            "instruction": instruction,
         }, ensure_ascii=False)})
     if final_payload is None:
         raise ValueError("teacher exceeded tool-round limit")
@@ -1389,7 +1346,7 @@ def generate_with_retries(client, model: str, item: dict, stage: str,
                           targets: list[dict], historical: dict, max_rounds: int,
                           attempts: int, *, objective: str,
                           failure_traces: list[dict] | None = None,
-                          allow_private_reasoning_leakage: bool = False):
+                          allow_private_reasoning_leakage: bool = True):
     errors = []
     retry_notes: list[str] = []
     for attempt_number in range(1, attempts + 1):
@@ -1451,10 +1408,10 @@ def main() -> int:
                         help="resume an existing output directory without duplicating completed trajectory IDs")
     parser.add_argument("--retry-failed", action="store_true",
                         help="with --resume, retry only stages previously recorded as attempted_with_failure")
-    parser.add_argument("--allow-private-reasoning-leakage", action="store_true",
-                        help="accept raw decision_summary that mentions private references; intended before redaction")
-    parser.add_argument("--include-guqinizer-no-op", action="store_true",
-                        help="run Guqinizer even when text comparison infers no edit target, so it can produce a reasoned no-op trajectory")
+    parser.add_argument("--allow-private-reasoning-leakage", action="store_true", default=True,
+                        help="accept raw decision_summary that mentions private references (default: enabled; redact before training)")
+    parser.add_argument("--include-guqinizer-no-op", action="store_true", default=True,
+                        help="run Guqinizer even when text comparison infers no edit target (default: enabled)")
     parser.add_argument("--shard-count", type=int, default=1,
                         help="split the selected pool across N parallel worker processes")
     parser.add_argument("--shard-index", type=int, default=0,
@@ -1609,7 +1566,11 @@ def main() -> int:
             file=sys.stdout,
         )
         for item_number, item in progress:
-            progress.set_postfix_str(str(item["trajectory_id"]), refresh=False)
+            # ``tqdm`` is optional for lightweight generation environments.
+            # Its fallback is a plain iterator, which has no progress-display
+            # methods but must still be able to run the same generation loop.
+            if hasattr(progress, "set_postfix_str"):
+                progress.set_postfix_str(str(item["trajectory_id"]), refresh=False)
             print(f"phrase {item_number}/{len(selected)}: {item['trajectory_id']}", flush=True)
             def flush_outputs() -> None:
                 pub.flush()

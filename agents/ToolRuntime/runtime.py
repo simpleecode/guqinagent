@@ -194,15 +194,19 @@ def pitch_audit_notes(
     current_notes = list((item.get("input") or {}).get("notes_without_jianzi") or [])
     prefix_phrases: list[tuple[list[dict], list[dict]]] = []
     if historical:
-        current_start = int(item["input"]["event_range"]["start"])
+        def phrase_start(row: dict) -> int:
+            event_range = row["input"]["event_range"]
+            return int(event_range.get("start", event_range.get("start_index")))
+
+        current_start = phrase_start(item)
         earlier = sorted(
             (row for (score_key, _), row in historical.items()
              if score_key == item["score_key"]
-             and int(row["input"]["event_range"]["start"]) < current_start),
-            key=lambda row: int(row["input"]["event_range"]["start"]),
+             and phrase_start(row) < current_start),
+            key=phrase_start,
         )
         prefix_phrases = [
-            (list(row["input"].get("notes_without_jianzi") or []),
+            (list(row["input"].get("notes_without_jianzi") or row["input"].get("phrase_notes") or []),
              list(row.get("reference_plan", {}).get("actions") or []))
             for row in earlier
         ]
@@ -298,10 +302,28 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         if warning.get("code") == "walk_direction_reversed"
         and warning.get("source_index") is not None
     }
+    consecutive_walk_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "consecutive_walks_without_attack"
+        and warning.get("source_index") is not None
+    }
     resonance_warnings = {
         int(warning["source_index"]): warning
         for warning in (warnings or [])
         if warning.get("code") == "open_to_stopped_same_string"
+        and warning.get("source_index") is not None
+    }
+    harmonic_walk_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "walk_inside_harmonic_region"
+        and warning.get("source_index") is not None
+    }
+    harmonic_resonance_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "harmonic_to_same_string_attack"
         and warning.get("source_index") is not None
     }
     pluck_pair_warnings = {
@@ -355,6 +377,12 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         direction_warning = walk_direction_warnings.get(index)
         if direction_warning:
             parts.append(":warning:走手方向错误")
+        consecutive_walk_warning = consecutive_walk_warnings.get(index)
+        if consecutive_walk_warning:
+            count = consecutive_walk_warning.get("count") or 4
+            parts.append(
+                f":warning:连续{count}个走手且无新音头（建议补右手起音或改为按音）"
+            )
         resonance_warning = resonance_warnings.get(index)
         if resonance_warning:
             strings = "、".join(
@@ -362,6 +390,18 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
             )
             parts.append(
                 f":warning:散音后紧接同弦按音（{strings}；会止住散音，可能破坏韵味）"
+            )
+        harmonic_walk_warning = harmonic_walk_warnings.get(index)
+        if harmonic_walk_warning:
+            technique = harmonic_walk_warning.get("technique") or "走手"
+            parts.append(f":warning:泛音区间内不能使用{technique}（请先泛止并重新起音）")
+        harmonic_resonance_warning = harmonic_resonance_warnings.get(index)
+        if harmonic_resonance_warning:
+            strings = "、".join(
+                f"{value}弦" for value in harmonic_resonance_warning.get("strings") or []
+            )
+            parts.append(
+                f":warning:泛音后紧接同弦起音（{strings}；会止住泛音，可能破坏余韵）"
             )
         pluck_pair_warning = pluck_pair_warnings.get(index)
         if pluck_pair_warning:
@@ -437,7 +477,9 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
     # acceptance gate keeps the turn alive for an issue it cannot identify.
     unmodified_warning_indices = sorted(
         (set(pitch_warnings) | set(walk_warnings) | set(walk_endpoint_warnings)
-         | set(walk_direction_warnings) | set(resonance_warnings)
+         | set(walk_direction_warnings) | set(consecutive_walk_warnings)
+         | set(resonance_warnings)
+         | set(harmonic_walk_warnings) | set(harmonic_resonance_warnings)
          | set(pluck_pair_warnings) | set(same_string_cuo_warnings)
          | set(same_finger_reach_warnings)
          | set(low_hui_warnings)) - changed
@@ -455,8 +497,14 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
             lines.append("仍有未修改的走手警告｜以下行的走手终点与起点相同；请核对是否无需走手：")
         elif unmodified_codes == {"walk_direction_reversed"}:
             lines.append("仍有未修改的走手警告｜以下行的绰上/注下方向与徽位变化相反；请核对技法：")
+        elif unmodified_codes == {"consecutive_walks_without_attack"}:
+            lines.append("仍有未修改的走手警告｜以下行已连续四个走手且无新音头；请补右手起音或改为按音：")
         elif unmodified_codes == {"open_to_stopped_same_string"}:
             lines.append("仍有未修改的余韵警告｜以下行紧接同弦散音后按音；请核对是否需要换弦或保留余韵：")
+        elif unmodified_codes == {"walk_inside_harmonic_region"}:
+            lines.append("仍有未修改的泛音警告｜以下行仍在泛音区间内使用走手；请先泛止并重新起音：")
+        elif unmodified_codes == {"harmonic_to_same_string_attack"}:
+            lines.append("仍有未修改的泛音余韵警告｜以下行紧接同弦泛音起音；请考虑换弦：")
         elif unmodified_codes == {"nonadjacent_pluck_pair"}:
             lines.append("仍有未修改的双弦警告｜以下行的拨/泼两弦不相邻；请核对右手可演奏性：")
         elif unmodified_codes == {"same_string_cuo_pair"}:
@@ -859,7 +907,10 @@ class RealToolRuntime:
                 if warning.get("code") not in {
                         "jianzi_pitch_mismatch", "walk_span_too_large",
                         "walk_endpoint_same_as_start", "walk_direction_reversed",
+                        "consecutive_walks_without_attack",
                         "open_to_stopped_same_string",
+                        "walk_inside_harmonic_region",
+                        "harmonic_to_same_string_attack",
                         "nonadjacent_pluck_pair",
                         "same_string_cuo_pair",
                         "same_finger_reach_too_large",
@@ -1186,6 +1237,20 @@ def validate_jianzi_only(
                     "to_hui": detail.get("to_hui"),
                     "suggested_technique": detail.get("suggested_technique"),
                 })
+        for detail in AUDIT.consecutive_walk_warnings({
+            "metadata": deepcopy(item["input"].get("metadata") or {}),
+            "open_midi": deepcopy(
+                (item["input"].get("normalized_tuning") or {}).get("open_midi")
+            ),
+            "notes": notes,
+        }):
+            source_index = detail.get("index")
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": "consecutive_walks_without_attack",
+                    "count": detail.get("count"),
+                })
         for detail in AUDIT.open_to_stopped_transition_warnings({
             "metadata": deepcopy(item["input"].get("metadata") or {}),
             "open_midi": deepcopy(
@@ -1198,6 +1263,21 @@ def validate_jianzi_only(
                 warnings.append({
                     "source_index": int(source_index),
                     "code": "open_to_stopped_same_string",
+                    "strings": list(detail.get("strings") or []),
+                })
+        for detail in AUDIT.harmonic_continuity_warnings({
+            "metadata": deepcopy(item["input"].get("metadata") or {}),
+            "open_midi": deepcopy(
+                (item["input"].get("normalized_tuning") or {}).get("open_midi")
+            ),
+            "notes": notes,
+        }):
+            source_index = detail.get("index")
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": detail.get("code"),
+                    "technique": detail.get("technique"),
                     "strings": list(detail.get("strings") or []),
                 })
         for detail in AUDIT.nonadjacent_pluck_pair_warnings({"notes": notes}):
@@ -1316,6 +1396,60 @@ def public_pitch_warning_source_indices(
         if warning.get("code") == "jianzi_pitch_mismatch"
         and warning.get("source_index") is not None
     }
+
+
+def public_plan_warning_messages(
+    item: dict, *, historical: dict[tuple[str, str], dict] | None = None,
+) -> dict[int, list[str]]:
+    """Return public, row-local warning text for an existing plan.
+
+    Guqinizer starts from a concrete Base plan.  Its first public score preview
+    must expose the same advisory state that a no-op ``edit_plan`` would show,
+    without adding a synthetic follow-up user turn.  Keep this mapping free of
+    private/reference data so it is safe to render directly in the prompt.
+    """
+    _, report = validate_jianzi_only(
+        item, [], toward_reference=False, require_complete=False,
+        historical=historical,
+    )
+    messages: dict[int, list[str]] = {}
+    for warning in report.get("warnings") or []:
+        source_index = warning.get("source_index")
+        if source_index is None:
+            continue
+        code = str(warning.get("code") or "")
+        if code == "jianzi_pitch_mismatch":
+            text = "音高不匹配"
+        elif code == "walk_span_too_large":
+            text = "走手跨度过大"
+        elif code == "walk_endpoint_same_as_start":
+            text = "走手终点与起点相同"
+        elif code == "walk_direction_reversed":
+            text = "走手方向错误"
+        elif code == "consecutive_walks_without_attack":
+            count = warning.get("count") or 4
+            text = f"连续{count}个走手且无新音头"
+        elif code == "open_to_stopped_same_string":
+            strings = "、".join(f"{value}弦" for value in warning.get("strings") or [])
+            text = f"散音后紧接同弦按音（{strings}；会止住散音，可能破坏韵味）"
+        elif code == "walk_inside_harmonic_region":
+            technique = warning.get("technique") or "走手"
+            text = f"泛音区间内不能使用{technique}"
+        elif code == "harmonic_to_same_string_attack":
+            strings = "、".join(f"{value}弦" for value in warning.get("strings") or [])
+            text = f"泛音后紧接同弦起音（{strings}；会止住泛音，可能破坏余韵）"
+        elif code == "nonadjacent_pluck_pair":
+            text = f"{warning.get('technique') or '泼'}双弦不相邻"
+        elif code == "same_string_cuo_pair":
+            text = "撮的两根弦相同"
+        elif code == "same_finger_reach_too_large":
+            text = "同指跨位过大"
+        elif code == "low_hui_stopped_too_cramped":
+            text = "低徽按音过紧"
+        else:
+            continue
+        messages.setdefault(int(source_index), []).append(text)
+    return messages
 
 def can_accept_empty_tool_turn(
     item: dict, patches: list[dict] | None = None, *, historical: dict | None = None

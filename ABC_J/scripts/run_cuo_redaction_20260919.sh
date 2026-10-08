@@ -12,7 +12,7 @@ pids=()
 for shard in 0 1 2 3 4 5 6; do
   out="$WORKERS/worker_${shard}"
   log="$WORKERS/worker_${shard}.log"
-  nohup "$PYTHON" "$ROOT/scripts/redact_teacher_reasoning.py" \
+  nohup "$PYTHON" "$ROOT/ABC_J/scripts/redact_teacher_reasoning.py" \
     --input-dir "$INPUT" \
     --output-dir "$out" \
     --model glm-5.3 \

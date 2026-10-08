@@ -47,6 +47,17 @@ def load_audit():
 AUDIT = load_audit()
 
 
+def mapped_score_dir(row: dict[str, str]) -> Path:
+    """Prefer the current local rendering over stale Windows capture paths."""
+    for candidate in (
+        ROOT / "ABC_J" / "final" / row["score_key"],
+        Path(row.get("final_data_path") or ""),
+    ):
+        if (candidate / "jianpu_jianzi_readable.json").exists():
+            return candidate
+    raise FileNotFoundError(f"mapped score unavailable: {row['score_key']}")
+
+
 def phrase_ranges(notes: list[dict], tonic_midi: float, max_sounding: int):
     return split_phrase_ranges(
         notes, max_sounding=max_sounding,
@@ -79,7 +90,7 @@ def infer_score(row: dict, max_sounding: int, *, gqs_dir: Path | None = None,
             raise FileNotFoundError(f"missing canonical GQS: {source}")
         data = parse_teacher_gqs(source.read_text(encoding="utf-8"))
     else:
-        source = Path(row["final_data_path"]) / "jianpu_jianzi_readable.json"
+        source = mapped_score_dir(row) / "jianpu_jianzi_readable.json"
         data = json.loads(source.read_text(encoding="utf-8"))
     assign_event_indices(data["notes"])
     repeat_report = None
@@ -244,7 +255,7 @@ def main() -> int:
         for row in rows:
             row["split"] = split_by_key.get(row["score_key"], row.get("split", ""))
     missing_split = [row["score_key"] for row in rows if row.get("split") not in {
-        "train", "validation", "test"
+        "train", "test"
     }]
     if missing_split:
         raise ValueError(f"scores missing a valid split: {missing_split[:10]}")
@@ -256,10 +267,11 @@ def main() -> int:
                           if line.strip())
         rows = [row for row in rows if row["score_key"] in wanted]
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    splits = sorted({row["split"] for row in rows})
     handles = {
         split: (args.output_dir / f"inferred_trajectories_{split}.jsonl").open(
             "w", encoding="utf-8", newline="\n"
-        ) for split in ("train", "validation", "test")
+        ) for split in splits
     }
     counts = Counter()
     classes = Counter()

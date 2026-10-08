@@ -164,6 +164,11 @@ def main() -> int:
     parser.add_argument("--max-rounds", type=int, default=8)
     parser.add_argument("--attempts", type=int, default=2)
     parser.add_argument(
+        "--max-guqinizer-passes", type=int, default=3,
+        help=("maximum total Guqinizer passes per phrase. A further pass runs only "
+              "when the preceding finalized plan still has a public warning."),
+    )
+    parser.add_argument(
         "--generation-batch-size", type=int, default=1,
         help=("batch ready generation turns from independent scores. "
               "Each score remains phrase-sequential; default 1 preserves the "
@@ -192,6 +197,15 @@ def main() -> int:
              " Base stage's hui or pitch-correct positions via token masking",
     )
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--guqinizer-only-baseline", type=Path,
+        help=("run only Guqinizer, seeded from the finalized Guqinizer plans in this "
+              "prediction JSONL; requires one or more --sample-id values"),
+    )
+    parser.add_argument(
+        "--sample-id", action="append", default=[],
+        help="sample_id to refine in --guqinizer-only-baseline mode; repeatable",
+    )
     parser.add_argument("--no-progress", action="store_true",
                         help="disable score/phrase progress bars")
     parser.add_argument("--stop-after-scores", type=int,
@@ -199,8 +213,14 @@ def main() -> int:
     parser.add_argument("--preflight-only", action="store_true")
     args = parser.parse_args()
     args.single_stage = args.workflow == "single_stage"
+    if args.guqinizer_only_baseline and (args.single_stage or not args.sample_id):
+        raise SystemExit(
+            "--guqinizer-only-baseline requires two_stage workflow and at least one --sample-id"
+        )
     if args.generation_batch_size < 1:
         raise SystemExit("--generation-batch-size must be positive")
+    if args.max_guqinizer_passes < 1:
+        raise SystemExit("--max-guqinizer-passes must be positive")
     if args.generation_batch_size > 1 and args.constrain_walk_hui:
         raise SystemExit(
             "cross-score batching is not yet compatible with --constrain-walk-hui; "
@@ -220,7 +240,8 @@ def main() -> int:
     )
     from agents.ToolRuntime import (
         RealToolRuntime, harmonic_region_at_phrase_start,
-        public_pitch_warning_source_indices, validate_jianzi_only,
+        public_pitch_warning_source_indices, public_plan_warning_messages,
+        validate_jianzi_only,
     )
     from agents.abc_to_jianzipu.trajectory_replay import replay_patches
     from scripts.adapter_loading import load_adapter_checked
@@ -246,6 +267,26 @@ def main() -> int:
         source_meta[str(row["sample_id"])] = row
     for phrases in by_score.values():
         phrases.sort(key=lambda item: int(item["input"]["event_range"]["start"]))
+
+    refinement_baseline: dict[str, dict] = {}
+    refinement_targets = set(args.sample_id)
+    if args.guqinizer_only_baseline:
+        refinement_baseline = {
+            str(row.get("sample_id")): row
+            for row in (
+                json.loads(line)
+                for line in args.guqinizer_only_baseline.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            )
+            if row.get("protocol_valid")
+            and isinstance((row.get("guqinizer") or {}).get("plan"), dict)
+        }
+        missing = refinement_targets - refinement_baseline.keys()
+        if missing:
+            raise SystemExit(
+                "baseline lacks valid finalized Guqinizer plans for: "
+                + ", ".join(sorted(missing))
+            )
 
     tokenizer = AutoTokenizer.from_pretrained(args.base_model, trust_remote_code=True)
     if args.preflight_only:
@@ -553,8 +594,12 @@ def main() -> int:
             item["public_pitch_warning_source_indices"] = sorted(
                 public_pitch_warning_source_indices(item, historical=historical)
             )
+            item["public_plan_warning_messages_by_source"] = public_plan_warning_messages(
+                item, historical=historical
+            )
         else:
             item.pop("public_pitch_warning_source_indices", None)
+            item.pop("public_plan_warning_messages_by_source", None)
         # Mirror the teacher runner's pitch gate: a jianzi_pitch_mismatch
         # warning blocks acceptance until the model has actually re-edited
         # that event in a LATER round (a same-turn rewrite that still warns
@@ -814,6 +859,23 @@ def main() -> int:
         except StopIteration as stopped:
             return stopped.value
 
+    def run_guqinizer_passes(
+        item: dict, historical: dict, initial_plan: dict,
+    ) -> tuple[dict, int]:
+        """Run Guqinizer once, then only re-enter it for a surviving warning."""
+        plan = deepcopy(initial_plan)
+        result: dict = {"ok": False}
+        for pass_count in range(1, args.max_guqinizer_passes + 1):
+            item["baseline_plan"] = plan
+            result = run_stage(item, "guqinization", historical)
+            if not result.get("ok") or not isinstance(result.get("plan"), dict):
+                return result, pass_count
+            plan = result["plan"]
+            item["baseline_plan"] = plan
+            if not public_plan_warning_messages(item, historical=historical):
+                return result, pass_count
+        return result, args.max_guqinizer_passes
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     completed: dict[str, dict] = {}
     if args.resume and args.output.exists():
@@ -832,6 +894,14 @@ def main() -> int:
                 and isinstance((prior.get(final_stage_key) or {}).get("plan"), dict)
             ):
                 completed[str(prior["sample_id"])] = prior
+    if refinement_baseline:
+        # Every non-target phrase is replayed as frozen model history.  This
+        # lets a small refinement run preserve phrase order and harmonic state
+        # without regenerating either the Base stage or unrelated Guqinizer plans.
+        completed.update({
+            sample_id: row for sample_id, row in refinement_baseline.items()
+            if sample_id not in refinement_targets
+        })
 
     def run_batched_scores(score_keys: list[str]) -> int:
         """Dynamically batch ready turns while preserving each score's order."""
@@ -881,6 +951,14 @@ def main() -> int:
                     if phrase_progress:
                         phrase_progress.update(1)
                     continue
+                if sample_id in refinement_targets:
+                    baseline_record = refinement_baseline[sample_id]
+                    item["baseline_plan"] = deepcopy(baseline_record["guqinizer"]["plan"])
+                    steps = run_stage_steps(item, "guqinization", state["historical"])
+                    return {"state": state, "item": item, "stage": "guqinization",
+                            "steps": steps, "request": next(steps),
+                            "base": deepcopy(baseline_record.get("base") or {"ok": True}),
+                            "guqinizer_passes": 0}
                 item["baseline_plan"] = blank_plan_from_item(item)
                 first_stage = "single_stage" if args.single_stage else "fingering_agent"
                 steps = run_stage_steps(item, first_stage, state["historical"])
@@ -954,8 +1032,21 @@ def main() -> int:
                         steps = run_stage_steps(session["item"], "guqinization",
                                                 session["state"]["historical"])
                         session.update({"stage": "guqinization", "steps": steps,
-                                        "request": next(steps)})
+                                        "request": next(steps), "guqinizer_passes": 0})
                         continue
+                    if session["stage"] == "guqinization":
+                        session["guqinizer_passes"] = session.get("guqinizer_passes", 0) + 1
+                        if stage_result.get("ok") and isinstance(stage_result.get("plan"), dict):
+                            session["item"]["baseline_plan"] = stage_result["plan"]
+                            if (session["guqinizer_passes"] < args.max_guqinizer_passes
+                                    and public_plan_warning_messages(
+                                        session["item"], historical=session["state"]["historical"]
+                                    )):
+                                steps = run_stage_steps(
+                                    session["item"], "guqinization", session["state"]["historical"]
+                                )
+                                session.update({"steps": steps, "request": next(steps)})
+                                continue
                     if session["stage"] == "single_stage":
                         keep_score = write_record(session, None, stage_result, output)
                     elif session["stage"] == "fingering_agent":
@@ -1057,7 +1148,15 @@ def main() -> int:
                     historical[(score_key, item["phrase_id"])] = item
                     continue
 
-                base = run_stage(item, "fingering_agent", historical)
+                if sample_id in refinement_targets:
+                    baseline_record = refinement_baseline[sample_id]
+                    base = deepcopy(baseline_record.get("base") or {"ok": True})
+                    guqinizer, guqinizer_passes = run_guqinizer_passes(
+                        item, historical, baseline_record["guqinizer"]["plan"],
+                    )
+                else:
+                    base = run_stage(item, "fingering_agent", historical)
+                    guqinizer, guqinizer_passes = ({"ok": False}, 0)
                 record = {
                     "schema_version": EVAL_SCHEMA_VERSION,
                     "sample_id": sample_id,
@@ -1067,10 +1166,12 @@ def main() -> int:
                     "input_sha256": source_meta.get(sample_id, {}).get("input_sha256"),
                     "base": base,
                 }
-                if base["ok"]:
-                    item["baseline_plan"] = base["plan"]
-                    record["guqinizer"] = run_stage(item, "guqinization", historical)
-                guqinizer = record.get("guqinizer") or {"ok": False}
+                if base["ok"] and sample_id not in refinement_targets:
+                    guqinizer, guqinizer_passes = run_guqinizer_passes(
+                        item, historical, base["plan"],
+                    )
+                record["guqinizer"] = guqinizer
+                record["guqinizer_passes"] = guqinizer_passes
                 record["protocol_valid"] = bool(base.get("ok") and guqinizer.get("ok"))
                 if record["protocol_valid"]:
                     final_plan = guqinizer["plan"]

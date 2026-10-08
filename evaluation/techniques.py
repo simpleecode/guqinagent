@@ -10,7 +10,8 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
-KNOWLEDGE_PATH = ROOT / "agents/abc_to_jianzipu/knowledge/complex_fingering_explanations.jsonl"
+KNOWLEDGE_PATH = (ROOT / "agents/abc_to_jianzipu/knowledge"
+                  / "complex_fingering_explanations_v3_with_effects.jsonl")
 FINGERING_CATEGORIES = {"右手指法", "左手指法", "特殊/左右手配合指法"}
 HAND_FINGER_MARKERS = ("大指", "食指", "中指", "名指", "跪指")
 # Basic strokes are usually written as single characters and are not all

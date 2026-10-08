@@ -94,6 +94,27 @@ LOW_HUI_STOPPED_LIMITS = {
 }
 
 
+def is_pitch_ambiguous_sweep(text: str) -> bool:
+    """Whether a swept ``拂`` glyph has no single pitch to audit.
+
+    A notation such as ``泛音名指五徽拂一至六弦`` is one compound sweep,
+    not an assertion that a single numbered-note event sounds at the endpoint
+    string.  Comparing one jianpu target to the parser's representative
+    member of that sweep produces artificial octave warnings.
+    """
+    return "拂" in str(text or "")
+
+
+def is_continuity_exempt_compound(text: str) -> bool:
+    """Whether an articulated gesture should not carry a one-note sustain.
+
+    Sweeps and locks deliberately articulate or damp a group of strings.
+    They are therefore unsuitable predecessors for the narrow advisory that
+    says the *next* same-string note stops a residual open/harmonic sound.
+    """
+    return any(token in str(text or "") for token in ("拂", "锁", "鎖"))
+
+
 def parse_string_numbers(text: str) -> list[int]:
     """Parse ordinary and compact string-number spellings.
 
@@ -910,6 +931,54 @@ def walk_motion_warnings(data: dict) -> list[dict]:
     return warnings
 
 
+def consecutive_walk_warnings(data: dict, threshold: int = 4) -> list[dict]:
+    """Warn when successive standalone walks replace a run of note attacks.
+
+    A single 绰上/注下 (and occasionally a paired return) can inherit the
+    preceding onset. Four successive no-attack walks, however, are no
+    longer a credible continuation of one pluck: the notation needs a new
+    right-hand attack or ordinary positioned notes between them.
+    """
+    metadata = data.get("metadata") or {}
+    supplied_open_midi = data.get("open_midi")
+    if (isinstance(supplied_open_midi, list)
+            and len(supplied_open_midi) == 7
+            and all(isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    for value in supplied_open_midi)):
+        open_midi = [float(value) for value in supplied_open_midi]
+    else:
+        open_midi = parse_open_midi(metadata)
+
+    context = new_context()
+    run_length = 0
+    warnings: list[dict] = []
+    for note in data.get("notes", []):
+        text = str(note.get("jianzi") or "").strip()
+        is_bar = (str(note.get("abc") or "").strip() == "|"
+                  or str(note.get("jianpu") or "").strip() == "|"
+                  or note.get("duration") == "小节线")
+        if is_bar:
+            continue
+        is_standalone_walk = (
+            text.startswith(("绰上", "注下"))
+            and not parse_string_numbers(text)
+            and first_token(text, RIGHT_HAND_TECHNIQUES) is None
+        )
+        actual, reason = parse_jianzi(text, open_midi, context)
+        if is_standalone_walk and actual and reason is None:
+            run_length += 1
+            if run_length == threshold:
+                warnings.append({
+                    "index": note.get("index"),
+                    "code": "consecutive_walks_without_attack",
+                    "count": run_length,
+                })
+        else:
+            run_length = 0
+    return warnings
+
+
 def open_to_stopped_transition_warnings(data: dict) -> list[dict]:
     """Warn when the next sounded row stops the same string just opened.
 
@@ -932,6 +1001,7 @@ def open_to_stopped_transition_warnings(data: dict) -> list[dict]:
 
     context = new_context()
     pending_open_strings: set[int] = set()
+    pending_open_is_compound = False
     warnings: list[dict] = []
     for note in data.get("notes", []):
         text = str(note.get("jianzi") or "").strip()
@@ -966,7 +1036,7 @@ def open_to_stopped_transition_warnings(data: dict) -> list[dict]:
             else (strings if parse_hui(text) is not None and "散" not in text else set())
         )
         shared = sorted(pending_open_strings & explicit_stopped_strings)
-        if shared and actual and reason is None:
+        if shared and actual and reason is None and not pending_open_is_compound:
             warnings.append({
                 "index": note.get("index"),
                 "code": "open_to_stopped_same_string",
@@ -976,7 +1046,91 @@ def open_to_stopped_transition_warnings(data: dict) -> list[dict]:
         # Only a plainly notated open-string sound can carry into the very
         # next event. Any other row, including a rest or an unparseable glyph,
         # ends this one-step continuity check.
-        pending_open_strings = explicit_open_strings if actual and reason is None else set()
+        pending_open_strings = (
+            explicit_open_strings
+            if actual and reason is None and not is_continuity_exempt_compound(text)
+            else set()
+        )
+        pending_open_is_compound = is_continuity_exempt_compound(text)
+    return warnings
+
+
+def harmonic_continuity_warnings(data: dict) -> list[dict]:
+    """Return advisory warnings for incompatible harmonic continuations.
+
+    ``泛起…泛止`` is a harmonic *region*, rather than a stopped-note
+    position.  Consequently a standalone ``绰上``/``注下`` cannot inherit a
+    playable pressed-string origin inside that region.  Also, immediately
+    sounding the same string again damps the preceding harmonic just as an
+    immediate stopped note damps a preceding open string.  These are musical
+    continuity advisories, not pitch-validity failures.
+    """
+    metadata = data.get("metadata") or {}
+    supplied_open_midi = data.get("open_midi")
+    if (isinstance(supplied_open_midi, list)
+            and len(supplied_open_midi) == 7
+            and all(isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    for value in supplied_open_midi)):
+        open_midi = [float(value) for value in supplied_open_midi]
+    else:
+        open_midi = parse_open_midi(metadata)
+
+    context = new_context()
+    pending_harmonic_strings: set[int] = set()
+    pending_harmonic_is_compound = False
+    warnings: list[dict] = []
+    for note in data.get("notes", []):
+        text = str(note.get("jianzi") or "").strip()
+        is_bar = (str(note.get("abc") or "").strip() == "|"
+                  or str(note.get("jianpu") or "").strip() == "|"
+                  or note.get("duration") == "小节线")
+        if is_bar:
+            continue
+
+        context_before = dict(context)
+        strings = set(parse_string_numbers(text))
+        actual, reason = parse_jianzi(text, open_midi, context)
+
+        # A prefixed 泛止 closes the region before a following articulated
+        # note; a suffix 泛止 belongs to the current harmonic note and closes
+        # it only afterwards.  The latter remains a harmonic attack here.
+        prefix_fanzhi = (
+            "泛止" in text
+            and ("泛起" not in text or text.find("泛止") < text.find("泛起"))
+        )
+        is_harmonic_attack = bool(
+            actual and reason is None and strings
+            and not prefix_fanzhi
+            and "按音" not in text
+            and "散" not in text
+            and ("泛音" in text or "泛起" in text
+                 or context_before.get("harmonic_scope"))
+        )
+
+        if (context_before.get("harmonic_scope")
+                and text.startswith(("绰上", "注下"))):
+            warnings.append({
+                "index": note.get("index"),
+                "code": "walk_inside_harmonic_region",
+                "technique": "绰上" if text.startswith("绰上") else "注下",
+            })
+
+        shared = sorted(pending_harmonic_strings & strings)
+        if shared and actual and reason is None and not pending_harmonic_is_compound:
+            warnings.append({
+                "index": note.get("index"),
+                "code": "harmonic_to_same_string_attack",
+                "strings": shared,
+            })
+
+        # The advisory only spans the immediately following sounded event.
+        # A bare rest, sustain, malformed glyph, or non-harmonic note ends it.
+        pending_harmonic_strings = (
+            strings if is_harmonic_attack and not is_continuity_exempt_compound(text)
+            else set()
+        )
+        pending_harmonic_is_compound = is_continuity_exempt_compound(text)
     return warnings
 
 
@@ -1288,6 +1442,8 @@ def audit(data: dict, tolerance_cents: float) -> dict:
             row["covered_indices"] = covered_indices
         if not expected:
             row.update(status="skipped", reason="no_sounding_jianpu")
+        elif is_pitch_ambiguous_sweep(text):
+            row.update(status="skipped", reason="compound_sweep_pitch_ambiguous")
         elif reason:
             row.update(status="skipped", reason=reason)
         elif any(gesture in text for gesture in ("应合", "放合")) and len(expected) == 2:

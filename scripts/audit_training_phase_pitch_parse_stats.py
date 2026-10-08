@@ -120,8 +120,13 @@ def audit_notes_for_plan(source: dict[str, Any], accepted_plan: dict[str, Any]) 
         index = int(note["index"])
         action = action_by_index.get(index) or {}
         text = action.get("jianzi_text")
+        # Reference actions store their source notation in ``text`` while
+        # runtime plans may additionally carry an empty ``jianzi_text``.
+        # Do not let that placeholder erase a valid reference glyph.
+        if text is None:
+            text = action.get("text", "")
         # None is the structured representation of a not-yet-filled row; the
-        # old auditor treats both it and the empty string as non-parseable.
+        # auditor treats both it and the empty string as non-parseable.
         raw_text = "" if text is None else str(text)
         audit_notes.append({
             "index": index,

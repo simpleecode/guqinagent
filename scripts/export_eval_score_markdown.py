@@ -82,6 +82,9 @@ def report(summary: dict[str, Any], events: list[dict[str, Any]], violations: li
     ]
     for name, value, percent in metric_rows(summary.get("metrics") or {}):
         lines.append(f"| {name} | {fmt(value, percent)} |")
+    warning = summary.get("final_warning") or {}
+    lines.append(f"| Final warning rate | {fmt(warning.get('warning_rate'), True)} |")
+    lines.append(f"| Final warning phrases | {warning.get('warning_phrases', '—')} / {warning.get('phrases', '—')} |")
 
     lines += ["", "## 按曲谱指标", "", "以下按 `piece_id` 汇总其全部 phrase；空值表示该曲谱没有足够可评估事件。", ""]
     headers = [

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Assign leakage-group-safe train/validation/test splits deterministically."""
+"""Assign leakage-group-safe train/test splits deterministically."""
 from __future__ import annotations
 
 import argparse
@@ -16,7 +16,7 @@ DEFAULT_METRICS = ROOT / "ABC_J" / "results" / "agent_metric_baseline.json"
 DEFAULT_DEV = ROOT / "ABC_J" / "results" / "agent_dev_examples.json"
 DEFAULT_REPORT = ROOT / "ABC_J" / "results" / "dataset_split_report.json"
 DEFAULT_SPLIT_MANIFEST = ROOT / "ABC_J" / "results" / "agent_dataset_splits.csv"
-TARGETS = {"train": 0.70, "validation": 0.10, "test": 0.20}
+TARGETS = {"train": 0.80, "test": 0.20}
 
 
 def bucket(value: float | None, edges: tuple[float, ...]) -> str:
@@ -41,6 +41,8 @@ def main() -> int:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--split-manifest", type=Path, default=DEFAULT_SPLIT_MANIFEST)
     parser.add_argument("--seed", type=int, default=20260812)
+    parser.add_argument("--force-test-group", action="append", default=[],
+                        help="leakage group ID that must remain entirely in test; repeatable")
     args = parser.parse_args()
 
     with args.manifest.open(encoding="utf-8-sig", newline="") as handle:
@@ -51,6 +53,10 @@ def main() -> int:
         item["leakage_group_id"]
         for item in json.loads(args.dev_examples.read_text(encoding="utf-8"))["examples"]
     }
+    forced_test_groups = set(args.force_test_group)
+    overlap = dev_groups & forced_test_groups
+    if overlap:
+        raise ValueError(f"groups cannot be forced to both train and test: {sorted(overlap)}")
 
     groups: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
@@ -85,6 +91,15 @@ def main() -> int:
     split_rows: Counter[str] = Counter()
     split_weight: Counter[str] = Counter()
     split_features: dict[str, Counter] = {name: Counter() for name in TARGETS}
+
+    for group_id in sorted(forced_test_groups):
+        if group_id not in groups:
+            raise ValueError(f"unknown forced test group: {group_id}")
+        assigned[group_id] = "test"
+        split_groups["test"] += 1
+        split_rows["test"] += len(groups[group_id])
+        split_weight["test"] += group_weights[group_id]
+        split_features["test"].update(features[group_id])
 
     # Development examples are deliberately assigned to train, never test.
     for group_id in sorted(dev_groups):
@@ -168,6 +183,7 @@ def main() -> int:
         "manifest": str(args.manifest),
         "split_manifest": str(args.split_manifest),
         "development_groups_forced_to_train": sorted(dev_groups),
+        "groups_forced_to_test": sorted(forced_test_groups),
         "totals": {"groups": total_groups, "scores": total_rows, "sounding_notes": total_weight},
         "splits": {
             split: {

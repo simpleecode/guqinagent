@@ -36,6 +36,14 @@ def read_jsonl(path: Path):
                     raise ValueError(f"{path}:{line_no}: invalid JSON") from exc
 
 
+def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.write_text(
+        "".join(json.dumps(row, ensure_ascii=False, separators=(",", ":")) + "\n"
+                for row in rows),
+        encoding="utf-8",
+    )
+
+
 def audit_module():
     global _AUDIT_MODULE
     if _AUDIT_MODULE is None:
@@ -91,7 +99,12 @@ BLANK_RUN_EXCEPTIONS = ("掐撮三声", "再做", "再作", "从头再做", "从
 
 
 def action_text(action: dict[str, Any]) -> str:
-    value = action.get("jianzi_text", action.get("text", ""))
+    # Reference actions use ``text``; tool-runtime plans additionally carry
+    # ``jianzi_text`` and may leave it as None.  A present-but-empty runtime
+    # field must not mask the source notation during eligibility filtering.
+    value = action.get("jianzi_text")
+    if value is None:
+        value = action.get("text", "")
     return "" if value is None else str(value).strip()
 
 
@@ -164,10 +177,18 @@ def main() -> int:
                         default=("train", "validation", "test"))
     parser.add_argument("--min-ordinary-blank-run", type=int, default=5,
                         help="exclude phrases in an ordinary-predecessor empty run of this many sounding events; 0 disables")
+    parser.add_argument("--materialize-selected-inferred", action="store_true",
+                        help="also write the selected inferred rows, so this output is self-contained for teacher generation")
+    parser.add_argument("--unfiltered-split", action="append", default=[],
+                        choices=("train", "validation", "test"),
+                        help="copy this split unchanged instead of applying training eligibility filtering")
     parser.add_argument("--output-dir", type=Path, required=True)
     args = parser.parse_args()
     if bool(args.stats) == bool(args.inferred_dir):
         raise ValueError("provide exactly one of --stats or --inferred-dir")
+    unfiltered_splits = set(args.unfiltered_split)
+    if not unfiltered_splits <= set(args.splits):
+        raise ValueError("--unfiltered-split must also be listed in --splits")
     if args.output_dir.exists():
         raise FileExistsError(args.output_dir)
 
@@ -223,17 +244,36 @@ def main() -> int:
              if is_all_empty_reference_phrase(row)}
             if args.inferred_dir else set()
         )
-        selected = [phrase_id for phrase_id, stages in phrases.items()
-                    if phrase_id not in blank_excluded
-                    and phrase_id not in empty_reference_excluded
-                    and all(stage in stages and strict_eligible(stages[stage]) for stage in STAGES)]
+        if split in unfiltered_splits:
+            selected = list(phrases)
+            blank_excluded = set()
+            empty_reference_excluded = set()
+        else:
+            selected = [phrase_id for phrase_id, stages in phrases.items()
+                        if phrase_id not in blank_excluded
+                        and phrase_id not in empty_reference_excluded
+                        and all(stage in stages and strict_eligible(stages[stage]) for stage in STAGES)]
         (args.output_dir / f"pitch_eligible_phrase_ids_{split}.txt").write_text(
             "".join(f"{phrase_id}\n" for phrase_id in selected), encoding="utf-8")
+        if args.materialize_selected_inferred:
+            if not args.inferred_dir:
+                raise ValueError("--materialize-selected-inferred requires --inferred-dir")
+            selected_set = set(selected)
+            write_jsonl(
+                args.output_dir / f"inferred_trajectories_{split}.jsonl",
+                [row for row in source_rows[split]
+                 if str(row.get("trajectory_id") or "") in selected_set],
+            )
         all_ids.extend(selected)
         splits_manifest[split] = {
             "source_phrase_count": len(phrases),
             "selected_phrase_count": len(selected),
+            "selection_applied": split not in unfiltered_splits,
             "phrase_ids": f"pitch_eligible_phrase_ids_{split}.txt",
+            "selected_inferred": (
+                f"inferred_trajectories_{split}.jsonl"
+                if args.materialize_selected_inferred else None
+            ),
             "ordinary_blank_run_excluded_phrase_count": len(blank_excluded),
             "ordinary_blank_run_excluded_phrase_ids": sorted(blank_excluded),
             "all_empty_reference_excluded_phrase_count": len(empty_reference_excluded),

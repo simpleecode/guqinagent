@@ -3,7 +3,7 @@ from __future__ import annotations
 import unittest
 from pathlib import Path
 
-from agents.abc_to_jianzipu.jianzi_renderer import render_jianzi_surface
+from agents.abc_to_jianzipu.jianzi_renderer import hui_label, render_jianzi_surface
 from agents.abc_to_jianzipu.teacher_trajectory import _render_phrase_lines
 from ABC_J.scripts.generate_teacher_tool_trajectories import (
     RealToolRuntime,
@@ -37,6 +37,10 @@ from agents.abc_to_jianzipu.reference_parser import AUDIT
 
 
 class EditableProtocolTests(unittest.TestCase):
+    def test_symbolic_outside_hui_renders_without_numeric_coercion(self) -> None:
+        self.assertEqual(hui_label("徽外"), "徽外")
+        self.assertEqual(hui_label("徽外半"), "徽外半")
+
     def test_first_edit_warning_requires_a_later_turn(self) -> None:
         pending: set[int] = set()
         repaired: set[int] = set()

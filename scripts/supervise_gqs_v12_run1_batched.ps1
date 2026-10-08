@@ -43,7 +43,7 @@ if (-not (Test-Path (Join-Path $merged 'generation_report.json'))) {
 }
 $redacted = Join-Path $root 'messages_gqs_v12_train_run1_final_redacted'
 if (-not (Test-Path (Join-Path $redacted 'reasoning_redaction_report.json'))) {
-    & python (Join-Path $project 'scripts\redact_teacher_reasoning.py') `
+    & python (Join-Path $project 'ABC_J\scripts\redact_teacher_reasoning.py') `
         --input-dir $merged --output-dir $redacted --model glm-5.3 --max-attempts 6
 }
 Write-Output "GQS v12 run1 complete: $redacted"

@@ -221,6 +221,7 @@ def _render_phrase_lines(
     notes: list[dict[str, Any]], actions: list[dict[str, Any]], *,
     readonly: bool = False,
     pitch_warning_source_indices: set[int] | None = None,
+    warning_messages_by_source: dict[int, list[str]] | None = None,
 ) -> str:
     event_to_source = {
         int(note["event_index"]): int(note["index"])
@@ -240,6 +241,7 @@ def _render_phrase_lines(
         by_index[key] = action
     lines = ["序号｜简谱｜ABC｜时值｜谱面减字"]
     pitch_warning_source_indices = pitch_warning_source_indices or set()
+    warning_messages_by_source = warning_messages_by_source or {}
     for note in notes:
         source_index = int(note["index"])
         index = note.get("event_index")
@@ -271,8 +273,11 @@ def _render_phrase_lines(
             action, left, right, techniques, surface = _action_columns(
                 stored_action, readonly=readonly
             )
-        if source_index in pitch_warning_source_indices:
-            surface += ":warning:音高不匹配"
+        messages = list(warning_messages_by_source.get(source_index) or [])
+        if source_index in pitch_warning_source_indices and "音高不匹配" not in messages:
+            messages.append("音高不匹配")
+        for message in messages:
+            surface += f":warning:{message}"
         lines.append(
             f'{index}｜{jianpu}｜{note.get("abc") or "-"}｜{note.get("duration") or "-"}｜'
             f'{surface}'
@@ -326,6 +331,11 @@ def render_public_prompt(item: dict, stage: str) -> str:
             pitch_warning_source_indices=(
                 {int(index) for index in item.get("public_pitch_warning_source_indices") or []}
                 if stage in {"guqinization", "single_stage"} else set()
+            ),
+            warning_messages_by_source=(
+                {int(index): list(messages) for index, messages in
+                 (item.get("public_plan_warning_messages_by_source") or {}).items()}
+                if stage in {"guqinization", "single_stage"} else {}
             ),
         ),
     ])

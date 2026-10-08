@@ -26,6 +26,17 @@ TECHNIQUES = (
 )
 
 
+def mapped_score_dir(row: dict[str, str]) -> Path:
+    """Resolve a score checkout locally before trusting legacy capture paths."""
+    for candidate in (
+        ROOT / "ABC_J" / "final" / row["score_key"],
+        Path(row.get("final_data_path") or ""),
+    ):
+        if (candidate / "jianpu_jianzi_readable.json").exists():
+            return candidate
+    raise FileNotFoundError(f"mapped score unavailable: {row['score_key']}")
+
+
 def load_audit():
     spec = importlib.util.spec_from_file_location("trajectory_pitch_audit", AUDIT_PATH)
     if spec is None or spec.loader is None:
@@ -65,7 +76,7 @@ def phrase_ranges(notes: list[dict], max_sounding: int, tonic_midi: float) -> li
 
 def build_score_trajectories(row: dict[str, str], max_sounding: int,
                              context_notes: int) -> list[dict]:
-    path = Path(row["final_data_path"]) / "jianpu_jianzi_readable.json"
+    path = mapped_score_dir(row) / "jianpu_jianzi_readable.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     metadata = data.get("metadata") or {}
     notes = data.get("notes", [])
@@ -190,11 +201,14 @@ def main() -> int:
     with args.manifest.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    splits = sorted({row["split"] for row in rows})
+    if not set(splits) <= {"train", "test"}:
+        raise ValueError(f"unsupported splits: {splits}")
     handles = {
         split: (args.output_dir / f"reference_trajectories_{split}.jsonl").open(
             "w", encoding="utf-8", newline="\n"
         )
-        for split in ("train", "validation", "test")
+        for split in splits
     }
     counts = Counter()
     score_counts = Counter()

@@ -22,7 +22,15 @@ def main() -> int:
     scores: dict[str, set[str]] = defaultdict(set)
     counts = Counter()
     errors: list[str] = []
-    for split in ("train", "validation", "test"):
+    splits = [
+        split for split in ("train", "test")
+        if (args.input_dir / f"{args.prefix}_{split}.jsonl").exists()
+    ]
+    if not splits:
+        raise FileNotFoundError(
+            f"no train/test trajectory files with prefix {args.prefix!r} in {args.input_dir}"
+        )
+    for split in splits:
         path = args.input_dir / f"{args.prefix}_{split}.jsonl"
         with path.open(encoding="utf-8") as handle:
             for line_number, line in enumerate(handle, 1):
@@ -67,6 +75,7 @@ def main() -> int:
         errors.append(f"scores in multiple splits: {leaking_scores}")
     report = {
         "valid": not errors,
+        "splits": splits,
         "trajectories": dict(counts),
         "unique_trajectory_ids": len(ids),
         "families": len(families),

@@ -39,6 +39,38 @@ def normalize_tools(tools: object) -> list[dict] | None:
     return normalized
 
 
+def normalize_messages_for_template(messages: list[dict]) -> list[dict]:
+    """Adapt stored OpenAI-style calls to Qwen3.5's template schema.
+
+    Trajectories store a call as ``function.name`` plus a JSON-string
+    ``function.arguments``.  Qwen3.5's chat template instead iterates a
+    top-level ``name`` and mapping-valued ``arguments``.  Preserve every
+    non-call field, but convert that one representation before rendering.
+    """
+    normalized: list[dict] = []
+    for message in messages:
+        item = dict(message)
+        calls: list[dict] = []
+        for call in item.get("tool_calls") or []:
+            function = call.get("function") if isinstance(call, dict) else None
+            function = function if isinstance(function, dict) else call
+            if not isinstance(function, dict) or not function.get("name"):
+                continue
+            arguments = function.get("arguments", {})
+            if isinstance(arguments, str):
+                try:
+                    arguments = json.loads(arguments)
+                except json.JSONDecodeError:
+                    # Retain malformed historical calls as strings so this
+                    # diagnostic script still measures their actual prompt.
+                    pass
+            calls.append({"name": function["name"], "arguments": arguments})
+        if calls:
+            item["tool_calls"] = calls
+        normalized.append(item)
+    return normalized
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input", type=Path, required=True)
@@ -67,7 +99,8 @@ def main() -> int:
         row = json.loads(line)
         tools = normalize_tools(row.get("tools"))
         rendered = processor.apply_chat_template(
-            row["messages"], tools=tools, tokenize=False, add_generation_prompt=False,
+            normalize_messages_for_template(row["messages"]),
+            tools=tools, tokenize=False, add_generation_prompt=False,
         )
         length = len(tokenizer(rendered, add_special_tokens=False)["input_ids"])
         lengths.append(length)

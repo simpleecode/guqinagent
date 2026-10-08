@@ -105,10 +105,12 @@ def main() -> int:
     parser.add_argument("--model", default="glm-5.3")
     parser.add_argument("--max-tool-rounds", type=int, default=24)
     parser.add_argument("--max-attempts", type=int, default=3)
-    parser.add_argument("--allow-private-reasoning-leakage", action="store_true")
+    parser.add_argument("--allow-private-reasoning-leakage", action="store_true", default=True,
+                        help="allow private-reference wording during generation (default: enabled; redact before training)")
     parser.add_argument("--stage", choices=("fingering_agent", "guqinization", "single_stage"))
     parser.add_argument("--intermediate-input", type=Path)
-    parser.add_argument("--include-guqinizer-no-op", action="store_true")
+    parser.add_argument("--include-guqinizer-no-op", action="store_true", default=True,
+                        help="run Guqinizer no-op trajectories by default")
     parser.add_argument("--score-shard-count", type=int,
                         help="partition source rows by stable score hash so workers do not each load the full corpus")
     parser.add_argument("--shard-by-trajectory-id", action="store_true",

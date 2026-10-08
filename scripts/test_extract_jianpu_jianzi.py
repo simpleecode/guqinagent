@@ -50,6 +50,23 @@ class JianpuDecodeTests(unittest.TestCase):
         self.assertEqual(abc, "{f}")
         self.assertEqual(previous, "c")
 
+    def test_multi_note_ornament_run_is_not_a_rest(self):
+        decoded = MODULE.decode_jianpu_token("y:3'/2'/1'/6/5")
+        self.assertTrue(decoded["ornament"])
+        self.assertFalse(decoded["rest"])
+        self.assertEqual(decoded["pitch_name"], "3̇ 2̇ 1̇ 6 5（饰）")
+        self.assertEqual(
+            decoded["ornament_pitches"],
+            [
+                {"pitch": 3, "octave": 1}, {"pitch": 2, "octave": 1},
+                {"pitch": 1, "octave": 1}, {"pitch": 6, "octave": 0},
+                {"pitch": 5, "octave": 0},
+            ],
+        )
+        abc, _ = MODULE.jianpu_to_abc(decoded, tonic="B")
+        self.assertTrue(abc.startswith("{") and abc.endswith("}"))
+        self.assertNotIn("z", abc)
+
     def test_barline_is_not_a_rest(self):
         decoded = MODULE.decode_jianpu_token("|")
         self.assertTrue(decoded["barline"])

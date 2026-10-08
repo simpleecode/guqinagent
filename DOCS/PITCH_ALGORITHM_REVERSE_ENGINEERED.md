@@ -2,7 +2,7 @@
 
 本报告基于对 `libapp.so`（Flutter/Dart AOT，arm64）的直接反汇编，所有结论
 均标注了二进制内的可核验地址。工具：仓库内 `.codex_deps/capstone` +
-`pyelftools`，脚本 `scripts/disasm_func.py`、`scripts/find_pool_xrefs.py`。
+`pyelftools`，脚本 `scripts/legacy_capture/disasm_func.py`、`scripts/find_pool_xrefs.py`。
 
 ## 0. 方法与可信度声明
 
@@ -212,7 +212,7 @@ App **不是**从减字谱"计算"出简谱音高，而是把减字谱和简谱*
 
 ## 6. 复现脚本
 
-- `scripts/disasm_func.py 0x68f230 0x100` — 反汇编任意函数。
+- `scripts/legacy_capture/disasm_func.py 0x68f230 0x100` — 反汇编任意函数。
 - `scripts/find_pool_xrefs.py` — 扫描全 `.text`，列出所有引用四张表的指令
   地址（已修正 arm64 LDR 掩码 `0xFFC00000==0xF9400000`）。
 

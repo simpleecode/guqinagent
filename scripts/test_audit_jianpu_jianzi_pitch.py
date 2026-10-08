@@ -198,6 +198,84 @@ class AuditPitchTests(unittest.TestCase):
         self.assertIsNone(reason)
         self.assertAlmostEqual(pitches[0], expected)
 
+    def test_harmonic_region_rejects_standalone_walk(self):
+        warnings = MODULE.harmonic_continuity_warnings({
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "5", "jianzi": "泛起中指七徽勾一弦"},
+                {"index": 2, "jianpu": "6", "jianzi": "绰上六徽"},
+            ],
+        })
+        self.assertEqual(warnings, [{
+            "index": 2,
+            "code": "walk_inside_harmonic_region",
+            "technique": "绰上",
+        }])
+
+    def test_harmonic_same_string_reattack_warns(self):
+        warnings = MODULE.harmonic_continuity_warnings({
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 71, "jianpu": "5", "jianzi": "泛音中指七徽勾一弦"},
+                {"index": 72, "jianpu": "3", "jianzi": "泛音大指四徽挑一弦"},
+            ],
+        })
+        self.assertEqual(warnings, [{
+            "index": 72,
+            "code": "harmonic_to_same_string_attack",
+            "strings": [1],
+        }])
+
+    def test_swept_fu_skips_single_pitch_comparison(self):
+        report = MODULE.audit({
+            "open_midi": self.opens,
+            "notes": [{
+                "index": 1, "jianpu": "5",
+                "jianzi": "泛音名指五徽拂一至六弦",
+            }],
+        }, 50.0)
+        self.assertEqual(report["details"][0]["status"], "skipped")
+        self.assertEqual(
+            report["details"][0]["reason"], "compound_sweep_pitch_ambiguous"
+        )
+
+    def test_fu_predecessor_does_not_carry_open_string_warning(self):
+        warnings = MODULE.open_to_stopped_transition_warnings({
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "5", "jianzi": "散勾一弦拂"},
+                {"index": 2, "jianpu": "5", "jianzi": "大指七徽挑一弦"},
+            ],
+        })
+        self.assertEqual(warnings, [])
+
+    def test_lock_predecessor_does_not_carry_harmonic_warning(self):
+        warnings = MODULE.harmonic_continuity_warnings({
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "5", "jianzi": "泛音中指七徽勾一弦锁"},
+                {"index": 2, "jianpu": "3", "jianzi": "泛音大指四徽挑一弦"},
+            ],
+        })
+        self.assertEqual(warnings, [])
+
+    def test_four_standalone_walks_without_attack_warns(self):
+        warnings = MODULE.consecutive_walk_warnings({
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "5", "jianzi": "大指九徽勾四弦"},
+                {"index": 2, "jianpu": "6", "jianzi": "绰上八徽"},
+                {"index": 3, "jianpu": "7", "jianzi": "绰上七徽"},
+                {"index": 4, "jianpu": "1̇", "jianzi": "绰上六徽"},
+                {"index": 5, "jianpu": "2̇", "jianzi": "绰上五徽"},
+            ],
+        })
+        self.assertEqual(warnings, [{
+            "index": 5,
+            "code": "consecutive_walks_without_attack",
+            "count": 4,
+        }])
+
     def test_prefix_fanzhi_ends_harmonic_before_current_note_and_preserves_position(self):
         context = MODULE.new_context()
         MODULE.parse_jianzi("泛起食指七徽勾一弦", self.opens, context)

@@ -2,6 +2,11 @@
 
 本文档面向接手本仓库的其它 agent。目标是在已授权登录状态下，复现“非本人原创/克隆/公开谱面”的结构化正文采集能力，输出 `raw_data.json` 与 `data.json`。本流程只面向当前账号可合法访问、可打开或可编辑的谱面；不要用于绕过账号权限、批量抓取无授权内容或传播第三方受保护数据。
 
+> 注意（2026-10）：采集时代的抓谱/逆向脚本已整体归档至 `scripts/legacy_capture/`
+> （硬编码当年 Windows 机器路径，macOS 下不可直接运行），本文命令中的脚本路径已同步
+> 更新；`cases/` 等旧目录引用为历史记录。当前管线状态以
+> `DOCS/agent_training_handoff.md` 为权威。
+
 ## 1. 结论先行
 
 真实正文来源不是“我的 -> 内容”列表里的元数据，也不是 OCR。
@@ -90,7 +95,7 @@ Web 后端会调用：
 ```text
 POST /api/capture
   -> startJob()
-  -> powershell scripts/collect_score_runtime.ps1
+  -> powershell scripts/legacy_capture/collect_score_runtime.ps1
 ```
 
 完成后结果在：
@@ -143,7 +148,7 @@ powershell -NoProfile -ExecutionPolicy Bypass `
 2. 启动 Frida hook：
 
 ```text
-python scripts/frida_decode_score_jians.py
+python scripts/legacy_capture/frida_decode_score_jians.py
   --host 127.0.0.1:27042
   --out <batch>/<slug>/evidence/runtime_note_slur.jsonl
   --only note_slur
@@ -300,7 +305,7 @@ options.edit !== false
 
 ## 9. memory 回退路径
 
-`runtime` 失败后，`collect_score_runtime.ps1` 会回退到 `scripts/export_score_from_memory.ps1`。
+`runtime` 失败后，`collect_score_runtime.ps1` 会回退到 `scripts/legacy_capture/export_score_from_memory.ps1`。
 
 该路径适用于 App 已经把完整正文 JSON 留在内存或缓存里的情况。它的局限：
 
@@ -481,7 +486,7 @@ powershell -ExecutionPolicy Bypass -File .\ABC_J\run_gupu_batch.ps1 -Stage colle
 候选 JSON 来源（rank 阶段的输入边界，按任意一种获取后放进
 `ABC_J/candidates/<曲名>/*.json`）：
 
-- `scripts/capture_https_plaintext.py` 抓 HTTPS 明文；
+- `scripts/legacy_capture/capture_https_plaintext.py` 抓 HTTPS 明文；
 - 内存候选导出：`ABC_J/collect_app_candidates.py` +
   `ABC_J/enrich_app_candidates.py`；
 - 手动导出的 App 搜索响应。

@@ -49,14 +49,30 @@ def read_records(path: Path) -> list[tuple[int, float]]:
     return sorted(deduped.items())
 
 
+def read_trainer_state_records(path: Path) -> list[tuple[int, float]]:
+    """Read loss records directly from a Hugging Face trainer_state.json."""
+    state = json.loads(path.read_text(encoding="utf-8"))
+    deduped: dict[int, float] = {}
+    for item in state.get("log_history") or []:
+        if not isinstance(item, dict) or "loss" not in item:
+            continue
+        try:
+            deduped[int(item["step"])] = float(item["loss"])
+        except (KeyError, TypeError, ValueError):
+            continue
+    return sorted(deduped.items())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--log", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--log", type=Path)
+    source.add_argument("--trainer-state", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--total-steps", type=int, default=1617)
     parser.add_argument("--title", default="训练 Loss 曲线")
     args = parser.parse_args()
-    records = read_records(args.log)
+    records = read_trainer_state_records(args.trainer_state) if args.trainer_state else read_records(args.log)
     if not records:
         raise SystemExit("no Trainer loss records found")
     steps = [x for x, _ in records]

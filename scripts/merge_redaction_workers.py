@@ -20,33 +20,61 @@ def write(path: Path, rows: list[dict]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--source-workers", type=Path,
+                        help="read raw source rows from worker_* directories instead of one source directory")
     parser.add_argument("--worker-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
+    parser.add_argument("--exclude-sample-id", action="append", default=[],
+                        help="drop a failed or quarantined sample from the merge")
     args = parser.parse_args()
     if args.output_dir.exists():
         raise SystemExit(f"output already exists: {args.output_dir}")
-    source = read(args.source / "messages_train.jsonl")
+    excluded = set(args.exclude_sample_id)
+    if args.source_workers:
+        source_worker_dirs = sorted(args.source_workers.glob("worker_*"))
+        if not source_worker_dirs:
+            raise SystemExit(f"no raw worker directories: {args.source_workers}")
+        source = []
+        private: dict[str, dict] = {}
+        for worker in source_worker_dirs:
+            source.extend(row for row in read(worker / "messages_train.jsonl")
+                          if str(row["sample_id"]) not in excluded)
+            private.update({str(row["sample_id"]): row
+                            for row in read(worker / "teacher_trajectory_audit.jsonl")
+                            if str(row["sample_id"]) not in excluded})
+    else:
+        source = [row for row in read(args.source / "messages_train.jsonl")
+                  if str(row["sample_id"]) not in excluded]
+        private = {}
     source_ids = [str(row["sample_id"]) for row in source]
     public: dict[str, dict] = {}
-    private: dict[str, dict] = {}
     audits: list[dict] = []
     reports: list[dict] = []
-    for worker in sorted(args.worker_root.glob("worker_[0-9]*")):
+    # Worker logs commonly live next to worker directories (for example
+    # ``worker_0.log``).  Only directories are valid merge inputs.
+    for worker in sorted(path for path in args.worker_root.glob("worker_[0-9]*") if path.is_dir()):
         report_path = worker / "reasoning_redaction_report.json"
         if not report_path.exists():
             raise SystemExit(f"unfinished worker: {worker}")
         report = json.loads(report_path.read_text(encoding="utf-8"))
-        if report.get("failed"):
+        outstanding = [row for row in report.get("failures", [])
+                       if str(row.get("sample_id")) not in excluded]
+        if outstanding:
             raise SystemExit(f"worker reports failures: {worker}")
         reports.append(report)
         for row in read(worker / "messages_train.jsonl"):
             sample_id = str(row["sample_id"])
+            if sample_id in excluded:
+                continue
             if sample_id in public:
                 raise SystemExit(f"duplicate public sample: {sample_id}")
             public[sample_id] = row
         for row in read(worker / "teacher_trajectory_audit.jsonl"):
-            private[str(row["sample_id"])] = row
-        audits.extend(read(worker / "reasoning_redaction_audit.jsonl"))
+            sample_id = str(row["sample_id"])
+            if sample_id not in excluded:
+                private[sample_id] = row
+        audits.extend(row for row in read(worker / "reasoning_redaction_audit.jsonl")
+                      if str(row.get("sample_id")) not in excluded)
     missing = set(source_ids) - set(public)
     extra = set(public) - set(source_ids)
     if missing or extra:
@@ -65,6 +93,7 @@ def main() -> int:
         "requested": len(source_ids),
         "written": len(ordered),
         "failed": 0,
+        "excluded": sorted(excluded),
         "redaction_audit_rows": len(audits),
         "public_private_ids_match": {row["sample_id"] for row in ordered} == set(private),
         "workers": reports,
