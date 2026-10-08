@@ -1,0 +1,270 @@
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0001", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0001", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0001", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0002", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0002", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0002", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0002", "previous_sample_id": "SmMYcR5r-p0001", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 20}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0003", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0003", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0003", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0003", "previous_sample_id": "SmMYcR5r-p0002", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 18}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0004", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0004", "attempt": 0, "round": 2, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0004", "attempt": 0, "round": 3, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0004", "attempt": 0, "round": 4, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0004", "previous_sample_id": "SmMYcR5r-p0003", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0005", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates", "get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0005", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0005", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0005", "previous_sample_id": "SmMYcR5r-p0004", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 18}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0007", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0007", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0007", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0007", "previous_sample_id": "SmMYcR5r-p0005", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 19}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0008", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0008", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0008", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0008", "previous_sample_id": "SmMYcR5r-p0007", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 19}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0009", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0009", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0009", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0009", "attempt": 0, "round": 4, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0009", "attempt": 0, "round": 5, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0009", "previous_sample_id": "SmMYcR5r-p0008", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 17}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0011", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0011", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0011", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0011", "previous_sample_id": "SmMYcR5r-p0009", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 11}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0012", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0012", "attempt": 0, "round": 2, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0012", "attempt": 0, "round": 3, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0012", "attempt": 0, "round": 4, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0012", "previous_sample_id": "SmMYcR5r-p0011", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 18}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0013", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0013", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0013", "previous_sample_id": "SmMYcR5r-p0012", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 17}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0014", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0014", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0014", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0014", "previous_sample_id": "SmMYcR5r-p0013", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 18}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0015", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0015", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0015", "previous_sample_id": "SmMYcR5r-p0014", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 17}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0016", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0016", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0016", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0016", "previous_sample_id": "SmMYcR5r-p0015", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 9}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0017", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0017", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0017", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0017", "previous_sample_id": "SmMYcR5r-p0016", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 19}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0018", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0018", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0018", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0018", "previous_sample_id": "SmMYcR5r-p0017", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 19}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0019", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0019", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0019", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0019", "previous_sample_id": "SmMYcR5r-p0018", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 10}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0020", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0020", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0020", "previous_sample_id": "SmMYcR5r-p0019", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0021", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0021", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0021", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0021", "previous_sample_id": "SmMYcR5r-p0020", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 19}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0022", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0022", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0022", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0022", "previous_sample_id": "SmMYcR5r-p0021", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 18}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0023", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0023", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0023", "previous_sample_id": "SmMYcR5r-p0022", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 12}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0024", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0024", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0024", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0024", "previous_sample_id": "SmMYcR5r-p0023", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 18}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0025", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0025", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0025", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0025", "previous_sample_id": "SmMYcR5r-p0024", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 17}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0026", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0026", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0026", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0026", "previous_sample_id": "SmMYcR5r-p0025", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 18}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0027", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0027", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0027", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0027", "previous_sample_id": "SmMYcR5r-p0026", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 12}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0029", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0029", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0029", "previous_sample_id": "SmMYcR5r-p0027", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 19}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0030", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0030", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0030", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0030", "previous_sample_id": "SmMYcR5r-p0029", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 15}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0031", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0031", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0031", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0031", "previous_sample_id": "SmMYcR5r-p0030", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 17}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0032", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0032", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0032", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0032", "previous_sample_id": "SmMYcR5r-p0031", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 17}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0033", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0033", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0033", "previous_sample_id": "SmMYcR5r-p0032", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0034", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0034", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0034", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0034", "previous_sample_id": "SmMYcR5r-p0033", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 10}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0035", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0035", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0035", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0035", "previous_sample_id": "SmMYcR5r-p0034", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 17}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0036", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0036", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0036", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0036", "previous_sample_id": "SmMYcR5r-p0035", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0037", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0037", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0037", "previous_sample_id": "SmMYcR5r-p0036", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 17}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0040", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0040", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0040", "attempt": 0, "round": 3, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0040", "attempt": 0, "round": 4, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0040", "previous_sample_id": "SmMYcR5r-p0037", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 3}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0041", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0041", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0041", "attempt": 0, "round": 3, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0041", "attempt": 0, "round": 4, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0041", "previous_sample_id": "SmMYcR5r-p0040", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 18}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0042", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0042", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SmMYcR5r-p0042", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SmMYcR5r-p0042", "previous_sample_id": "SmMYcR5r-p0041", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 18}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0001", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0001", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0001", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0002", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0002", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0002", "previous_sample_id": "SNt85j0u-p0001", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 22}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0003", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0003", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0003", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0003", "previous_sample_id": "SNt85j0u-p0002", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0004", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0004", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0004", "previous_sample_id": "SNt85j0u-p0003", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 24}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0005", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0005", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0005", "previous_sample_id": "SNt85j0u-p0004", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0006", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0006", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0006", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0006", "previous_sample_id": "SNt85j0u-p0005", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 5}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0007", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0007", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0007", "previous_sample_id": "SNt85j0u-p0006", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 20}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0008", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0008", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0008", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0008", "previous_sample_id": "SNt85j0u-p0007", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 20}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0009", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0009", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0009", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0009", "previous_sample_id": "SNt85j0u-p0008", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0010", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0010", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0010", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0010", "previous_sample_id": "SNt85j0u-p0009", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 24}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0011", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0011", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0011", "previous_sample_id": "SNt85j0u-p0010", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0012", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0012", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0012", "attempt": 0, "round": 3, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0012", "attempt": 0, "round": 4, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0012", "previous_sample_id": "SNt85j0u-p0011", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 5}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0013", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0013", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0013", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0013", "previous_sample_id": "SNt85j0u-p0012", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 20}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0014", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0014", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0014", "attempt": 0, "round": 3, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0014", "previous_sample_id": "SNt85j0u-p0013", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 20}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0015", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0015", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0015", "previous_sample_id": "SNt85j0u-p0014", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 19}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0016", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0016", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0016", "previous_sample_id": "SNt85j0u-p0015", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0017", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0017", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0017", "previous_sample_id": "SNt85j0u-p0016", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 21}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0018", "attempt": 0, "round": 1, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0018", "attempt": 0, "round": 2, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0018", "previous_sample_id": "SNt85j0u-p0017", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 23}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0019", "attempt": 0, "round": 1, "tool_calls": ["get_pitch_candidates"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0019", "attempt": 0, "round": 2, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0019", "attempt": 0, "round": 3, "tool_calls": ["edit_plan"], "truncated": false}
+{"event": "rollout_round", "sample_id": "SNt85j0u-p0019", "attempt": 0, "round": 4, "tool_calls": [], "truncated": false}
+{"event": "handoff_provenance", "sample_id": "SNt85j0u-p0019", "previous_sample_id": "SNt85j0u-p0018", "source": "candidate_self_session", "previous_ok": true, "injected_rows": 23}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0001", "ok": true, "score": 0.7, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0002", "ok": true, "score": 0.5, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0003", "ok": true, "score": 0.3636363636363636, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0004", "ok": true, "score": 0.412087912087912, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0005", "ok": true, "score": 0.2833333333333333, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0007", "ok": true, "score": 0.2310924369747899, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0008", "ok": true, "score": 0.3173295454545454, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0009", "ok": true, "score": 0.33333333333333337, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0011", "ok": true, "score": 0.20779220779220778, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0012", "ok": true, "score": 0.21753246753246752, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0013", "ok": true, "score": 0.3547008547008547, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0014", "ok": true, "score": 0.2833333333333333, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0015", "ok": true, "score": 0.42857142857142855, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0016", "ok": true, "score": 0.6708974358974358, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0017", "ok": true, "score": 0.6875, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0018", "ok": true, "score": 0.625, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0019", "ok": true, "score": 0.4580419580419581, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0020", "ok": true, "score": 0.34523809523809523, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0021", "ok": true, "score": 0.45000000000000007, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0022", "ok": true, "score": 0.625, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0023", "ok": true, "score": 0.8174603174603174, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0024", "ok": true, "score": 0.7619047619047619, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0025", "ok": true, "score": 0.4416666666666667, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0026", "ok": true, "score": 0.8333333333333334, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0027", "ok": true, "score": 0.34615384615384615, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0029", "ok": true, "score": 0.6923076923076923, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0030", "ok": true, "score": 0.8920454545454545, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0031", "ok": true, "score": 0.49166666666666675, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0032", "ok": true, "score": 0.45065045248868785, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0033", "ok": true, "score": 0.4444444444444445, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0034", "ok": true, "score": 0.5288461538461539, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0035", "ok": true, "score": 0.37027863777089787, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0036", "ok": true, "score": 0.33974358974358976, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0037", "ok": true, "score": 0.5, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0040", "ok": true, "score": 0.8571428571428572, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0041", "ok": true, "score": 0.7850649350649351, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SmMYcR5r-p0042", "ok": true, "score": 0.7996428571428571, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0001", "ok": true, "score": 0.53125, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0002", "ok": true, "score": 0.6421052631578948, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0003", "ok": true, "score": 0.617063492063492, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0004", "ok": true, "score": 0.31529411764705884, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0005", "ok": true, "score": 0.0, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0006", "ok": true, "score": 0.3057692307692308, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0007", "ok": true, "score": 0.24239130434782608, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0008", "ok": true, "score": 0.37, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0009", "ok": true, "score": 0.34523809523809523, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0010", "ok": true, "score": 0.0, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0011", "ok": true, "score": 0.0, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0012", "ok": true, "score": 0.475, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0013", "ok": true, "score": 0.6096618357487923, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0014", "ok": true, "score": 0.638095238095238, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0015", "ok": true, "score": 0.5950226244343891, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0016", "ok": true, "score": 0.5666666666666667, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0017", "ok": true, "score": 0.4, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0018", "ok": true, "score": 0.1875, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}
+{"event": "phrase_scored", "sample_id": "SNt85j0u-p0019", "ok": true, "score": 0.6281593406593406, "usage": {"actor_calls": 160, "actor_tokens_in": 212711, "actor_tokens_out": 95070, "reflection_calls": 0, "reflection_tokens_in": 0, "reflection_tokens_out": 0}, "leakage": {"feedback_leaks": 0, "record_soft_hits": 0, "unresolved_trajectory": 0}}

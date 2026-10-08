@@ -1,0 +1,15 @@
+{
+ "arm": "vanilla_react",
+ "val_phrases": 56,
+ "mean_score": 0.4699284032399865,
+ "protocol_ok": 56,
+ "usage": {
+  "actor_calls": 160,
+  "actor_tokens_in": 212711,
+  "actor_tokens_out": 95070,
+  "reflection_calls": 0,
+  "reflection_tokens_in": 0,
+  "reflection_tokens_out": 0
+ },
+ "wall_seconds": 2344
+}

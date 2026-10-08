@@ -1,0 +1,15 @@
+{
+  "source": "/Volumes/F/work/Gunqin-agent/ABC_J/agent_training/renderfix_train_test_20261007/pitch_eligible_two_or_half/inferred_trajectories_train.jsonl",
+  "seed": 42,
+  "target_phrases": 200,
+  "available_scores": 191,
+  "selected_scores": 5,
+  "selected_phrases": 201,
+  "train_scores": 3,
+  "train_phrases": 145,
+  "val_scores": 2,
+  "val_phrases": 56,
+  "excluded_from": [
+    "/Volumes/F/work/Gunqin-agent/ABC_J/agent_training/renderfix_train_test_20261007/pitch_eligible_two_or_half/inferred_trajectories_test.jsonl"
+  ]
+}

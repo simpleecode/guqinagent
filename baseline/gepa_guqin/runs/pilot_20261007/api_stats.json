@@ -1,0 +1,18 @@
+{
+  "api_usage": {
+    "reflection_calls": 4,
+    "reflection_tokens_in": 27525,
+    "reflection_tokens_out": 7995,
+    "actor_tokens_out": 955821,
+    "actor_calls": 924,
+    "actor_tokens_in": 635492
+  },
+  "leakage_audit": {
+    "feedback_leaks": 0,
+    "record_soft_hits": 13,
+    "unresolved_trajectory": 0
+  },
+  "total_evals": 222,
+  "model": "glm-5.3",
+  "note": "run-lifetime totals summed across the interrupted+resumed processes (adapter_log-derived)"
+}
