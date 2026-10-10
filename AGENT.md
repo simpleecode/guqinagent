@@ -59,7 +59,7 @@ conda run -n guqin python C:\Users\30343\.codex\skills\.system\skill-creator\scr
 - `raw_data.json` 作为原始证据不得静默改写；修正规则单独记录、可重放。
 - 未知编码保留原值，结论区分“已验证 / 推断 / 未验证”。
 - 修改提取逻辑后，用 `batch/SYuY17FF/out/raw_data.json` 回归检查输出。
-- 完整采集说明见 `AGENT_REPRODUCTION_GUIDE.md`；排查经验见 `DOCS/PARTIAL_OMISSION_POSTMORTEM.md`。
+- 完整采集说明见 `AGENT_REPRODUCTION_GUIDE.md`。
 
 ## 教师轨迹并发任务监控
 
