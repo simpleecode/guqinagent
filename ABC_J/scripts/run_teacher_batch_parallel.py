@@ -17,7 +17,7 @@ from collections import Counter
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 TWO_STAGE_GENERATOR = ROOT / "ABC_J" / "scripts" / "generate_teacher_tool_trajectories.py"
 SINGLE_STAGE_GENERATOR = ROOT / "ABC_J" / "scripts" / "generate_single_stage_teacher_trajectories.py"
 FILES = ("messages_train.jsonl", "teacher_trajectory_audit.jsonl",
@@ -252,7 +252,9 @@ def main() -> int:
             command.extend(("--stage", args.stage))
         if args.intermediate_input:
             command.extend(("--intermediate-input", str(args.intermediate_input)))
-        if args.include_guqinizer_no_op:
+        # This switch belongs solely to the two-stage generator.  The
+        # single-stage generator has no Guqinizer phase and rejects it.
+        if args.include_guqinizer_no_op and args.stage != "single_stage":
             command.append("--include-guqinizer-no-op")
         process = subprocess.Popen(command, cwd=ROOT, stdout=log_handle,
                                    stderr=subprocess.STDOUT)
