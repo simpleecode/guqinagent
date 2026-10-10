@@ -9,9 +9,7 @@
 “拨弦前置绰”的结构差异、动作物化与重放审计。新教师生成必须使用 v6。v44 pilot 抽样中没有
 这些新增动作，因此原78条仍有效，但不能作为 v5/v6 新语义的质量证据。
 
-本文是当前工程状态的唯一交接入口。框架原则见
-[abc_to_jianzipu_agent_framework.md](abc_to_jianzipu_agent_framework.md)，训练与评估方案见
-[agent_training_experiment_plan.md](agent_training_experiment_plan.md)。
+本文是当前工程状态的唯一交接入口。
 
 ## 0. 2026-09-11 最新数据状态
 
