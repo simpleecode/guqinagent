@@ -149,12 +149,7 @@ def harmonic_scope_after_phrases(
             source_index = note.get("index")
             action = by_index.get(int(source_index)) if source_index is not None else None
             text = str((action or {}).get("text") or (action or {}).get("jianzi_text") or "")
-            for marker in re.findall(r"泛起|泛止", text):
-                active = marker == "泛起"
-            # This mirrors ``audit``: a score-level blank rest ends a prior
-            # harmonic phrase even when the source omitted an explicit 泛止.
-            if "休止" in str(note.get("jianpu") or "") and not text:
-                active = False
+            active = AUDIT.replay_harmonic_scope(active, note, text)
     return active
 
 
@@ -263,6 +258,22 @@ def pitch_audit_notes(
             for action in actions if action.get("source_index") is not None
         }
         prefix.extend(render_rows(notes, action_map))
+    # ``harmonic_region_at_start`` is the canonical phrase-boundary replay
+    # used for the model-facing prompt.  Historical reference actions can be
+    # more permissive than that replay (for example, a stale ``泛起`` can
+    # survive through an intervening empty/rest phrase).  Do not let such a
+    # reference-only state manufacture harmonic-resonance warnings in a
+    # phrase that is explicitly declared to start outside the region.
+    # ``泛止`` clears only harmonic state; the preceding stopped-position
+    # context remains available for ordinary shorthand inheritance.
+    if prefix_phrases and seed_allowed is False:
+        prefix.append({
+            "index": -2,
+            "jianpu": None,
+            "abc": "",
+            "duration": "",
+            "jianzi": "泛止",
+        })
     return prefix + render_rows(current_notes, actions_by_source)
 
 def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,

@@ -916,16 +916,12 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         "最终结束前每个演奏事件必须得到字符串；若前一减字已覆盖多个动作，后续行可用空字符串置空表示不重复显示。",
         "edit_plan 回执出现 warning 时，应结合工具结果主动审阅并优先改写相关行；不要只作空泛解释。"
     ])
-    # Keep the surface order explicit in the teacher-only prompt.  The model
-    # into prose-like strings that are not conventional jianzipu notation.
+    # Keep the surface order explicit without turning conventional contextual
+    # omission into an error.
     jianzi_field_order_rule = (
-        "【减字字段次序】先在心中按固定模板组织，再写入 edit_plan：前置技法→取音状态（如泛音）"
-        "→左手按指→徽位→右手指法→起音弦。成对例子：名指九徽勾六弦（不是名指六弦九徽勾）；"
-        "泛音名指七徽勾四弦（不是泛音四弦七徽勾四弦）；"
-        "名指九徽打三弦（不是名指三弦九徽打）；"
-        "绰名指十徽八分勾三弦（不是绰名指三弦十徽八分勾）。"
-        "除撮、泼、剌等明确的多弦复合写法外，一个起音的弦序只写在该音右手指法之后；"
-        "完成前逐项比对这四组正例，修正任何把弦序写到徽位之前的行。"
+        "【减字字段次序】完整写出时通常为：前置技法/取音状态→左手按指→徽位→右手指法→弦序，"
+        "如“名指九徽勾六弦”“绰名指十徽八分勾三弦”。不要写成如“名指三弦十徽八分勾”或“名指勾三弦十徽八分”等。相邻上下文已明确按指、徽位、弦位或技法时，可按谱法省略，"
+        "不必为套模板而重复补全；撮、泼、剌等复合写法按其惯例。"
     )
     if basic and not direct_final:
         private_instruction["rules"] = [

@@ -226,6 +226,17 @@ class AuditPitchTests(unittest.TestCase):
             "strings": [1],
         }])
 
+    def test_bare_rest_ends_harmonic_scope_for_continuity_warning(self):
+        warnings = MODULE.harmonic_continuity_warnings({
+            "open_midi": self.opens,
+            "notes": [
+                {"index": 1, "jianpu": "5", "jianzi": "泛起中指七徽勾一弦"},
+                {"index": 2, "jianpu": "0（休止）", "jianzi": ""},
+                {"index": 3, "jianpu": "3", "jianzi": "名指九徽挑一弦"},
+            ],
+        })
+        self.assertEqual(warnings, [])
+
     def test_swept_fu_skips_single_pitch_comparison(self):
         report = MODULE.audit({
             "open_midi": self.opens,

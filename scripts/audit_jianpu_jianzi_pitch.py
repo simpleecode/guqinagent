@@ -70,9 +70,9 @@ LEFT_HAND_FINGERS = ("大指", "名指", "中指", "食指", "跪指")
 ORNAMENTS = {"吟", "猱", "撞", "逗", "往来", "复", "掐起", "带起", "抓起", "爪起", "滔起"}
 
 # ``绰上`` / ``注下`` are connected left-hand movements, not arbitrary
-# repositioning instructions.  At 400 cents or more the inherited,
-# connected-walk interpretation should be reviewed.
-WALK_SPAN_WARNING_CENTS = 400.0
+# repositioning instructions.  Spans beyond 500 cents should be reviewed;
+# 498-cent whole-step-like moves are permitted.
+WALK_SPAN_WARNING_CENTS = 501.0
 # A single left-hand finger making a large simultaneous change in both string
 # and hui is mechanically demanding.  This is an advisory rather than an
 # impossibility rule: expert fingering can sometimes justify it, but the
@@ -210,6 +210,39 @@ def normalize_context(context: dict | None) -> dict:
     if not isinstance(context.get("left_positions"), dict):
         context["left_positions"] = {}
     return context
+
+
+def is_bare_rest_note(note: dict, text: str | None = None) -> bool:
+    """Whether this row is a rest with no notation that continues a state."""
+    surface = str(note.get("jianzi") or "").strip() if text is None else text.strip()
+    return "休止" in str(note.get("jianpu") or "") and not surface
+
+
+def advance_context_for_bare_rest(context: dict, note: dict, text: str | None = None) -> bool:
+    """Apply the canonical state transition for an unnotated rest.
+
+    A bare rest ends sounding/open/harmonic state, while preserving the last
+    stopped left-hand position for ordinary shorthand after the rest.  All
+    stateful audit passes and runtime phrase-boundary replay use this helper.
+    """
+    if not is_bare_rest_note(note, text):
+        return False
+    previous = dict(context)
+    context.clear()
+    context.update(new_context())
+    context["active_left_hui"] = previous.get("active_left_hui")
+    context["active_left_string"] = previous.get("active_left_string")
+    context["left_finger"] = previous.get("left_finger")
+    context["left_positions"] = dict(previous.get("left_positions") or {})
+    return True
+
+
+def replay_harmonic_scope(active: bool, note: dict, text: str | None = None) -> bool:
+    """Advance phrase-boundary harmonic scope with the canonical rest rule."""
+    surface = str(note.get("jianzi") or "") if text is None else text
+    for marker in re.findall(r"泛起|泛止", surface):
+        active = marker == "泛起"
+    return False if is_bare_rest_note(note, surface) else active
 
 
 def first_token(text: str, choices: tuple[str, ...]) -> str | None:
@@ -851,6 +884,8 @@ def _standalone_walk_transitions(data: dict):
     context = new_context()
     for note in data.get("notes", []):
         text = str(note.get("jianzi") or "").strip()
+        if advance_context_for_bare_rest(context, note, text):
+            continue
         is_standalone_walk = (
             text.startswith(("绰上", "注下"))
             and not parse_string_numbers(text)
@@ -960,6 +995,9 @@ def consecutive_walk_warnings(data: dict, threshold: int = 4) -> list[dict]:
                   or note.get("duration") == "小节线")
         if is_bar:
             continue
+        if advance_context_for_bare_rest(context, note, text):
+            run_length = 0
+            continue
         is_standalone_walk = (
             text.startswith(("绰上", "注下"))
             and not parse_string_numbers(text)
@@ -1010,6 +1048,10 @@ def open_to_stopped_transition_warnings(data: dict) -> list[dict]:
                   or note.get("duration") == "小节线")
         if is_bar:
             # A barline is structural, not an intervening sound.
+            continue
+        if advance_context_for_bare_rest(context, note, text):
+            pending_open_strings = set()
+            pending_open_is_compound = False
             continue
 
         actual, reason = parse_jianzi(text, open_midi, context)
@@ -1086,6 +1128,17 @@ def harmonic_continuity_warnings(data: dict) -> list[dict]:
                   or str(note.get("jianpu") or "").strip() == "|"
                   or note.get("duration") == "小节线")
         if is_bar:
+            continue
+
+        # Match ``audit`` and phrase-boundary replay: a score-level bare
+        # rest terminates a 泛起…泛止 region even when the printed score
+        # omitted an explicit 泛止.  This warning pass previously advanced
+        # only the jianzi parser, which cannot see that an empty row is a
+        # rest; a historical 泛起 could therefore leak across the rest and
+        # manufacture a later same-string harmonic warning.
+        if advance_context_for_bare_rest(context, note, text):
+            pending_harmonic_strings = set()
+            pending_harmonic_is_compound = False
             continue
 
         context_before = dict(context)
@@ -1218,6 +1271,9 @@ def same_finger_reach_warnings(
                   or note.get("duration") == "小节线")
         if is_bar:
             continue
+        if advance_context_for_bare_rest(context, note, text):
+            previous = None
+            continue
 
         actual, reason = parse_jianzi(text, open_midi, context)
         strings = parse_string_numbers(text)
@@ -1311,6 +1367,8 @@ def low_hui_stopped_warnings(data: dict) -> list[dict]:
 
     for note in data.get("notes", []):
         text = str(note.get("jianzi") or "").strip()
+        if advance_context_for_bare_rest(context, note, text):
+            continue
         actual, reason = parse_jianzi(text, open_midi, context)
         strings = parse_string_numbers(text)
         hui = context.get("active_left_hui")
@@ -1543,18 +1601,7 @@ def audit(data: dict, tolerance_cents: float) -> dict:
             pair_errors.extend(pair["absolute_cents"] for pair in pairs)
         counts[row["status"]] += 1
         details.append(row)
-        if "休止" in str(note.get("jianpu", "")) and not note.get("jianzi"):
-            # A bare rest ends the sounding/harmonic state, but it does not
-            # erase where the left hand is currently placed.  The next note
-            # may omit its hui and legitimately inherit that stopped
-            # position.  Clearing active_left_hui here turns ordinary open-
-            # looking shorthand after a rest into a false octave error.
-            context.clear()
-            context.update(new_context())
-            context["active_left_hui"] = context_before_note.get("active_left_hui")
-            context["active_left_string"] = context_before_note.get("active_left_string")
-            context["left_finger"] = context_before_note.get("left_finger")
-            context["left_positions"] = dict(context_before_note.get("left_positions") or {})
+        advance_context_for_bare_rest(context, note, text)
 
     compared = counts["matched"] + counts["mismatched"]
     return {

@@ -16,6 +16,7 @@ DEFAULT_METRICS = ROOT / "ABC_J" / "results" / "agent_metric_baseline.json"
 DEFAULT_DEV = ROOT / "ABC_J" / "results" / "agent_dev_examples.json"
 DEFAULT_REPORT = ROOT / "ABC_J" / "results" / "dataset_split_report.json"
 DEFAULT_SPLIT_MANIFEST = ROOT / "ABC_J" / "results" / "agent_dataset_splits.csv"
+DEFAULT_BLACKLIST = ROOT / "ABC_J" / "results" / "score_blacklist.json"
 TARGETS = {"train": 0.80, "test": 0.20}
 
 
@@ -40,13 +41,34 @@ def main() -> int:
     parser.add_argument("--dev-examples", type=Path, default=DEFAULT_DEV)
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--split-manifest", type=Path, default=DEFAULT_SPLIT_MANIFEST)
+    parser.add_argument(
+        "--blacklist",
+        type=Path,
+        default=DEFAULT_BLACKLIST,
+        help="JSON score blacklist; listed score_key values are excluded before splitting.",
+    )
     parser.add_argument("--seed", type=int, default=20260812)
     parser.add_argument("--force-test-group", action="append", default=[],
                         help="leakage group ID that must remain entirely in test; repeatable")
+    parser.add_argument("--force-train-group", action="append", default=[],
+                        help="leakage group ID that must remain entirely in train; repeatable")
+    parser.add_argument("--single-score-test", action="store_true",
+                        help="allow only leakage groups containing one score in test")
     args = parser.parse_args()
 
     with args.manifest.open(encoding="utf-8-sig", newline="") as handle:
         rows = list(csv.DictReader(handle))
+    blacklist_payload = json.loads(args.blacklist.read_text(encoding="utf-8"))
+    if isinstance(blacklist_payload, dict):
+        blacklist = set(blacklist_payload.get("score_keys", []))
+    elif isinstance(blacklist_payload, list):
+        blacklist = set(blacklist_payload)
+    else:
+        raise ValueError(f"unsupported blacklist format: {args.blacklist}")
+    original_row_count = len(rows)
+    rows = [row for row in rows if row["score_key"] not in blacklist]
+    if not rows:
+        raise ValueError("all manifest rows were excluded by the blacklist")
     metrics = json.loads(args.metrics.read_text(encoding="utf-8"))
     metric_by_key = {item["score_key"]: item for item in metrics["per_score"]}
     dev_groups = {
@@ -54,13 +76,24 @@ def main() -> int:
         for item in json.loads(args.dev_examples.read_text(encoding="utf-8"))["examples"]
     }
     forced_test_groups = set(args.force_test_group)
-    overlap = dev_groups & forced_test_groups
+    forced_train_groups = set(args.force_train_group)
+    overlap = (dev_groups | forced_train_groups) & forced_test_groups
     if overlap:
         raise ValueError(f"groups cannot be forced to both train and test: {sorted(overlap)}")
 
     groups: dict[str, list[dict]] = defaultdict(list)
     for row in rows:
         groups[row["leakage_group_id"]].append(row)
+    if args.single_score_test:
+        invalid_forced = sorted(
+            group_id for group_id in forced_test_groups
+            if len(groups.get(group_id, [])) != 1
+        )
+        if invalid_forced:
+            raise ValueError(
+                "--single-score-test conflicts with multi-score forced test groups: "
+                f"{invalid_forced}"
+            )
 
     features: dict[str, Counter] = {}
     group_weights: dict[str, int] = {}
@@ -101,8 +134,13 @@ def main() -> int:
         split_weight["test"] += group_weights[group_id]
         split_features["test"].update(features[group_id])
 
-    # Development examples are deliberately assigned to train, never test.
-    for group_id in sorted(dev_groups):
+    # Development examples and explicitly curated repertoire are deliberately
+    # assigned to train, never test.
+    for group_id in sorted(dev_groups | forced_train_groups):
+        if group_id not in groups:
+            raise ValueError(f"unknown forced train group: {group_id}")
+        if group_id in assigned:
+            continue
         assigned[group_id] = "train"
         split_groups["train"] += 1
         split_rows["train"] += len(groups[group_id])
@@ -116,7 +154,10 @@ def main() -> int:
     for group_id in ordered:
         best_split = None
         best_cost = None
-        for candidate_split in TARGETS:
+        candidates = TARGETS
+        if args.single_score_test and len(groups[group_id]) != 1:
+            candidates = ("train",)
+        for candidate_split in candidates:
             target = TARGETS[candidate_split]
             # Largest groups are placed first.  Compare how full each split
             # would be relative to its own target capacity; this prevents all
@@ -181,9 +222,14 @@ def main() -> int:
         "seed": args.seed,
         "targets": TARGETS,
         "manifest": str(args.manifest),
+        "blacklist": str(args.blacklist),
+        "excluded_blacklist_score_keys": sorted(blacklist),
+        "excluded_blacklist_score_count": original_row_count - len(rows),
         "split_manifest": str(args.split_manifest),
         "development_groups_forced_to_train": sorted(dev_groups),
+        "groups_forced_to_train": sorted(forced_train_groups),
         "groups_forced_to_test": sorted(forced_test_groups),
+        "single_score_test": args.single_score_test,
         "totals": {"groups": total_groups, "scores": total_rows, "sounding_notes": total_weight},
         "splits": {
             split: {

@@ -43,31 +43,34 @@ def main() -> int:
             cleaned = []
             index = 0
             row_changed = False
+            declared_tools = {
+                str(tool.get("name") or "") for tool in (row.get("tools") or [])
+            }
             while index < len(messages):
                 message = messages[index]
                 calls = message.get("tool_calls") or []
-                null_calls = [
+                invalid_calls = [
                     call for call in calls
-                    if str((call.get("function") or {}).get("name") or "") == "null"
+                    if str((call.get("function") or {}).get("name") or "") not in declared_tools
                 ]
-                if message.get("role") == "assistant" and null_calls:
+                if message.get("role") == "assistant" and invalid_calls:
                     failed_result = (
                         messages[index + 1]
                         if index + 1 < len(messages)
                         else None
                     )
-                    failed_ids = {str(call.get("id")) for call in null_calls}
+                    failed_ids = {str(call.get("id")) for call in invalid_calls}
                     failed_text = str((failed_result or {}).get("content") or "")
                     is_failed_pair = (
                         failed_result is not None
                         and failed_result.get("role") == "tool"
                         and str(failed_result.get("tool_call_id")) in failed_ids
-                        and "unknown tool: null" in failed_text
+                        and "unknown tool:" in failed_text
                     )
                     if is_failed_pair:
                         kept_calls = [
                             call for call in calls
-                            if str((call.get("function") or {}).get("name") or "") != "null"
+                            if str((call.get("function") or {}).get("name") or "") in declared_tools
                         ]
                         if kept_calls:
                             updated = dict(message)
@@ -80,7 +83,7 @@ def main() -> int:
                             updated = dict(message)
                             updated.pop("tool_calls", None)
                             cleaned.append(updated)
-                        removed_calls += len(null_calls)
+                        removed_calls += len(invalid_calls)
                         removed_results += 1
                         row_changed = True
                         index += 2
