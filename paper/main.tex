@@ -1,14 +1,22 @@
 \documentclass[11pt]{article}
-\usepackage[margin=1in]{geometry}
+% ARR / ACL review submission. Change ``review'' to ``final'' only after
+% acceptance and after inserting the camera-ready author information.
+\usepackage[review]{acl}
+\usepackage{times}
+\usepackage{latexsym}
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
-\usepackage{microtype,booktabs,tabularx,amsmath,enumitem,graphicx,xcolor,hyperref}
+\usepackage{microtype}
+\usepackage{inconsolata}
+\usepackage{graphicx}
+\usepackage{booktabs,tabularx,amsmath,enumitem,xcolor}
 \hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
 \newcommand{\system}{\textsc{GuqinAgent}}
 \newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
 \title{\system: Tool-Interactive Performance-Action Planning\\for Jianpu-to-Jianzipu Generation}
+% The ACL review template suppresses this metadata and displays its required
+% anonymous-submission marker. Keep the real author block out of this file.
 \author{Anonymous Authors}
-\date{}
 \begin{document}
 \maketitle
 
@@ -29,20 +37,103 @@ Existing text generation alone does not expose whether a candidate realizes the 
 \item We develop targeted inverse trajectory construction, which replays annotations through the runtime and exports public, redacted supervision.
 \end{enumerate}
 
-\section{Related Work}\label{sec:related}
-\paragraph{Jianzipu digitization.} Recent systems address the visual recognition problem. JZ-Glyph predicts canonical component sequences for individual glyphs under zero-shot splits, while JZ-Tab performs end-to-end structured extraction from full-page mixed-script manuscripts \cite{li2026zeroshotjianzi,li2026jztab}. These systems recover notation from images. We take machine-readable jianpu as input and generate a playable jianzipu realization for a complete score, addressing the downstream performance-planning problem.
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.8\textwidth]{figures/method_0.png}
+  \caption{Overview of \system. \textbf{Top:} at inference time, the agent partitions a complete jianpu score into ordered work units, constructs a pitch-grounded intermediate plan in the Fingering stage, and refines it into final jianzipu in the Guqinizer stage. Both stages interact with the same executable runtime, which returns pitch candidates, plan previews, compact context, and advisory warnings. \textbf{Bottom:} for training, a privileged teacher uses expert annotations only through a private channel while interacting with the public runtime. Redaction retains a student-visible trajectory for supervised fine-tuning, so the deployed student conditions only on score context, its prior actions, and runtime observations.}
+  \label{fig:method}
+\end{figure*}
 
-\paragraph{Tool-using and iterative language models.} ReAct interleaves model reasoning and actions that query an external environment; Toolformer studies learning when and how to invoke APIs; Self-Refine iteratively improves an output using feedback \cite{yao2023react,schick2023toolformer,madaan2023selfrefine}. \system shares the interactive and iterative setting, while grounding feedback in deterministic, domain-specific operations over pitch, tuning, event alignment, and inherited notation state. Its phrase partitioning and two-stage Fingering-to-Guqinizer workflow are designed for whole-score tablature generation.
+\input{related_work}
 
 \section{Methodology}
-\subsection{Task Formulation and Benchmark}\label{sec:formulation}
-Each input is a complete score $x=(m,e_{1:N})$: metadata $m$ includes mode and tuning, while $e_{1:N}$ are all jianpu events in the score. Every event has a stable \emph{event index}, source notation, duration, structural type, and target pitch when defined. The output is one full-score plan $y=(y_1,\ldots,y_N)$ where $y_i$ is jianzipu text or an explicit empty display value. Empty display values are not deletion commands; they can mean that a compound gesture or continuation covers a later event. ABC notation may be derived internally for pitch processing, but it is not a separate task input.
+\subsection{Constrained Generation with an Executable Runtime}\label{sec:formulation}
+Given a complete jianpu score $x=(m,e_{1:N})$, the task is to construct an event-indexed jianzipu plan $y=(y_1,\ldots,y_N)$. The metadata $m$ specifies the mode and tuning; each event $e_i$ has a stable index, notated duration, structural type, and a target pitch $q_i$ when defined. An output entry $y_i$ is either a jianzipu expression or an explicit empty display value. The latter may indicate continuation or coverage by a compound gesture and does not remove the event from the score. ABC notation is used only as an internal representation for pitch processing, not as an additional input.
 
-The task is stateful. Let $S_i=\mathcal{T}(S_{i-1},y_i)$ be the deterministic notation-state transition. A plan must satisfy runtime invariants and is evaluated against an expert plan at structured-event level. We score pitch only where it is reliably resolvable, never treating unresolved notation as either correct or incorrect.
+Unlike independent token prediction, the interpretation of $y_i$ depends on preceding actions. We represent this dependence by a deterministic notation-state transition,
+\begin{equation}
+    s_i=\mathcal{T}(s_{i-1},y_i;m),\qquad s_0=s_{\mathrm{init}}(m),
+    \label{eq:notation-state}
+\end{equation}
+where $s_i$ records such properties as harmonic-region status, inherited left-hand position, walking gestures, and compound-action coverage. Given this state, the realized pitch $\hat q_i=\mathcal{P}(y_i,s_{i-1};m)$ is a partial function: some compound or ambiguous expressions do not admit a reliable pitch estimate. Structural consistency and pitch agreement are therefore distinct from the broader question of musical suitability.
 
-\subsection{Whole-Score Phrase Planning}
-Directly editing an entire score in one context is impractical and obscures local musical decisions. \system therefore derives an ordered partition $\mathcal{P}(x)=(p_1,\ldots,p_K)$ from the full score, using musical boundaries and bounded event ranges. For each $p_k$, the agent receives the current editable slice together with the state inherited from completed earlier slices. It may retrieve selected earlier slices when needed, then commits edits before the runtime advances the full-score state. Thus phrases are algorithmic work units that make whole-score generation tractable; they are neither independent benchmark examples nor externally supplied inputs.
+\paragraph{Interactive plan editing.}
+The complete score is partitioned into an ordered sequence of bounded, musically aligned work units $\mathcal{B}(x)=(p_1,\ldots,p_K)$. This partition is computed from the input score; the benchmark examples remain complete scores. The agent edits one shared plan rather than generating independent phrases. At interaction step $t$ within $p_k$, its public history consists of the score, current work unit, editable plan, replayed notation state, and previous tool observations:
+\begin{equation}
+    \begin{aligned}
+        h_t&=(x,p_k,y^{(t)},s^{(t)},o_{<t}),\\
+        a_t&\sim\pi_\theta(\cdot\mid h_t,r),
+    \end{aligned}
+    \label{eq:policy}
+\end{equation}
+where $r$ denotes the current planning stage and $s^{(t)}$ is obtained by replaying the current plan. The executable runtime $\mathcal{R}$ processes an action and returns the resulting plan, state, and tool observation:
+\begin{equation}
+    (y^{(t+1)},s^{(t+1)},o_t)
+    =\mathcal{R}(x,y^{(t)},s^{(t)},a_t).
+    \label{eq:runtime}
+\end{equation}
+Read-only actions leave the plan unchanged. The runtime used to construct training trajectories is also used at inference time.
 
+The agent can request tuning-aware string--hui realizations through \texttt{get\_pitch\_candidates}, including open strings, stopped notes, harmonics, and supported inherited or compound gestures. Returned candidates distinguish exact, approximate, and unavailable matches. The only plan-writing operation is \texttt{edit\_plan(jianzi\_rows)}, which applies event-indexed updates and replays the resulting notation state. Compact context retrieval through \texttt{list\_context} and targeted earlier-phrase lookup provides prior material without reproducing the entire score in every interaction.
+
+\paragraph{Conservative constraint feedback.}
+We distinguish runtime-checkable violations from cases whose interpretation is uncertain. For a rule $c$ and event $i$, let $v_c(i;x,y,s)\in\{0,1,\bot\}$ denote no detected violation, a detected violation, or an indeterminate check, respectively. The warning set is
+\begin{equation}
+    W(x,y)=\{(i,c):v_c(i;x,y,s)=1\},
+    \label{eq:warnings}
+\end{equation}
+with $s$ obtained by replaying $y$. In the implementation, checks cover reliably parsed pitch mismatches and conservative diagnostics for harmonic-state continuity, walk direction or span, interrupted open-string resonance, paired stroke adjacency, and difficult left-hand reaches. Indeterminate cases are not converted into violations. Warnings accompany the relevant \texttt{edit\_plan} preview but neither rewrite the plan nor imply that an unflagged output is musically correct. The agent may query candidates, revise the affected entries, or retain its choice; identical repeated edits are stopped to prevent unproductive loops.
+
+\subsection{Two-Stage Performance-Action Planning}\label{sec:two-stage}
+The same notation event jointly specifies how a pitch is produced and how it is articulated. We separate these decisions into two successive planning stages. \emph{Fingering} first constructs a basic pitch-grounded realization, choosing strings, hui positions, left-hand contact, and elementary right-hand strokes. \emph{Guqinizer} then revises the committed plan for idiomatic execution, including ornaments, walking gestures, harmonic transitions, and compound-action notation. The second stage may preserve or revise earlier decisions; it is not a post-processing formatter.
+
+For work unit $p_k$, let $y^{(k-1)}$ be the shared plan after completing the preceding units. A bounded runtime rollout under each stage gives
+\begin{equation}
+\begin{aligned}
+    y^{F,(k)}&=\operatorname{Rollout}_{F}(x,p_k,y^{(k-1)};\mathcal{R}),\\
+    y^{(k)}&=\operatorname{Rollout}_{G}(x,p_k,y^{F,(k)};\mathcal{R}),
+\end{aligned}
+\label{eq:stage-composition}
+\end{equation}
+where each rollout consists of stage-conditioned tool interactions of the form in Eq.~\eqref{eq:runtime}. Only edits committed through the runtime enter the shared plan. Crucially, the state passed to $p_{k+1}$ is replayed from $y^{(k)}$, including any earlier mistakes, rather than substituted from an expert reference. Both stages retain access to pitch candidates and runtime feedback. Warnings can trigger another revision but are not hard acceptance criteria; execution remains subject to the configured interaction budget.
+
+This decomposition imposes a procedural bias: establish a basic sound-producing realization before making the more context-dependent choices involved in idiomatic execution. It does not assume a unique separation between fingering and ornamentation, nor does it guarantee that the second stage preserves every correct decision. We evaluate both the benefits and regressions introduced by refinement against a single-stage agent using the same public tools.
+
+\subsection{Expert-Guided Inverse Trajectory Learning}\label{sec:inverse}
+Expert jianzipu annotations specify desired performance actions but generally not the tool interactions by which an agent could arrive at them. Directly supervising final notation therefore leaves the interaction policy unspecified. We instead construct trajectories by allowing an offline teacher to work backward from the annotated target while acting through the same executable runtime available to the student.
+
+Let $z$ be a phrase-level expert annotation and $\mathcal{K}(z)$ the technique-relevant descriptions retrieved from a curated knowledge base. Both are private to the teacher. Its rollout is conditioned on the input, private guidance, and public runtime:
+\begin{equation}
+    \tau^T\sim\operatorname{Rollout}
+      \bigl(\pi_T\mid x,z,\mathcal{K}(z);\mathcal{R}\bigr),
+    \label{eq:teacher}
+\end{equation}
+where $\tau^T$ records the chronological sequence of tool actions, returned observations, and accepted plan updates. The reference guides the search for an executable realization but does not constitute a tool response. The teacher constructs stage-specific traces: basic fingering first, followed by idiomatic refinement. Semantic descriptions clarify technique constraints that may be implicit in compact jianzipu symbols; they are not added to the student's inference context.
+
+\paragraph{Validation and public-prefix reconstruction.}
+Candidate examples are screened for reference parsing and consistency before construction, and generated traces are checked against the runtime. Training examples are obtained by removing private expert content and retaining the public interaction sequence,
+\begin{equation}
+    \begin{aligned}
+        \tilde\tau&=g_{\mathrm{pub}}(\tau^T),\\
+        \mathcal{D}&=\{\tilde\tau:\tau^T\text{ passes validation}\}.
+    \end{aligned}
+    \label{eq:public-trajectory}
+\end{equation}
+The intended information boundary is temporal as well as structural: at each supervised action, the conditioning context should contain only the input, earlier public actions, and observations already returned by the runtime. Removing private fields alone cannot establish this property if rewritten reasoning anticipates future observations or reproduces unseen annotation details. Public-prefix consistency must therefore be checked separately from runtime execution validity; the precise checks and filtering counts belong in the experimental protocol.
+
+\paragraph{Student supervision.}
+We fit a stage-conditioned student policy to the assistant-side actions and messages in the retained public trajectories. For a supervised token position $u$, let $h_u^{\mathrm{pub}}$ contain the preceding student-visible context and let $w_u$ be its target token. The training loss is standard masked cross-entropy,
+\begin{equation}
+    \mathcal{L}_{\mathrm{SFT}}(\theta)
+    =-\sum_{\tilde\tau\in\mathcal{D}}
+      \sum_{u\in\mathcal{Y}(\tilde\tau)}
+      \log p_\theta(w_u\mid h_u^{\mathrm{pub}}),
+    \label{eq:sft}
+\end{equation}
+where $\mathcal{Y}(\tilde\tau)$ indexes supervised assistant tokens; tool outputs form context but are not prediction targets. At deployment, neither expert annotations nor private semantic guidance are provided. The resulting student must recover its actions from the input score, its own previous edits, and the executable feedback it has observed.
+
+\section{Experimental Setup}
+\subsection{Benchmark and Data Protocol}
 \begin{table}[t]
 \centering\small
 \begin{tabularx}{\linewidth}{@{}lX@{}}
@@ -57,92 +148,17 @@ Reference & Expert annotation, private to the offline teacher and evaluation pip
 \end{tabularx}
 \caption{Benchmark representation. The student policy never receives the reference plan.}
 \end{table}
-
 The benchmark uses score-level splits. A high-confidence test subset retains scores with reference pitch-match rate strictly above $70\%$ under the current 50-cent auditor, calculated over parseable reference events only. The current test inventory has 44 scores; 39 meet this condition. The other scores remain available for diagnostic analysis rather than being silently treated as clean gold pitch labels.
 
-\subsection{Executable Runtime}
-The same runtime is used for teacher generation and inference. This avoids a train--test mismatch where a model learns parser artifacts unavailable at deployment.
-
-Formally, generation is a stateful, tool-interactive process. At interaction step $t$, the agent conditions on the score, the current work unit, the editable plan, the inherited notation state, and previous runtime observations:
-\begin{equation}
-h_t = \bigl(x,\, p_k,\, y^{(t)},\, S^{(t)},\, o_{<t}\bigr),
-\qquad
-a_t \sim \pi_\theta(\cdot \mid h_t),
-\label{eq:policy}
-\end{equation}
-where $y^{(t)}$ and $S^{(t)}$ denote the full editable plan and its replayed notation state after step $t$, so that event-level notation and state remain $y_i$ and $S_i$ as defined in Section~\ref{sec:formulation}. The runtime executes each action deterministically and returns the updated plan, notation state, and an observable feedback signal:
-\begin{equation}
-\bigl(y^{(t+1)},\, S^{(t+1)},\, o_t\bigr)
-= \mathcal{R}\bigl(x,\, y^{(t)},\, S^{(t)},\, a_t\bigr),
-\label{eq:runtime}
-\end{equation}
-where $o_t$ may contain pitch candidates, plan previews, notation-state information, or conservative warnings. The policy observes the world only through this channel, so all deliberation remains grounded in executable feedback rather than in private annotation.
-
-\paragraph{Pitch candidates.} \texttt{get\_pitch\_candidates} accepts one or more event indices, groups equal target MIDI values, and returns candidate string--hui realizations. It uses normalized score tuning rather than assuming standard tuning, and represents open strings, stopped tones, harmonics, inherited positions, and supported compound gestures. Candidates carry exact, approximate, or unavailable confidence labels.
-
-\paragraph{Stateful editing.} The only editing action is \texttt{edit\_plan(jianzi\_rows)}, an event-indexed batch update. The runtime replays notation state and returns a compact preview. High-confidence pitch contradictions are warnings, not automatic rewrites: some advanced gestures cannot be resolved from text alone. Replay state includes tuning, harmonic region entry and termination, inherited left-hand position, walking gestures, and compound-action coverage.
-
-\paragraph{Warning-guided inference.} Each \texttt{edit\_plan} preview exposes warnings directly beside the affected event. The warning layer includes reliably parsed pitch mismatches, potentially stale harmonic-region state, implausible walk spans or directions, an open-string resonance immediately stopped on the same string, non-adjacent paired \emph{bo}/\emph{po} strokes, excessive same-finger reaches, and mechanically cramped low-hui stopped notes. These checks are deliberately conservative: ambiguous or compound notation is skipped rather than guessed. A warning revealed by an edit is carried into a later agent turn, where the agent can query pitch candidates and either submit a genuinely changed repair or retain the notation with a reason. Thus warnings guide deliberation without turning a partial parser into an automatic musical authority; repeated identical edits are stopped to avoid correction loops.
-
-\paragraph{Context retrieval.} \texttt{list\_context} returns a compact section-grouped phrase index; targeted retrieval supplies only the relevant prior phrase. This prevents a full-score directory from consuming the model's context window.
-
-\subsection{Two-Stage Guqin Agent}
-\paragraph{Fingering stage.} For each derived work unit, Fingering edits the corresponding blank portion of the full-score plan into a pitch-grounded basic realization: string, hui, left-hand contact, and elementary right-hand stroke. It may batch-query pitch candidates and fills relevant events without gratuitous final-stage ornamentation.
-
-\paragraph{Guqinizer stage.} Guqinizer receives the accepted Fingering plan, not a blank string. It may preserve correct material or revise it with ornaments, walking gestures, harmonic notation, compound actions, and display compression. It has access to the same candidate tool and current-plan audit, so every revision remains inspectable.
-
-This decomposition is an inductive bias, not a claim that basic and idiomatic notation have a unique boundary. We compare it with a single-stage policy that edits a blank plan directly to final notation under the same public tools.
-
-\subsection{Expert Artifact-Guided Inverse Trajectory Construction}
-
-Many specialized domains provide high-quality expert artifacts, such as scores, designs, protocols, or structured records. However, these artifacts typically describe the desired outcome rather than the interactive procedures required to obtain it. This creates a fundamental challenge for domain-specific agent training: how to transform expert artifacts into executable trajectories without using the artifacts as direct answer supervision.
-
-We formulate trajectory construction as expert-guided inverse execution. Let $z$ denote private expert-artifact guidance and $\mathcal{K}$ the retrieved private domain knowledge; both reach the teacher through a channel inaccessible to the student. The teacher produces an executable trajectory through the same public runtime $\mathcal{R}$ available at deployment:
-\begin{equation}
-\tau^{T} \sim \pi_T(\cdot \mid x,\, z,\, \mathcal{K},\, \mathcal{R}),
-\label{eq:teacher}
-\end{equation}
-where $\pi_T$ must discover a valid sequence of tool interactions and plan edits leading to an executable solution, using the expert artifact as semantic guidance for exploring valid execution paths rather than mechanically copying it. The student-visible trajectory is then obtained by removing private-source information:
-\begin{equation}
-\tilde{\tau} = g_{\mathrm{redact}}\bigl(\tau^{T}\bigr),
-\label{eq:redact}
-\end{equation}
-such that every conditioning signal retained in $\tilde{\tau}$---score context, public actions, tool outputs, and public reasoning---is available to the student policy at deployment time.
-
-In our guqin setting, the private guidance contains phrase-level reference Jianzipu annotations. The teacher operates on the student-visible score context, invokes public tools, and updates an editable performance plan through executable interactions. All tool calls, tool responses, and validated intermediate or final plans are recorded from the runtime rather than generated as free-form text. Stage~1 focuses on constructing a playable basic fingering plan with correct pitch realization and notation, while Stage~2 performs idiomatic refinement by incorporating transitions, ornaments, and domain-specific performance conventions.
-
-\paragraph{Domain semantic augmentation.}
-Expert artifacts often contain compact symbols whose meanings cannot be fully recovered from surface forms alone. To bridge this gap, we maintain a curated domain knowledge base describing complex guqin techniques and their execution semantics. During trajectory generation, technique-relevant descriptions are retrieved according to symbols appearing in the current artifact and provided as private semantic guidance to the teacher. This knowledge explains the meaning and constraints of domain symbols rather than directly specifying target actions, allowing the teacher to reason about executable alternatives while avoiding direct answer imitation.
-
-\paragraph{Trajectory validation and leakage control.}
-Before trajectory construction, unreliable artifact segments are removed based on parsing quality and consistency checks. After generation, the resulting trajectories are validated through the execution runtime. Private teacher reasoning is transformed into public reasoning grounded only in observable score context, previous public messages, and tool outputs. The exported SFT data exclude private-reference fields and preserve only interactions accessible to the student agent during inference.
-
-The resulting procedure can be summarized as follows:
-\begin{enumerate}[leftmargin=1.5em]
-    \item Initialize a stage-specific editable plan from the current domain state.
-    \item Provide the teacher with observable context and private expert-artifact guidance.
-    \item Execute bounded public tool interactions and iteratively update the executable plan.
-    \item Validate the final trajectory, remove private-source information, and export the student-visible training example.
-\end{enumerate}
-
-Given the resulting public trajectory dataset $\mathcal{D}$, we train the student with standard supervised fine-tuning:
-\begin{equation}
-\mathcal{L}_{\mathrm{SFT}}(\theta)
-= -\sum_{\tilde{\tau}\in\mathcal{D}} \sum_{u\in\mathcal{Y}(\tilde{\tau})}
-\log p_\theta\bigl(u \mid h_u^{\mathrm{pub}}\bigr),
-\label{eq:sft}
-\end{equation}
-where $\mathcal{Y}(\tilde{\tau})$ denotes the supervised assistant tokens and $h_u^{\mathrm{pub}}$ contains only student-visible context. The teacher conditions on $z$ and $\mathcal{K}$ when constructing $\tau^{T}$, but the training context $h_u^{\mathrm{pub}}$ never contains them; this is the formal statement of reference-leakage control.
-
-\section{Experimental Setup}
 \subsection{Evaluation Metrics}
-We parse predictions and references into unified events containing source and event IDs, target pitch, string, left-hand position and finger, right-hand technique, tone type, ornaments, and necessary state. We do not use BLEU, ROUGE, or direct final-string equality as primary metrics. Let $\hat{q}_i$ and $q_i^{\mathrm{ref}}$ denote the pitches realized by the prediction and the reference at event $i$, let $d_c(\cdot,\cdot)$ measure their distance in cents, and let $\mathcal{I}_{\mathrm{pitch}}=\{i:\hat{q}_i \text{ and } q_i^{\mathrm{ref}} \text{ are both resolvable}\}$ be the jointly resolvable set. Our primary pitch metrics are
+We parse predictions and references into unified events containing source and event IDs, target pitch, string, left-hand position and finger, right-hand technique, tone type, ornaments, and necessary state. We do not use BLEU, ROUGE, or direct final-string equality as primary metrics. Let $\hat{q}_i$ and $q_i^{\mathrm{ref}}$ denote the pitches realized by the prediction and the reference at event $i$, let $\delta_i=d_c(\hat{q}_i,q_i^{\mathrm{ref}})$ measure their distance in cents, and let $\mathcal{I}_{\mathrm{pitch}}=\{i:\hat{q}_i \text{ and } q_i^{\mathrm{ref}} \text{ are both resolvable}\}$ be the jointly resolvable set. Our primary pitch metrics are
 \begin{equation}
+\begin{aligned}
 \mathrm{PitchAcc}_{50}
-= \frac{1}{|\mathcal{I}_{\mathrm{pitch}}|}\sum_{i\in\mathcal{I}_{\mathrm{pitch}}} \mathbf{1}\bigl[\, d_c(\hat{q}_i,\, q_i^{\mathrm{ref}}) \le 50 \,\bigr],
-\qquad
+&= \frac{1}{|\mathcal{I}_{\mathrm{pitch}}|}\sum_{i\in\mathcal{I}_{\mathrm{pitch}}} \mathbf{1}[\delta_i \le 50],\\
 \mathrm{PitchMAE}
-= \frac{1}{|\mathcal{I}_{\mathrm{pitch}}|}\sum_{i\in\mathcal{I}_{\mathrm{pitch}}} d_c(\hat{q}_i,\, q_i^{\mathrm{ref}}).
+&= \frac{1}{|\mathcal{I}_{\mathrm{pitch}}|}\sum_{i\in\mathcal{I}_{\mathrm{pitch}}} \delta_i.
+\end{aligned}
 \label{eq:pitch-metrics}
 \end{equation}
 Unresolved events are excluded from the denominator rather than counted as errors, and $|\mathcal{I}_{\mathrm{pitch}}|$ is reported alongside every pitch number. Beyond pitch, we report string accuracy; left- and right-hand fingering precision, recall, and F1; ornament precision, recall, and F1; deterministic rule-violation rate; and technique-usage statistics to expose collapsed or overused techniques. Each violation is stored with an event ID, relevant state, and explanation. Rules that cannot yet be determined reliably are excluded from automatic scoring and listed as expert-review TODOs.
@@ -193,6 +209,5 @@ We will release the trained model, redacted training trajectories, the test benc
 \section{Conclusion}
 \system frames jianzipu generation as executable, stateful plan editing. Its benchmark makes score events, tuning, and notation state explicit; its two-stage architecture separates basic realization from idiomatic refinement; and its inverse trajectories create auditable public tool-use supervision from private annotations. Together, these components enable evaluation beyond text overlap and establish a practical basis for musically grounded notation agents.
 
-\bibliographystyle{plain}
 \bibliography{references}
 \end{document}
