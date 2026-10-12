@@ -1,46 +1,679 @@
 {
-  "schema_version": "split-inventories-1.0",
-  "sources": {
-    "groups_csv": "D:\\sitongli\\sitongli-guanshanyue\\ABC_J\\results\\dataset_split_groups.csv",
-    "splits_csv": "D:\\sitongli\\sitongli-guanshanyue\\ABC_J\\results\\agent_dataset_splits.csv",
-    "metrics_csv": "D:\\sitongli\\sitongli-guanshanyue\\ABC_J\\results\\agent_metric_baseline.csv",
-    "phrases": "D:\\sitongli\\sitongli-guanshanyue\\ABC_J\\agent_training\\inferred_v3"
-  },
-  "counts": {
-    "scores_total": 241,
-    "scores_by_split": {
-      "train": 176,
-      "validation": 21,
-      "test": 44
-    },
-    "phrases_by_split": {
-      "train": 3410,
-      "validation": 489,
-      "test": 1003
-    },
-    "pitch_pass_over_40": 223,
-    "pitch_fail_over_40": 18
-  },
-  "pitch_pass_by_split": {
+  "schema_version": "test50-incremental-rebuild-1.0",
+  "seed": 20261012,
+  "selection": "22 retained singleton groups + 25 two-version groups + 3 seeded three-version groups; one test version per work",
+  "representative_policy": "highest captured annotation pitch_match_rate, then notes_length, then score_key; no model-performance selection",
+  "splits": {
     "train": {
-      "pass": 163,
-      "total": 176
-    },
-    "validation": {
-      "pass": 19,
-      "total": 21
+      "scores": 158,
+      "source_phrases": 4969,
+      "selected_phrases": 3995
     },
     "test": {
-      "pass": 41,
-      "total": 44
+      "scores": 50,
+      "phrases": 999,
+      "selection_applied": false
+    },
+    "excluded_test_alternate": {
+      "scores": 31,
+      "phrases": 689
     }
   },
-  "pitch_rate_range": {
-    "min": 0.0,
-    "max": 1.0
+  "reused_training_phrases": 3995,
+  "removed_training_phrases": 1152,
+  "new_training_phrases": 0,
+  "changed_retained_inputs": 0,
+  "teacher_generation_required": 0,
+  "three_version_additions": [
+    {
+      "group": "LG0032",
+      "score_key": "SBFpPuMq",
+      "title": "良宵引",
+      "version_count": 3,
+      "excluded_versions": [
+        "S9j70QqA",
+        "SqMgYYGH"
+      ]
+    },
+    {
+      "group": "LG0050",
+      "score_key": "Sc9dDref",
+      "title": "阳春",
+      "version_count": 3,
+      "excluded_versions": [
+        "SH8hkkfN",
+        "Sr2iNtgY"
+      ]
+    },
+    {
+      "group": "LG0085",
+      "score_key": "SrbyFUb1",
+      "title": "秋鸿",
+      "version_count": 3,
+      "excluded_versions": [
+        "SaljUbT2",
+        "SddZqhN8"
+      ]
+    }
+  ],
+  "test_scores": [
+    {
+      "group": "LG0004",
+      "score_key": "S35eJqgV",
+      "title": "梅花三弄",
+      "version_count": 2,
+      "excluded_versions": [
+        "S0tu8BXC"
+      ]
+    },
+    {
+      "group": "LG0005",
+      "score_key": "S1tbvmY3",
+      "title": "遁世操",
+      "version_count": 2,
+      "excluded_versions": [
+        "SbgkbNBF"
+      ]
+    },
+    {
+      "group": "LG0006",
+      "score_key": "S1zt293d",
+      "title": "凤求凰",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0019",
+      "score_key": "S5C2nqTc",
+      "title": "隐德",
+      "version_count": 2,
+      "excluded_versions": [
+        "Sru5SUZq"
+      ]
+    },
+    {
+      "group": "LG0022",
+      "score_key": "S6Heech0",
+      "title": "韦编三绝",
+      "version_count": 2,
+      "excluded_versions": [
+        "SmgJYQmw"
+      ]
+    },
+    {
+      "group": "LG0024",
+      "score_key": "S6gnp9GP",
+      "title": "岐山操",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0025",
+      "score_key": "SUArIqAg",
+      "title": "大雅",
+      "version_count": 2,
+      "excluded_versions": [
+        "S74NcKEx"
+      ]
+    },
+    {
+      "group": "LG0028",
+      "score_key": "SQYzHeTq",
+      "title": "碧涧流泉",
+      "version_count": 2,
+      "excluded_versions": [
+        "S8Tq46CE"
+      ]
+    },
+    {
+      "group": "LG0031",
+      "score_key": "S9JJeSp7",
+      "title": "神人畅",
+      "version_count": 2,
+      "excluded_versions": [
+        "STN1D392"
+      ]
+    },
+    {
+      "group": "LG0032",
+      "score_key": "SBFpPuMq",
+      "title": "良宵引",
+      "version_count": 3,
+      "excluded_versions": [
+        "S9j70QqA",
+        "SqMgYYGH"
+      ]
+    },
+    {
+      "group": "LG0036",
+      "score_key": "SB4hDksv",
+      "title": "水调歌头",
+      "version_count": 2,
+      "excluded_versions": [
+        "SzEutqKF"
+      ]
+    },
+    {
+      "group": "LG0038",
+      "score_key": "SkvmkgjX",
+      "title": "秋风词",
+      "version_count": 2,
+      "excluded_versions": [
+        "SBGKZ4xR"
+      ]
+    },
+    {
+      "group": "LG0040",
+      "score_key": "SCUbgHhK",
+      "title": "大风唱",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0042",
+      "score_key": "SCwngKTr",
+      "title": "黄云秋塞",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0044",
+      "score_key": "SDecjzc3",
+      "title": "玄默",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0046",
+      "score_key": "SEhKToLa",
+      "title": "高山流水",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0050",
+      "score_key": "Sc9dDref",
+      "title": "阳春",
+      "version_count": 3,
+      "excluded_versions": [
+        "SH8hkkfN",
+        "Sr2iNtgY"
+      ]
+    },
+    {
+      "group": "LG0051",
+      "score_key": "SvoChViX",
+      "title": "听泉引",
+      "version_count": 2,
+      "excluded_versions": [
+        "SHNqkmfR"
+      ]
+    },
+    {
+      "group": "LG0055",
+      "score_key": "SJfq7AeP",
+      "title": "神化引",
+      "version_count": 2,
+      "excluded_versions": [
+        "SxUPcN1Q"
+      ]
+    },
+    {
+      "group": "LG0056",
+      "score_key": "SKIU1Qgw",
+      "title": "长清",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0064",
+      "score_key": "SXMzVw42",
+      "title": "水龙吟",
+      "version_count": 2,
+      "excluded_versions": [
+        "SNvDNk6b"
+      ]
+    },
+    {
+      "group": "LG0065",
+      "score_key": "SQ53VHng",
+      "title": "泽畔吟",
+      "version_count": 2,
+      "excluded_versions": [
+        "SaSyfMWH"
+      ]
+    },
+    {
+      "group": "LG0067",
+      "score_key": "SQkmMebz",
+      "title": "神品古商意",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0068",
+      "score_key": "SQnvresu",
+      "title": "短侧",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0072",
+      "score_key": "SRa07eQk",
+      "title": "秋江夜泊",
+      "version_count": 2,
+      "excluded_versions": [
+        "STAYLh5P"
+      ]
+    },
+    {
+      "group": "LG0073",
+      "score_key": "SwCGgMsJ",
+      "title": "搔首问天",
+      "version_count": 2,
+      "excluded_versions": [
+        "SRhXSleW"
+      ]
+    },
+    {
+      "group": "LG0076",
+      "score_key": "STcGty0f",
+      "title": "文王操",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0077",
+      "score_key": "STe3AARv",
+      "title": "汉宫秋月",
+      "version_count": 2,
+      "excluded_versions": [
+        "SpiUELEp"
+      ]
+    },
+    {
+      "group": "LG0078",
+      "score_key": "SofmzCXT",
+      "title": "秋月照茅亭",
+      "version_count": 2,
+      "excluded_versions": [
+        "SU8cA0Cl"
+      ]
+    },
+    {
+      "group": "LG0080",
+      "score_key": "SWk1GWt2",
+      "title": "广寒游",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0081",
+      "score_key": "SncH0ay9",
+      "title": "高山",
+      "version_count": 2,
+      "excluded_versions": [
+        "SXv5nCde"
+      ]
+    },
+    {
+      "group": "LG0082",
+      "score_key": "SelC5zWR",
+      "title": "龟山操",
+      "version_count": 2,
+      "excluded_versions": [
+        "SYz9UOXW"
+      ]
+    },
+    {
+      "group": "LG0084",
+      "score_key": "StGZ8Zbt",
+      "title": "石上流泉",
+      "version_count": 2,
+      "excluded_versions": [
+        "SaDRc7nJ"
+      ]
+    },
+    {
+      "group": "LG0085",
+      "score_key": "SrbyFUb1",
+      "title": "秋鸿",
+      "version_count": 3,
+      "excluded_versions": [
+        "SaljUbT2",
+        "SddZqhN8"
+      ]
+    },
+    {
+      "group": "LG0086",
+      "score_key": "ScGgTmDm",
+      "title": "圯桥进履",
+      "version_count": 2,
+      "excluded_versions": [
+        "SlXTUkVF"
+      ]
+    },
+    {
+      "group": "LG0087",
+      "score_key": "SdOedBkd",
+      "title": "获麟",
+      "version_count": 2,
+      "excluded_versions": [
+        "SpwPjVka"
+      ]
+    },
+    {
+      "group": "LG0089",
+      "score_key": "SeBx4Lvv",
+      "title": "神品羽意",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0090",
+      "score_key": "SeWok3pZ",
+      "title": "神品凄凉意",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0091",
+      "score_key": "Sx4mbdGp",
+      "title": "湘妃怨",
+      "version_count": 2,
+      "excluded_versions": [
+        "SekYym8W"
+      ]
+    },
+    {
+      "group": "LG0092",
+      "score_key": "SeuXWX4b",
+      "title": "桃源春晓",
+      "version_count": 2,
+      "excluded_versions": [
+        "SzyUVJiY"
+      ]
+    },
+    {
+      "group": "LG0093",
+      "score_key": "SfRWCtNp",
+      "title": "神游六合",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0094",
+      "score_key": "SgKMecQx",
+      "title": "佩兰",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0097",
+      "score_key": "ShaYBRwI",
+      "title": "雉朝飞",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0098",
+      "score_key": "SjLqLX8p",
+      "title": "广寒秋",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0099",
+      "score_key": "SkgRafvU",
+      "title": "耕歌",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0100",
+      "score_key": "SnJxH8DC",
+      "title": "白头吟",
+      "version_count": 2,
+      "excluded_versions": [
+        "Sw4S16SU"
+      ]
+    },
+    {
+      "group": "LG0101",
+      "score_key": "SurzVQ02",
+      "title": "碣石调幽兰",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0102",
+      "score_key": "SxC3qbtd",
+      "title": "泛沧浪",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0103",
+      "score_key": "SxhX3fgD",
+      "title": "平沙落雁",
+      "version_count": 1,
+      "excluded_versions": []
+    },
+    {
+      "group": "LG0104",
+      "score_key": "SzV4KbB5",
+      "title": "古怨",
+      "version_count": 1,
+      "excluded_versions": []
+    }
+  ],
+  "train_score_keys": [
+    "S074gS1m",
+    "S0FKGjFt",
+    "S26yxv5q",
+    "S28ZUHcn",
+    "S2M83aBA",
+    "S2T7rDyJ",
+    "S34JRKE9",
+    "S3CDXQNy",
+    "S3JNAahW",
+    "S3JzYyec",
+    "S3gMUKsg",
+    "S3rVwfH0",
+    "S45fs5uq",
+    "S4kEDQeh",
+    "S4nhaTGN",
+    "S5MuzPqP",
+    "S5xDN56V",
+    "S6Vgo65y",
+    "S7QRcTrz",
+    "S7mY2frJ",
+    "S86m75aK",
+    "S8JNFGxm",
+    "S8Y5kmNg",
+    "S9GH7RvP",
+    "S9e4grhB",
+    "S9x6xrBV",
+    "SAZ9S3Na",
+    "SApzZmDj",
+    "SAyqwdky",
+    "SBAwX43Q",
+    "SBEG4da1",
+    "SBapp9z5",
+    "SCH7FWX4",
+    "SCaWsdJu",
+    "SCph53tK",
+    "SDcE3Geq",
+    "SE3EZqHu",
+    "SENHjZvp",
+    "SFd9d5qs",
+    "SFzXxqnV",
+    "SGWkdhrD",
+    "SGaq8Sne",
+    "SGj2AXUk",
+    "SHB5Sqwm",
+    "SHdc8A58",
+    "SHwDrsUY",
+    "SHwdQW3Y",
+    "SJAqz3h5",
+    "SJz27Rve",
+    "SK7bMnBG",
+    "SKeACLJ2",
+    "SLv8raGb",
+    "SM6TcwyQ",
+    "SMEq1nGR",
+    "SMcjde29",
+    "SMcokJse",
+    "SMd3xqs5",
+    "SN7RK3c4",
+    "SNIXD9TH",
+    "SNVqKaVy",
+    "SNeUHfdb",
+    "SNt85j0u",
+    "SP9stwgk",
+    "SPHtJJ6X",
+    "SPtSPxwY",
+    "SQ6h5eUe",
+    "SQAVtRQT",
+    "SQAf6j3a",
+    "SQkwA84h",
+    "SQr0aW3S",
+    "SQxXbCZ5",
+    "SQzJKZZ8",
+    "SS94Hxr1",
+    "SSG4KZXS",
+    "SSGNQthN",
+    "ST65Msa6",
+    "STGsvZsA",
+    "STTPh4nr",
+    "STYDv7xh",
+    "STyg7J1U",
+    "SUBN04j6",
+    "SVGgjsQ3",
+    "SVHDVp22",
+    "SWCrPd2w",
+    "SWkES6xH",
+    "SXBbuM3G",
+    "SYcUPLQn",
+    "SYfRQ9Ao",
+    "SYtMbNNQ",
+    "SZ7pMCs3",
+    "SZZkpAAL",
+    "SZh5gUkP",
+    "SZkHNtAN",
+    "SaBzwJPS",
+    "SaN3X9UQ",
+    "SbEnRCX9",
+    "Sbdk4C1S",
+    "Sc5NDDba",
+    "ScPh6PVu",
+    "SdFTA7u3",
+    "SdWxvYR8",
+    "SeXEtqce",
+    "SerUpdP4",
+    "Sf3uDRcQ",
+    "SfKaJPU6",
+    "SfR5DDMK",
+    "SfXYSY5p",
+    "SfcEnVgP",
+    "SgZArXmQ",
+    "Sgm0yeKr",
+    "SgyrJScP",
+    "Sh8BUAQh",
+    "ShD3V8pA",
+    "ShSCyERN",
+    "ShXKQjut",
+    "ShnpF8Qg",
+    "Si2QXsS0",
+    "SiGApP1N",
+    "Sj7n7ZM8",
+    "SjgRh7RG",
+    "Sk0YhP5A",
+    "SkAD4fmu",
+    "SkVScKyG",
+    "SkYX92CP",
+    "SknHwPhW",
+    "SkrVrAJR",
+    "SmFP1nH0",
+    "SmMYcR5r",
+    "SmzdkQ6g",
+    "Sn1Yvu4u",
+    "SpFIVKZ9",
+    "SpvgypT2",
+    "Sq4basMd",
+    "Sq6pbetG",
+    "SqJmJZhj",
+    "SqY0ZGAm",
+    "Sqg2C0GU",
+    "SqiKz6Xp",
+    "SqjvBphK",
+    "SrHw2CVs",
+    "Srph48V7",
+    "SrvncV5U",
+    "Ssn9EWFF",
+    "St6t99e8",
+    "StwrXbDa",
+    "Su7r9naa",
+    "Su9KA9sg",
+    "SuCcHqve",
+    "SumLbkVi",
+    "SvCEkGQB",
+    "SwTDTTBf",
+    "SwX9z1Jc",
+    "SwnasFAz",
+    "Sx69n79G",
+    "Sxq5d2F6",
+    "Sy0h59DY",
+    "SywB9Jym",
+    "SzQNSg3J"
+  ],
+  "excluded_score_keys": [
+    "S0tu8BXC",
+    "S74NcKEx",
+    "S8Tq46CE",
+    "S9j70QqA",
+    "SBGKZ4xR",
+    "SH8hkkfN",
+    "SHNqkmfR",
+    "SNvDNk6b",
+    "SRhXSleW",
+    "STAYLh5P",
+    "STN1D392",
+    "SU8cA0Cl",
+    "SXv5nCde",
+    "SYz9UOXW",
+    "SaDRc7nJ",
+    "SaSyfMWH",
+    "SaljUbT2",
+    "SbgkbNBF",
+    "SddZqhN8",
+    "SekYym8W",
+    "SlXTUkVF",
+    "SmgJYQmw",
+    "SpiUELEp",
+    "SpwPjVka",
+    "SqMgYYGH",
+    "Sr2iNtgY",
+    "Sru5SUZq",
+    "Sw4S16SU",
+    "SxUPcN1Q",
+    "SzEutqKF",
+    "SzyUVJiY"
+  ],
+  "protected_train_groups": [
+    "LG0003",
+    "LG0043",
+    "LG0054",
+    "LG0058",
+    "LG0075"
+  ],
+  "leakage_check": {
+    "train_test_group_overlap": [],
+    "test_versions_per_work": 1,
+    "passed": true
   },
-  "leakage_groups": 104,
-  "consistency_problems": [],
-  "data_quality_notes": [],
-  "all_checks_passed": true
+  "status": "complete",
+  "backup_trash": "/Users/lijiawei/.Trash/guqin_before_test50.f0zezh1o",
+  "canonical_eval": "/Volumes/F/work/Gunqin-agent/train/eval_inputs_v2_text_protocol/test50",
+  "canonical_sft": "/Volumes/F/work/Gunqin-agent/train/data/guqin_agent_sft_two_stage_test50"
 }
