@@ -109,3 +109,6 @@ baseline/gepa/docs/
 ABC_J/.deleted_20261006/
 # Generated GEPA optimization splits (rebuild with baseline.gepa_guqin.data).
 baseline/gepa_guqin/data/
+
+# Local renderer-probe scratch output
+/output/
