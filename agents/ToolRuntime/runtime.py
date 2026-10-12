@@ -361,6 +361,12 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         if warning.get("code") == "low_hui_stopped_too_cramped"
         and warning.get("source_index") is not None
     }
+    repeat_anchor_warnings_by_source = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "missing_repeat_anchor"
+        and warning.get("source_index") is not None
+    }
 
     def warning_suffix(index: int) -> str:
         parts: list[str] = []
@@ -448,6 +454,8 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
                 else "5弦尽量避免四徽以内按音"
             )
             parts.append(f":warning:低徽按音过紧（{boundary}）")
+        if index in repeat_anchor_warnings_by_source:
+            parts.append(":warning:缺少再作起点标记（“从ㄱ再作”前需先有“〔再作起点〕”）")
         return "".join(parts)
 
     for index in sorted(changed):
@@ -493,7 +501,7 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
          | set(harmonic_walk_warnings) | set(harmonic_resonance_warnings)
          | set(pluck_pair_warnings) | set(same_string_cuo_warnings)
          | set(same_finger_reach_warnings)
-         | set(low_hui_warnings)) - changed
+         | set(low_hui_warnings) | set(repeat_anchor_warnings_by_source)) - changed
     )
     if unmodified_warning_indices:
         unmodified_codes = {
@@ -524,6 +532,8 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
             lines.append("仍有未修改的同指跨位警告｜以下行与前一按音同指跨度过大；请考虑换指或手指组合：")
         elif unmodified_codes == {"low_hui_stopped_too_cramped"}:
             lines.append("仍有未修改的低徽按音警告｜以下行按音位置过紧；请考虑更高徽位、换弦或其他指法：")
+        elif unmodified_codes == {"missing_repeat_anchor"}:
+            lines.append("仍有未修改的再作警告｜“从ㄱ再作”前需先有“〔再作起点〕”：")
         else:
             lines.append("仍有未修改的警告｜以下行未包含在本轮提交；请核对：")
     for index in unmodified_warning_indices:
@@ -926,6 +936,7 @@ class RealToolRuntime:
                         "same_string_cuo_pair",
                         "same_finger_reach_too_large",
                         "low_hui_stopped_too_cramped",
+                        "missing_repeat_anchor",
                     }
                 ]
                 if remaining_warnings:
@@ -1109,6 +1120,69 @@ def validate_patch_vocabulary(patches: list[dict]) -> None:
         if patch.get("patch_type") != "SET_JIANZI_TEXT":
             raise ValueError("edit_plan only accepts SET_JIANZI_TEXT patches")
 
+
+def repeat_anchor_warnings(
+    item: dict, actions_by_source: dict[int, dict], *,
+    historical: dict[tuple[str, str], dict] | None = None,
+) -> list[dict]:
+    """Find ``从ㄱ再作`` rows that lack an earlier authored repeat anchor."""
+    event_range = (item.get("input") or {}).get("event_range") or {}
+    current_start = int(event_range.get("start", event_range.get("start_index", 0)))
+
+    def phrase_start(row: dict) -> int:
+        source_range = (row.get("input") or {}).get("event_range") or {}
+        return int(source_range.get("start", source_range.get("start_index", 0)))
+
+    item_score_key = item.get("score_key")
+    earlier = sorted(
+        (
+            row for (history_score_key, _), row in (historical or {}).items()
+            if history_score_key == item_score_key and phrase_start(row) < current_start
+        ),
+        key=phrase_start,
+    ) if item_score_key else []
+    phrase_rows: list[tuple[list[dict], dict[int, dict], bool]] = []
+    for row in earlier:
+        actions = {
+            int(action["source_index"]): action
+            for action in row.get("reference_plan", {}).get("actions", [])
+            if action.get("source_index") is not None
+        }
+        phrase_rows.append((
+            list(row["input"].get("notes_without_jianzi")
+                 or row["input"].get("phrase_notes") or []),
+            actions,
+            False,
+        ))
+    phrase_rows.append((
+        list(item["input"].get("notes_without_jianzi") or []),
+        actions_by_source,
+        True,
+    ))
+
+    anchor_seen = False
+    warnings: list[dict] = []
+    for notes, action_map, is_current in phrase_rows:
+        for note in notes:
+            source_index = note.get("index")
+            if source_index is None:
+                continue
+            action = action_map.get(int(source_index))
+            text = str((action or {}).get("jianzi_text")
+                       or (action or {}).get("text") or "")
+            # Test before setting the anchor so malformed text containing both
+            # terms cannot satisfy its own prerequisite.
+            if is_current and "从ㄱ再作" in text and not anchor_seen:
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": "missing_repeat_anchor",
+                })
+            if any(marker in text for marker in (
+                "再作起点", "再作标记", "再做起点", "再做标记",
+            )):
+                anchor_seen = True
+    return warnings
+
 def validate_jianzi_only(
     item: dict, patches: list[dict], *, toward_reference: bool = False,
     require_complete: bool = True,
@@ -1184,6 +1258,9 @@ def validate_jianzi_only(
                 })
 
     warnings: list[dict] = []
+    warnings.extend(repeat_anchor_warnings(
+        item, by_index, historical=historical,
+    ))
     pitch_report = {"counts": {"matched": 0, "mismatched": 0, "skipped": 0},
                     "details": []}
     try:
@@ -1457,6 +1534,8 @@ def public_plan_warning_messages(
             text = "同指跨位过大"
         elif code == "low_hui_stopped_too_cramped":
             text = "低徽按音过紧"
+        elif code == "missing_repeat_anchor":
+            text = "缺少再作起点标记"
         else:
             continue
         messages.setdefault(int(source_index), []).append(text)

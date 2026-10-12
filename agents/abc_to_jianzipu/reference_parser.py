@@ -88,7 +88,7 @@ def parse_reference_actions(data: dict, audit_report: dict | None = None) -> lis
         # Parse any explicit base pluck separately, but never leak the 撮/剌
         # substring inside 掐撮/掐拨剌 into ordinary double-stop rules.
         techniques = _techniques(ordinary_text)
-        strings = [int(value) for value in re.findall(r"([1-7])弦", ordinary_text)]
+        strings = AUDIT.parse_string_numbers(ordinary_text)
         string = strings[0] if len(strings) == 1 else None
         string2 = None
         mode2 = None

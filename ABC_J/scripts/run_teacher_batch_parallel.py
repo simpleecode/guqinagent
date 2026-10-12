@@ -205,10 +205,9 @@ def main() -> int:
 
     shards: list[list[str]] = [[] for _ in range(args.workers)]
     if args.shard_by_trajectory_id:
-        # Every worker receives the full source corpus for historical context,
-        # so score affinity is unnecessary here.  Round-robin assignment keeps
-        # small resume sets balanced too (a hash can put their last few IDs in
-        # only one or two workers).
+        # Round-robin assignment balances small retry sets. Each worker still
+        # receives all phrases of its assigned scores for historical context,
+        # without multiplying the unrelated full corpus in RAM seven times.
         for index, trajectory_id in enumerate(remaining):
             shards[index % args.workers].append(trajectory_id)
     else:
@@ -227,9 +226,17 @@ def main() -> int:
         id_file.write_text("\n".join(ids) + "\n", encoding="utf-8")
         log_path = worker_dir / "worker.log"
         log_handle = log_path.open("a", encoding="utf-8", newline="\n")
+        worker_input = args.input
+        if args.shard_by_trajectory_id:
+            assigned_ids = set(ids)
+            assigned_scores = {row.get("score_key") for row in source_rows
+                               if row["trajectory_id"] in assigned_ids}
+            worker_input = worker_dir / "score_context_input.jsonl"
+            write_jsonl(worker_input, [row for row in source_rows
+                                      if row.get("score_key") in assigned_scores])
         generator = SINGLE_STAGE_GENERATOR if args.stage == "single_stage" else TWO_STAGE_GENERATOR
         command = [sys.executable, str(generator),
-                   "--input", str(args.input),
+                   "--input", str(worker_input),
                    "--output-dir", str(worker_dir / "output"),
                    "--trajectory-id-file", str(id_file),
                    "--model", args.model,

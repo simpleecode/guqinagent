@@ -3,9 +3,27 @@ import unittest
 from evaluation.fingering import field_counts, rates
 from evaluation.ornament import ornament_metrics, technique_usage
 from evaluation.techniques import extract_fingering_techniques
+from agents.abc_to_jianzipu.reference_parser import parse_reference_actions
 
 
 class MetricsTests(unittest.TestCase):
+    def test_chinese_and_arabic_strings_have_identical_semantics(self):
+        for chinese, arabic in (
+            ('大指九徽挑五弦', '大指九徽挑5弦'),
+            ('泛音大指七徽勾四弦', '泛音大指七徽勾4弦'),
+            ('撮（大指七徽六弦按音＋一弦散音）', '撮（大指七徽6弦按音＋1弦散音）'),
+        ):
+            def parse(text):
+                tuning = {'open_strings': [
+                    {'pitch': pitch, 'octave': octave}
+                    for pitch, octave in [('C', 2), ('D', 2), ('F', 2), ('G', 2), ('A', 2), ('C', 3), ('D', 3)]
+                ]}
+                return parse_reference_actions({'metadata': {'tuning': tuning}, 'notes': [{'index': 0, 'jianzi': text}]})[0]
+            left, right = parse(chinese), parse(arabic)
+            self.assertIsNotNone(left.string)
+            for field in ('string', 'string2', 'mode', 'hui', 'left_finger', 'right_finger'):
+                self.assertEqual(getattr(left, field), getattr(right, field), (chinese, field))
+
     def test_field_accuracy_and_f1(self):
         events = [
             {"reference": {"string": 5}, "prediction": {"string": 5}},

@@ -186,6 +186,8 @@ def new_context() -> dict:
         # left hand is still at a usable stopped position.
         "active_left_hui": None,
         "active_left_string": None,
+        # A standalone 复 returns to the position before the preceding walk.
+        "walk_return_position": None,
         "left_finger": None,
         # Per-finger stopped positions are retained separately from the
         # immediately active position.  They are needed for releases such as
@@ -261,6 +263,17 @@ def remember_left_position(
         context["left_positions"][str(resolved_finger)] = {
             "string": int(string), "hui": hui,
         }
+
+
+def invalidate_active_left_hui(context: dict) -> None:
+    """Forget an unknown movement endpoint, including per-finger caches."""
+    active_string = context.get("active_left_string")
+    context["active_left_hui"] = None
+    context["stopped_hui"] = None
+    context["left_positions"] = {
+        finger: position for finger, position in context["left_positions"].items()
+        if position.get("string") != active_string
+    }
 
 
 def release_position_for_daiqi(context: dict, text: str) -> tuple[str, int] | None:
@@ -629,14 +642,38 @@ def _parse_jianzi(
             text.startswith(
                 ("上", "下", "进", "退", "绰", "注", "浒", "淌", "引上")
             )
+            or re.fullmatch(r"(?:急|缓|少)?(?:进|退|上|下)", text) is not None
             or text in ORNAMENTS
             or positioned_qiaqi
         )
     )
     if direction_only:
+        if text == "复":
+            origin = context.get("walk_return_position")
+            if origin and origin.get("string") == context.get("active_left_string"):
+                string, destination = int(origin["string"]), origin["hui"]
+                context["stopped_string"] = string
+                context["stopped_hui"] = destination
+                context["active_left_hui"] = destination
+                context["sound_mode"] = "stopped"
+                context["walk_return_position"] = None
+                remember_left_position(context, string, destination)
+                pitch, error = position_pitch(string, destination, open_midi, "stopped")
+                return ([pitch] if error is None else []), error
+            # Without a recorded origin, 复 cannot prove that the old hui
+            # remains current. Do not invent a return destination.
+            invalidate_active_left_hui(context)
+            return [], "context_dependent_slide"
         destination = parse_hui(text)
         if destination is not None and context.get("active_left_string") is not None:
             active_string = int(context["active_left_string"])
+            if (not positioned_qiaqi
+                    and context.get("active_left_hui") is not None):
+                context["walk_return_position"] = {
+                    "string": active_string, "hui": context["active_left_hui"],
+                }
+            else:
+                context["walk_return_position"] = None
             left_finger = first_token(text, LEFT_HAND_FINGERS)
             if left_finger is not None:
                 context["left_finger"] = left_finger
@@ -650,6 +687,15 @@ def _parse_jianzi(
             if error:
                 return [], error
             return [pitch], None
+        if re.fullmatch(r"(?:急|缓|少)?(?:进|退|上|下)", text):
+            # A bare movement has no deterministic distance. Retain its
+            # origin for a later 复, but invalidate the unobserved endpoint.
+            if context.get("active_left_hui") is not None:
+                context["walk_return_position"] = {
+                    "string": context.get("active_left_string"),
+                    "hui": context["active_left_hui"],
+                }
+            invalidate_active_left_hui(context)
         reason = (
             "ornament_or_control" if text in ORNAMENTS
             else "context_dependent_slide"
@@ -834,6 +880,10 @@ def parse_jianzi(
     """
     normalized = normalize_context(context)
     compact = str(text or "").strip()
+    if (parse_string_numbers(compact)
+            or first_token(compact, RIGHT_HAND_TECHNIQUES) is not None
+            or "泛起" in compact or "泛止" in compact):
+        normalized["walk_return_position"] = None
     # Commit a leading 泛起 before delegating to specialised parsers.  In
     # particular, the double-stopped branch returns before the normal
     # single-string state update, while corpus glyphs such as

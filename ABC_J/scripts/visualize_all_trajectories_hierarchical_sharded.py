@@ -12,9 +12,11 @@ from collections import defaultdict
 from pathlib import Path
 
 
-def read_jsonl(path: Path) -> list[dict]:
+def read_jsonl(path: Path):
     with path.open(encoding="utf-8") as handle:
-        return [json.loads(line) for line in handle if line.strip()]
+        for line in handle:
+            if line.strip():
+                yield json.loads(line)
 
 
 def write_jsonl(path: Path, rows: list[dict]) -> None:
@@ -44,7 +46,6 @@ def main() -> int:
     messages_by_score: dict[str, list[dict]] = defaultdict(list)
     for row in read_jsonl(args.input):
         messages_by_score[score_key_from_message(row)].append(row)
-    audits = {row["sample_id"]: row for row in read_jsonl(args.audit)}
     sources_by_score: dict[str, list[dict]] = defaultdict(list)
     for row in read_jsonl(args.source):
         sources_by_score[score_key_from_source(row)].append(row)
@@ -54,16 +55,23 @@ def main() -> int:
     entries = []
     with tempfile.TemporaryDirectory(prefix="guqin-hierarchical-") as temp_name:
         temp = Path(temp_name)
+        # Keep the large private audit on disk rather than loading the full corpus.
+        sample_scores = {row['sample_id']: score for score, rows in messages_by_score.items() for row in rows}
+        for row in read_jsonl(args.audit):
+            score = sample_scores.get(row['sample_id'])
+            if score is not None:
+                with (temp / f'{score}.audit.jsonl').open('a', encoding='utf-8') as handle:
+                    handle.write(json.dumps(row, ensure_ascii=False) + '\n')
         for position, score_key in enumerate(sorted(messages_by_score), 1):
             messages = messages_by_score[score_key]
             sample_ids = {row["sample_id"] for row in messages}
-            score_audits = [audits[sample_id] for sample_id in sample_ids if sample_id in audits]
             score_sources = sources_by_score.get(score_key, [])
             input_path = temp / "messages.jsonl"
-            audit_path = temp / "audit.jsonl"
+            audit_path = temp / f"{score_key}.audit.jsonl"
+            if not audit_path.exists():
+                raise RuntimeError(f'Missing audit for score {score_key}')
             source_path = temp / "source.jsonl"
             write_jsonl(input_path, messages)
-            write_jsonl(audit_path, score_audits)
             write_jsonl(source_path, score_sources)
             output_name = f"{score_key}.html"
             subprocess.run([

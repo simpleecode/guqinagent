@@ -865,9 +865,18 @@ def main() -> int:
         """Run Guqinizer once, then only re-enter it for a surviving warning."""
         plan = deepcopy(initial_plan)
         result: dict = {"ok": False}
+        trace_history = []
+        pass_history = []
         for pass_count in range(1, args.max_guqinizer_passes + 1):
             item["baseline_plan"] = plan
+            pass_initial = deepcopy(plan)
             result = run_stage(item, "guqinization", historical)
+            trace_history.extend({**turn, "guqinizer_pass": pass_count}
+                                 for turn in result.get("trace", []))
+            pass_history.append({"pass": pass_count, "initial_plan": pass_initial,
+                                 "plan": deepcopy(result.get("plan")), "ok": result.get("ok", False)})
+            result["trace"] = list(trace_history)
+            result["pass_history"] = list(pass_history)
             if not result.get("ok") or not isinstance(result.get("plan"), dict):
                 return result, pass_count
             plan = result["plan"]
@@ -958,7 +967,8 @@ def main() -> int:
                     return {"state": state, "item": item, "stage": "guqinization",
                             "steps": steps, "request": next(steps),
                             "base": deepcopy(baseline_record.get("base") or {"ok": True}),
-                            "guqinizer_passes": 0}
+                            "guqinizer_passes": 0, "guqinizer_trace_history": [],
+                            "guqinizer_pass_history": []}
                 item["baseline_plan"] = blank_plan_from_item(item)
                 first_stage = "single_stage" if args.single_stage else "fingering_agent"
                 steps = run_stage_steps(item, first_stage, state["historical"])
@@ -1032,10 +1042,22 @@ def main() -> int:
                         steps = run_stage_steps(session["item"], "guqinization",
                                                 session["state"]["historical"])
                         session.update({"stage": "guqinization", "steps": steps,
-                                        "request": next(steps), "guqinizer_passes": 0})
+                                        "request": next(steps), "guqinizer_passes": 0,
+                                        "guqinizer_trace_history": [], "guqinizer_pass_history": []})
                         continue
                     if session["stage"] == "guqinization":
                         session["guqinizer_passes"] = session.get("guqinizer_passes", 0) + 1
+                        pass_count = session["guqinizer_passes"]
+                        history = session.setdefault("guqinizer_trace_history", [])
+                        history.extend({**turn, "guqinizer_pass": pass_count}
+                                       for turn in stage_result.get("trace", []))
+                        pass_history = session.setdefault("guqinizer_pass_history", [])
+                        pass_history.append({"pass": pass_count,
+                                             "initial_plan": deepcopy(session["item"]["baseline_plan"]),
+                                             "plan": deepcopy(stage_result.get("plan")),
+                                             "ok": stage_result.get("ok", False)})
+                        stage_result["trace"] = list(history)
+                        stage_result["pass_history"] = list(pass_history)
                         if stage_result.get("ok") and isinstance(stage_result.get("plan"), dict):
                             session["item"]["baseline_plan"] = stage_result["plan"]
                             if (session["guqinizer_passes"] < args.max_guqinizer_passes

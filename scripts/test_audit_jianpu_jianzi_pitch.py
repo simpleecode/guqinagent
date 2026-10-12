@@ -18,6 +18,55 @@ class AuditPitchTests(unittest.TestCase):
         self.assertIsNone(reason)
         self.assertAlmostEqual(pitches[0], 64.01955, places=4)
 
+    def test_fu_restores_walk_origin_and_allows_repeated_slide(self):
+        context = MODULE.new_context()
+        origin, _ = MODULE.parse_jianzi("大指七徽九分挑四弦", self.opens, context)
+        MODULE.parse_jianzi("绰上七徽", self.opens, context)
+        restored, reason = MODULE.parse_jianzi("复", self.opens, context)
+        self.assertIsNone(reason)
+        self.assertEqual(origin, restored)
+        self.assertEqual(context["active_left_hui"], 7.9)
+        notes = [{"index": i, "jianzi": text} for i, text in enumerate([
+            "大指七徽九分挑四弦", "绰上七徽", "复", "绰上七徽"])]
+        self.assertEqual(MODULE.walk_motion_warnings({"open_midi": self.opens, "notes": notes}), [])
+
+    def test_bare_movement_invalidates_unknown_hui_but_fu_restores_origin(self):
+        for movement in ("进", "退", "急进", "急退"):
+            with self.subTest(movement=movement):
+                context = MODULE.new_context()
+                MODULE.parse_jianzi("大指七徽挑四弦", self.opens, context)
+                pitches, reason = MODULE.parse_jianzi(movement, self.opens, context)
+                self.assertFalse(pitches)
+                self.assertIsNotNone(reason)
+                self.assertIsNone(context["active_left_hui"])
+                MODULE.parse_jianzi("复", self.opens, context)
+                self.assertEqual(context["active_left_hui"], 7.0)
+                notes = [{"index": i, "jianzi": t} for i, t in enumerate([
+                    "大指七徽挑四弦", movement, "绰上七徽"])]
+                self.assertEqual(MODULE.walk_motion_warnings({"open_midi": self.opens, "notes": notes}), [])
+
+    def test_positioned_jin_tui_update_hui(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("大指七徽挑四弦", self.opens, context)
+        MODULE.parse_jianzi("进六徽二分", self.opens, context)
+        self.assertEqual(context["active_left_hui"], 6.2)
+        MODULE.parse_jianzi("退七徽六分", self.opens, context)
+        self.assertEqual(context["active_left_hui"], 7.6)
+
+    def test_new_attack_and_rest_clear_fu_origin(self):
+        for reset in ("大指七徽挑四弦", None):
+            context = MODULE.new_context()
+            MODULE.parse_jianzi("大指七徽九分挑四弦", self.opens, context)
+            MODULE.parse_jianzi("绰上七徽", self.opens, context)
+            if reset is None:
+                MODULE.advance_context_for_bare_rest(context, {"jianpu": "0（休止）", "jianzi": ""})
+            else:
+                MODULE.parse_jianzi(reset, self.opens, context)
+            self.assertIsNone(context["walk_return_position"])
+            pitches, reason = MODULE.parse_jianzi("复", self.opens, context)
+            self.assertEqual(pitches, [])
+            self.assertEqual(reason, "context_dependent_slide")
+
     def test_hui_outside_positions_have_project_defined_pitches(self):
         base, _ = MODULE.position_pitch(5, 12.3, self.opens)
         outer, reason = MODULE.position_pitch(5, "徽外", self.opens)

@@ -49,7 +49,7 @@ from agents.abc_to_jianzipu.trajectory_replay import (  # noqa: E402
     compare_replay_to_patch_targets, replay_patches,
 )
 from agents.ToolRuntime import (  # noqa: E402
-    RealToolRuntime, can_accept_empty_tool_turn,
+    RealToolRuntime, advance_pitch_warning_state, can_accept_empty_tool_turn,
     harmonic_region_at_phrase_start, infer_jianzi_text_patches,
     public_pitch_warning_source_indices, public_plan_warning_messages,
     validate_jianzi_only,

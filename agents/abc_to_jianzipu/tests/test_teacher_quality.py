@@ -210,6 +210,52 @@ class EditableProtocolTests(unittest.TestCase):
             rendered,
         )
 
+    def test_from_repeat_requires_an_earlier_repeat_anchor(self) -> None:
+        item = {
+            "score_key": "repeat-test", "phrase_id": "p0012",
+            "baseline_plan": {"actions": [{
+                "source_index": 201, "jianzi_text": "从ㄱ再作",
+            }]},
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "event_range": {"start": 201, "end_exclusive": 202},
+                "notes_without_jianzi": [{
+                    "index": 201, "event_index": 201, "jianpu": "1̇̇", "abc": "c'",
+                }],
+            },
+        }
+        _, report = validate_jianzi_only(item, [], require_complete=False)
+        self.assertIn(
+            "missing_repeat_anchor",
+            [warning["code"] for warning in report["warnings"]],
+        )
+        preview = render_edit_preview(
+            item["baseline_plan"]["actions"], [], True, [], item,
+            report["warnings"],
+        )
+        self.assertIn(":warning:缺少再作起点标记", preview)
+
+        history = {
+            ("repeat-test", "p0001"): {
+                "score_key": "repeat-test",
+                "input": {
+                    "event_range": {"start": 0, "end_exclusive": 1},
+                    "notes_without_jianzi": [{"index": 0, "jianpu": "1"}],
+                },
+                "reference_plan": {"actions": [{
+                    "source_index": 0, "jianzi_text": "〔再作起点〕大指七徽挑七弦",
+                }]},
+            },
+        }
+        _, report = validate_jianzi_only(
+            item, [], require_complete=False, historical=history,
+        )
+        self.assertNotIn(
+            "missing_repeat_anchor",
+            [warning["code"] for warning in report["warnings"]],
+        )
+
     def test_public_guqinizer_edit_plan_runs_pitch_audit_without_reference(self) -> None:
         item = {
             "score_key": "test", "phrase_id": "p0001",
@@ -404,6 +450,30 @@ class EditableProtocolTests(unittest.TestCase):
             ":warning:走手跨度过大（绰上｜五徽→四徽｜498 cents",
             result["result"]["text"],
         )
+
+    def test_edit_plan_replays_fu_before_repeated_slide(self) -> None:
+        texts = ["大指七徽九分挑四弦", "绰上七徽", "复", "绰上七徽"]
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=C"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": i, "event_index": i, "jianpu": tone}
+                    for i, tone in enumerate(["3", "5", "3", "5"])
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": i, "jianzi_text": text}
+                for i, text in enumerate(texts)
+            ]},
+        }
+        result = RealToolRuntime(item, {}, basic_fingering=False).invoke(
+            "edit_plan", {"jianzi_rows": [[3, "绰上七徽"]]}
+        )
+        self.assertTrue(result["result"]["valid"])
+        self.assertNotIn("走手终点与起点相同", result["result"]["text"])
+        self.assertNotIn("音高不匹配", result["result"]["text"])
 
     def test_edit_plan_warns_when_walk_endpoint_equals_start(self) -> None:
         item = {
