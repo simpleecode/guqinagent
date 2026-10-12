@@ -1,6 +1,6 @@
 # 项目简介
 
-本项目面向 AI for Guqin 研究，目标是将 ABC notation（机器可读简谱）自动转换为音高准确、可演奏、指法连贯且具有古琴“韵味”的减字谱，并形成以 WWW 为目标的论文（草稿见 `paper/main.tex`，系统名 GuqinAgent）。详细目标见 `DOCS/target.md`。
+本项目面向 AI for Guqin 研究，目标是将 ABC notation（机器可读简谱）自动转换为音高准确、可演奏、指法连贯且具有古琴“韵味”的减字谱，并形成以 ACL 为目标的论文（草稿见 `paper/main.tex`，系统名 GuqinAgent）。详细目标见 `DOCS/plan.md`。
 
 ## 当前阶段
 
@@ -60,6 +60,7 @@ conda run -n guqin python C:\Users\30343\.codex\skills\.system\skill-creator\scr
 - 未知编码保留原值，结论区分“已验证 / 推断 / 未验证”。
 - 修改提取逻辑后，用 `batch/SYuY17FF/out/raw_data.json` 回归检查输出。
 - 完整采集说明见 `AGENT_REPRODUCTION_GUIDE.md`。
+- 每个中间阶段只维护一套结果，不要保存各种版本，比如两阶段的教师轨迹、单阶段的教师轨迹都只保留1份；每次重跑合并后，记得清理临时副本；
 
 ## 教师轨迹并发任务监控
 

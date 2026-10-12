@@ -1,5 +1,150 @@
 # ABC → 减字谱 Agent：交付文档
 
+## 2026-10-12 待提交：四卡test50评估依赖J00237
+
+- 用户要求四卡评估挂Jobber，训练成功后衔接。已准备`train/scripts/run_test50_eval_4gpu.sh`：当前test50 50首／999条，adapter使用四卡训练最终输出目录；4个独立vLLM实例、总16workers，8192输出tokens、16384上下文、最多3次Guqinizer、max-num-seqs8、显存比例0.75。
+- 输出将为`train/eval_outputs_v3_two_stage/two_stage_test50_3epoch_4gpu/`，总日志`eval.log`；启动前检查当前划分与文件哈希、adapter文件、训练结果及trainer_state.epoch>=2.99。
+- **尚未上传／尚未提交成功，没有评估Job ID**：SSH多次在密钥认证之前由远端关闭，`kex_exchange_identification: Connection closed by remote host`。不是错误密码／工具推理失败；本次没有中断训练。
+- 连接恢复后先上传脚本，查重队列，然后提交`jobber.py submit --gpus 4 --depends-on J00237 --name guqin-eval-test50-e3-4gpu --cwd /home/20223393ljw/guqin-agent -- bash train/scripts/run_test50_eval_4gpu.sh`。务必核验Job ID、依赖以及queued状态后再向用户报告已挂好。
+
+## 2026-10-12 test50正式训练集问题统计
+
+- 口径：3,995个phrase／7,990条两阶段轨迹，当前正式messages SHA256为`b2e0db20977f0f8d3019497cfe217c0686983403f2a1231301236661b5a0c6bd`。
+- 用服务器Qwen3.5-9B processor对实际SFT序列化后样本统计：超过8,192有15条阶段轨迹（finger9／Guqinizer6），去重为13个phrase；最大11,244，SaBzwJPS-p0001的Guqinizer轨迹。
+- 最终Guqinizer `teacher_private.jianzi_quality_report.warnings`非空97个phrase；超长与其重合2个，合并问题phrase为108（2.7034%）。这里读取已接受最终plan的存档审计，不是历史各轮warning并集，也没有宣称是重新全曲审计。
+- 若把两个阶段各自最终warning都算入，finger124、Guqinizer97，去重149个phrase；再并入超长为160个phrase。
+- 详情：`ABC_J/agent_training/two_stage_audited/teacher_train_final/problem_statistics.json`；长度分布及长样本列表：`train/data/guqin_agent_sft_two_stage_test50/token_distribution.json`、`over8192.tsv`。
+- 仅作统计，未删除这些样本、未修改训练数据、未中断J00237。
+
+## 2026-10-12 当前唯一划分：test50，四卡重新训练J00237
+
+**本节取代下方旧22首／旧43首评估口径。旧43首包含当前训练曲目，不可作为当前测试集成绩。**
+
+- 用户批准：保留22首单版本测试曲，新增25首恰好双版本曲目；另从三版本曲目补3首（良宵引、阳春、秋鸿）。每个测试曲目只保留一个版本，其余31个版本排除出train和test。
+- 三版本组按固定seed 20261012选取；测试版本按源标注音高匹配率、源长度、ID确定，不使用学生模型成绩选版本。
+- 测试50首／999个phrase，**完全不筛选测试phrase**。训练158个score版本／4,969个原始phrase，沿用原筛选后3,995个phrase。
+- 潇湘水云SBAwX43Q、ST65Msa6，广陵散SDcE3Geq、SMcjde29，酒狂STGsvZsA、SbEnRCX9、SkAD4fmu全部保留在train；开发样例组LG0054、LG0058也保留。
+- 从训练移出1,152个phrase；保留3,995个输入逐字未变、教师公开及私有审计记录逐字复用；新增训练phrase 0、输入变化0，所以不重生成、不重新调用教师脱敏。
+- 两阶段唯一正式教师目录：`ABC_J/agent_training/two_stage_audited/teacher_train_final/`，7,990条（两阶段各3,995）；单阶段：`ABC_J/agent_training/single_stage_audited/teacher_final_redacted/`，3,995条。公私ID对应、消息协议与SFT导出校验通过。
+- 唯一源与筛选产物沿用`two_stage_audited/inferred_all/`和`pitch_eligible_train_test/`，已替换划分。完整清单：`ABC_J/results/dataset_split_report.json`与`agent_dataset_splits.csv`；`excluded_test_alternate`不是训练集！任何后续划分器需保留排除状态，不得悄悄把其回填train。
+- 当前评估输入与封存标注：`train/eval_inputs_v2_text_protocol/test50/test_runtime.jsonl`、`evaluation_pairs_test.jsonl`；导出manifest 50首／999条，并核验normalized_tuning.open_midi与metadata实际调弦逐条相等。
+- 当前SFT：`train/data/guqin_agent_sft_two_stage_test50/`，7,990条。已将两方法公开训练轨迹、新划分、原始／筛选phrase、新测试输入、SFT及当前代码同步实验室服务器；私有教师审计留本地，不交给推理模型。
+- 服务器`guqin-sft`环境完成全量processor预检：无模板错误；p50=4,989，p95=6,783，p99=7,616，max=11,244，超过8,192有15条（0.1877%）。没有改cutoff、没有删除这15条。
+- 用户追加要求4卡：先注册**J00237**（4 GPU，priority1）再SIGTERM取消刚初始化的3卡J00236。当前正式训练为J00237：4 GPU、3 epoch、有效batch12（1×3×4）、QLoRA4bit、LR2e-4、cutoff8192、Liger、梯度检查点，每epoch保存；从Qwen3.5-9B基础模型重新训，**绝不续训旧adapter，旧权重见过新测试曲目**。3卡预处理缓存可复用，四卡overwrite_cache=false，仅复用序列化结果而不复用旧权重。
+- 配置：`train/configs/qwen35_9b_lora_two_stage_test50_4gpu_bs12_20261012.yaml`；启动：`train/scripts/run_test50_train_4gpu.sh`；输入guard：`train/scripts/verify_test50_training_inputs.py`，训练前强制核验文件哈希、数量、版本唯一性、作品组泄漏及预检报告。
+- 输出／日志（服务器）：`/home/20223393ljw/jianzi/outputs/qwen35_9b_lora_two_stage_test50_4gpu_bs12_20261012/train.log`；Jobber日志`/home/20223393ljw/code/training/runtime/gpu_queue/logs/J00237.log`。后续评估入口已切换四卡训练最终adapter目录。
+- 原`renderfix_20261007`评估输入已从本地和服务器原路径移走；服务器归档到`train/artifacts/obsolete_eval_inputs_before_test50_20261012/`。旧suffix两个启动器遇test50时拒绝运行；原全量评估启动器已改为test50和新训练最终adapter，待新训练完成才允许运行；本轮尚未提交新评估任务。
+- 旧划分、原教师正式集、旧全量／问题可视化、旧43首指标及可视化已移本机废纸篓`/Users/lijiawei/.Trash/guqin_before_test50.f0zezh1o/`，可恢复；旧轨迹不在当前训练文件中。
+- 重建入口：`scripts/rebuild_test50_dataset.py --apply`，日志`ABC_J/results/test50_rebuild.log`。这是从旧22首扩展的一次性入口，成功后拒绝直接重放，防止误覆盖新集。
+
+## 2026-10-12 checkpoint-2574完整评估结果汇总
+
+- Jobber J00227正常完成：1,162条／32首续跑目录结果（含222条保留前缀），协议有效1,162，跳过0、去重丢弃0；与原完整评估其余217条合并。
+- 最终43首／1,379个phrase，覆盖全量新测试集，输入sha256逐条一致、协议有效1,379、缺失0、重复0；未把1,162条子集冒充完整测试集。
+- 合并文件：`train/eval_outputs_v3_two_stage/harmonicrestfix_checkpoint2574_walkreturn_repeatanchor_suffix_3gpu_20261011/final_predictions.jsonl`；原始预测文件未覆盖。
+- 自动化指标：`evaluation_results/harmonicrestfix_checkpoint2574_walkreturn_repeatanchor_suffix_3gpu_20261011/`；完整总体及逐曲Markdown：`train/eval_score/harmonicrestfix_checkpoint2574_walkreturn_repeatanchor_suffix_3gpu_20261011.md`。
+- Pitch@50c 99.2517%，MAE 7.8581 cents；左手F1 55.0545%，右手F1 45.6279%，音色类别准确率63.6311%，装饰音F1 24.3902%，技法分布相似度72.3628%，规则违规率2.5104%。最终edit_plan回执带warning：55/1,379（3.9884%），这是最终回执口径，非历史所有回执并集。
+- 修复统计语义解析器遗漏中文弦序（原仅匹配阿拉伯数字弦序），复用AUDIT.parse_string_numbers；弦序准确率重算为39.3394%，不要引用修复前的6.17%。19个评估／逆向解析回归测试通过。仅修正统计解析，未改写预测。
+- 全曲可视化目录：上述最终结果目录`visualization_all/`，索引`index.html`，每首`<score_key>.html`。沿用现有可视化脚本，补齐标注text字段回退；音高重放的历史改用先前模型最终plan，不使用私有参考作为历史状态。
+- 汇总入口：`train/scripts/finalize_walkreturn_eval_results.py`；日志：结果目录`finalize_results.log`。本次没有重新启动推理、没有改动远端训练任务。
+
+## 2026-10-11 单阶段复／进退重跑已脱敏合并、全量分片可视化
+
+- 64个单阶段phrase重跑经过GLM-5.3脱敏流程，失败0，已按sample_id替换正式集。
+- 唯一正式数据：`ABC_J/agent_training/single_stage_audited/teacher_final_redacted/messages_train.jsonl`，5,147条；消息校验、公私审计ID一致、ID顺序及工具参数／非assistant消息不变校验通过。
+- 合并后64条公开及私有记录逐条与脱敏副本完全相等。
+- 使用现有分片脚本生成完整单阶段可视化，索引：`ABC_J/agent_training/single_stage_audited/full_training_visualization/visualization_sharded/index.html`；各曲谱分片为同目录`<score_key>.html`。源使用完整筛选训练phrase以保留曲谱上下文。
+- 分片脚本改为将大型私有审计逐曲暂存并读取，不再一次加载全量私有审计。
+- 本批raw／脱敏worker／脱敏副本／上下文输入及旧正式集移到废纸篓`/Users/lijiawei/.Trash/guqin_single_walkreturn_cleanup.5C1yaH`，可恢复；重跑目录保留选择、生成、脱敏及合并报告和日志。
+- 未上传本批新数据、未启动新训练；下方“单阶段未脱敏”的旧状态已被本节取代。
+
+## 2026-10-11 22:04 两阶段复／进退重跑已脱敏合并
+
+- 合并后再次逐条核对正式集中的174条公开及私有替换记录，与脱敏副本完全一致。
+  本批临时raw（含并行worker）、redacted、redaction_workers、score_context_input.jsonl
+  共约643 MB已移入废纸篓 `guqin_walkreturn_cleanup.i2FP7f`，可恢复。
+  重跑目录只留ID清单、选择／生成／脱敏／合并报告和日志。
+  单阶段64条尚未脱敏合并，未清理其raw或worker结果。
+- 两阶段87个phrase／174条阶段轨迹全部生成，失败0；7个GLM脱敏worker完成，
+  脱敏174条、失败0。工具调用参数与非assistant消息逐条保持不变。
+- 已按sample_id替换到唯一正式目录
+  `ABC_J/agent_training/two_stage_audited/teacher_train_final/`。
+  正式总量10,294条（fingering_agent 5,147＋guqinization 5,147），
+  ID顺序、总数、公私审计ID对应及消息校验均通过；不是另建一个供训练误选的版本。
+- 本批87个Guqinizer最终回执仍有warning的1个：
+  `SS94Hxr1-p0013`，音序254“注下十徽四弦应合”，音高不匹配。
+  此计数只针对本批87个，不代表整个正式集。
+- 入口 `ABC_J/scripts/finalize_walk_return_retry.py`；过程及结果报告在
+  `two_stage_audited/walk_return_retry/finalize.log`、`finalization_report.json`。
+  旧正式集在替换验证后移入本机废纸篓 `guqin_two_stage_before_walkreturn_20261011`，可恢复。
+- 单阶段64个phrase／64条轨迹也已全部生成，失败0，
+  位于 `ABC_J/agent_training/single_stage_audited/walk_return_retry/raw/`；
+  **本次用户要求查看进度，尚未脱敏／尚未替换单阶段正式集**。
+- 未向服务器上传本次新教师数据，未启动新训练；评估J00227独立运行。
+
+## 2026-10-11 评估续跑：复／进退与再作标记合并修复
+
+- 新 Jobber 任务 `J00227`：3 GPU、16 workers、checkpoint-2574，
+  8192输出tokens／16384上下文／最多3次Guqinizer／max-num-seqs=8／显存比例0.75。
+  启动器 `train/scripts/run_walk_return_suffix_eval_3gpu.sh`。
+- 新输出目录：
+  `train/eval_outputs_v3_two_stage/harmonicrestfix_checkpoint2574_walkreturn_repeatanchor_suffix_3gpu_20261011/`。
+  从32首曲谱各自最早受影响phrase续跑940条，保留222条前缀；
+  `SApzZmDj`（忆故人）确定从 `p0004` 起，保留p0001—p0003，续跑31条。
+- 选择器 `train/scripts/prepare_walk_return_suffix_rerun.py`：
+  扫描base与guqinizer各轮可见工具回执，累积局部编辑后用完整前缀重放，
+  排除修复后仍成立的警告；旧评估器丢失早期Guqinizer pass时，
+  对含复／裸进退的多pass phrase保守纳入。强制包括用户指定p0004。
+  合并原18首曲谱待完成的再作标记续跑范围，各曲按更早位置起跑。
+  选择报告位于新输出目录的 `selection_report.json`。
+- 旧 `J00226` 实际已失败，worker在首个phrase报
+  `AttributeError: inverse_baseline_audit has no attribute replay_harmonic_scope`，
+  原因是此前漏同步共享审计脚本。此次已补齐脚本、运行时、评估器，
+  远端预检确认replay_harmonic_scope存在、复后活动徽位恢复7.9。
+  旧任务未生成新phrase，不当作任何重跑完成证据；旧目录保留诊断记录。
+- 评估器两条执行路径都保存所有Guqinizer轮次：trace中新增guqinizer_pass，
+  pass_history保存各次初始／结束plan。修复此前第2次pass覆盖第1次trace的问题，
+  mock三pass回归已通过。模型输入、轮数／输出预算未改变。
+- 实时日志（远端）：新输出目录的 `eval_3gpu.log` 和 `workers/worker_*.log`。
+  正式完整评估结果尚未替换；续跑完成后按sample_id合并，再重新统计和可视化。
+- 用户同意将审计实现迁入 `agents/ToolRuntime/pitch_audit.py`、保留CLI薄入口；
+  按约定待当前教师重跑结束后实施，此刻仍使用原共享脚本，未在运行中搬迁。
+
+## 2026-10-11 当前追加任务：复／裸进退状态修复与定向重跑
+
+以下新路径优先于本文早期历史章节中的数据路径。
+
+- 共享音高解析器 `scripts/audit_jianpu_jianzi_pitch.py` 修复独立“复”：
+  明确走手记录起点，“复”返回起点并更新音高、活动徽位与按指位置。
+  裸“进／退／急进／急退”等终点未知时不再保留旧徽位；不能证明的起点不报确定性的同位／方向／跨度警告。
+  新起音、泛音标记或裸休止清除返回缓存；带明确徽位的进退继续按明确终点更新。
+- 回归：70 个解析器测试＋2 个运行时测试通过，包含
+  `七徽九分挑四弦→绰上七徽→复→绰上七徽` 不再误报同位。
+- 当前完整训练源仍是
+  `ABC_J/agent_training/two_stage_audited/pitch_eligible_train_test/inferred_trajectories_train.jsonl`。
+  没有重新筛选或变更调弦，没有修改当前正式训练集。
+- `ABC_J/scripts/find_walk_return_affected.py` 流式扫描每一轮私有 edit_plan 的
+  warnings＋完整 preview_actions，不只查最终状态；与修复后的重放比较，
+  跨度沿用该轮原来的阈值，避免混入 400→501 音分变更。
+  两阶段扫描 10,294 条阶段轨迹，选出 87 个 phrase（其中25个有同位警告）；
+  单阶段扫描 5,147 条轨迹，选出64个 phrase（其中34个有同位警告）。
+  选择包含无法确定复起点的疑似受影响情况，不把“无法证明”宣称为已经证明的正确音高。
+- 清单／逐轮证据分别在两方法目录下的
+  `walk_return_retry/affected_phrase_ids.txt`、`walk_return_retry/selection_report.json`。
+  `score_context_input.jsonl` 保留受影响曲谱的所有训练 phrase 作为只读历史；
+  **实际重跑只限 ID 文件**。并行协调器的 balanced 模式现在让各 worker
+  仅加载其涉及曲谱的全部历史，避免在16 GB本机上复制整库7次。
+- screen：`teacher_walk_return_retry`；入口
+  `ABC_J/scripts/run_walk_return_retries.py`。
+  顺序运行两阶段87个（两个阶段均重建）再运行单阶段64个，
+  总并发7、glm-5.3、min-interval=0.5、max-tool-rounds=24、max-attempts=3。
+  保留私有措辞开关／guqinizer no-op默认值；没有增加强制 user message。
+- 这是**尚在生成的临时 raw 重跑**，不得当作已脱敏合并。
+  完成后检查失败与警告、GLM脱敏、按 ID 替换当前正式数据，再清理临时产物。
+- 启动／顺序日志：`two_stage_audited/walk_return_retry/batch.log`；
+  coordinator日志：各方法 `walk_return_retry/run.log`；实时进度：
+  各方法 `walk_return_retry/raw/.parallel_workers/walk7_*/worker.log`。
+
 更新时间：2026-10-01  
 当前状态：**训练源数据已冻结**（`inferred_v6`，2026-08-28，冻结声明见 §7.67）；
 `inferred_v6` 数据与教师管线就绪；40 条分层 pilot 已完成，最终干净集合为
