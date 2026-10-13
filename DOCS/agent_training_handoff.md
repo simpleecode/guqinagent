@@ -1,5 +1,172 @@
 # ABC → 减字谱 Agent：交付文档
 
+## 2026-10-13 最新运行时四首全部两阶段从头重跑J00245
+
+- 用户明确全量重跑湘妃怨Sx4mbdGp15、古怨SzV4KbB5 11、良宵引SBFpPuMq6、阳春Sc9dDref13，共45phrase，四GPU；从头生成每首全部Fingering／Guqinizer，不预置任何prefix，不复用局部重跑结果。旧结果保留。
+- 重新从当前canonical test50取45条公开输入，核对调弦／结构编号；最新agents、scripts、ABC_J/scripts、train/scripts同步，runtime／审计／教师生成器／repeat_materializer／结构解析／评估器／调度入口及输入关键hash一致后提交J00245。
+- 沿用原test50三epoch adapter，8192输出／16384上下文／8工具轮／最多3次Guqinizer，4独立vLLM服务，16worker参数实际4个score分片。最新同弦同徽交替右手豁免、双泛音审计、再作warning及实际请求记录全部生效。
+- 输出`/home/20223393ljw/guqin-agent/train/eval_outputs_v3_two_stage/two_stage_test50_four_scores_latest_runtime_full_4gpu_20261013/`，eval.log及workers/worker_*.log；`run_structurefix_four_scores_4gpu.sh`通过EVAL_OUTPUT_DIR设置新路径，拒绝复用已存在目录。没有重训模型。
+
+## 2026-10-13 泛音同弦同徽交替右手豁免余韵warning
+
+- 用户指定例外：相邻泛音起音同一根弦／相同有效徽位，明确且唯一的右手指法不同，不报harmonic_to_same_string_attack。不豁免同右手、未知／多重右手、不同徽位、当前按音及复杂多音；缺徽位时可依现有泛音状态继承有效徽位。
+- 共享审计器修复并同步实验室，78项审计测试通过。当前本地合并湘妃怨最终计划按新规则重审：p0009音序163／164原2个warning均豁免，全曲最终warning为0，报告final_warning_reaudit.json更新；未篡改旧工具回执。
+- 已启动J00244的Python进程不会热更新其已加载模块；本轮未中断／重启该任务，也未重造数据或模型训练。
+
+## 2026-10-13 只重跑湘妃怨p0009 J00244
+
+- 当前合并全曲最终plan重审剩2个warning，均p0009音序163／164的harmonic_to_same_string_attack。用户要求试重跑p0009。
+- J00244请求1GPU；`train/scripts/run_xiangfeiyuan_phrase_retry.sh 9`。输入仅p0001—p0009、worker00预置当前合并结果的前8段（含最新替换p0008），--resume只实际生成p0009两阶段，不重跑后段。
+- 最新runtime／双泛音共享审计／评估器／入口／input／prefix共6文件hash已验证；沿用原3epoch adapter与8192／16384／最多3Guqinizer设置，实际请求快照保存。
+- 远端输出`/home/20223393ljw/guqin-agent/train/eval_outputs_v3_two_stage/Sx4mbdGp_p0009_latestcode_20261013/`，eval.log及workers/worker_00.log；输入`train/eval_inputs_v2_text_protocol/Sx4mbdGp_p0009_retry/`。原合并预测未改，待结果再决定是否替换。
+
+## 2026-10-13 最新p0008替换进当前湘妃怨结果并重新可视化
+
+- 下载J00243结果，核验p0008两阶段ok／protocol_valid及与原输入hash一致；只替换本地`Sx4mbdGp_p0013_suffix_repeatfix_20261013/predictions.jsonl`中p0008，其余14条逐对象保持不变，共15条无重复。
+- 同目录`visualization_all/Sx4mbdGp.html`及index已重新生成并通过完整性／当前test输入hash校验；前版本预测可从废纸篓`/Users/lijiawei/.Trash/guqin_before_p0008_replace.7mgkb4cc/`恢复，替换报告`p0008_replacement_report.json`。
+- 后续p0009—p0015没有随新p0008续跑，这是用户要求的局部结果替换，不可宣称全曲所有后段都基于新p0008重新生成；已记录实际请求的段落仍展示其真实记录。
+
+## 2026-10-13 上游及划分标注统一再作起点ㄱ，暂不重训
+
+- 用户讨论重新造轨迹／训练是否学会仅在反复开始处标起点。当前源谱扫描298处起点，0处与反复开始同一源行，仅27处在反复开始前后2源行内；这是邻近性统计，不能据此断言其余标注错误。当前`:k`是独立起点标记，不是由`||:`／`|:`自动推导；未强行挪动／删除起点。
+- 上游`DECOR_TAG[':k']`正式改为`〔再作起点ㄱ〕`；repeat_materializer优先识别完整新标记，兼容旧标记，避免残留ㄱ或将起点误作再作执行指令；marker-only允许外层标记括号。30项解析／再作回归通过。
+- `scripts/normalize_repeat_anchor_inputs.py`对当前final／modern派生mapped/readable/MD及canonical train/test标注统一名称，共513份文件变化。源JSON逐份验证仅名称替换，音符位置、metadata、phrase ID不变；raw采集证据、历史预测／实际请求快照不改。
+- 分段训练原始223处／筛选206处、测试40处参考标记均用新名称。测试inferred原始／筛选各75条、封存标注40条记录变化；公开test_runtime不变，test50 export manifest文件hash已更新。
+- 报告`two_stage_audited/split_anchor_normalization_report.json`及可恢复废纸篓备份路径；上游解析器和repeat_materializer代码同步实验室，未同步本轮全部数据、未造教师／重训／重跑模型。旧可视化保留历史快照，不冒充新标注。
+
+## 2026-10-13 同步最新代码后单独重跑湘妃怨p0008 J00243
+
+- 用户明确要求先同步本地代码（包含`ABC_J/scripts/generate_teacher_tool_trajectories.py`）再重跑Sx4mbdGp-p0008。agents／scripts／ABC_J/scripts／train/scripts的py、sh、md已同步，无delete；生成器、runtime、共享审计、结构识别、prompt、评估器、调度脚本及输入／prefix共10个关键文件逐sha256验证一致后才提交。
+- J00243请求1GPU，同原3epoch权重和既有8192／16384／最多3Guqinizer参数；输入仅p0001—p0008，worker预置最新完整湘妃怨结果中的前7段并--resume，真实重算仅p0008的两阶段。不会重算p0009以后的段落；这是局部试验，不能自动拼成后续已沿用新p0008的全曲。
+- 入口`train/scripts/run_xiangfeiyuan_p0008_retry.sh`，本地及远端输入`train/eval_inputs_v2_text_protocol/Sx4mbdGp_p0008_retry/`；结果`/home/20223393ljw/guqin-agent/train/eval_outputs_v3_two_stage/Sx4mbdGp_p0008_latestcode_20261013/`，eval.log／workers/worker_00.log。旧预测与HTML不覆盖，未重新训练。
+
+## 2026-10-13 本地训练标记再作起点统一改为再作起点ㄱ
+
+- 用户要求字符串替换，并询问是否存在单独标记。核验实际accepted_plan：两阶段5条／4phrase，单阶段7条，确有独立`〔再作起点〕`；不是全部附着于普通减字。名单在`two_stage_audited/repeat_anchor_rename_report.json`；本次不擅自重新附着或重造这些样本。
+- 已通过`scripts/rename_training_repeat_anchor.py`流式替换10份当前本地训练文件：原始／筛选inferred train、两阶段及单阶段messages／private audit／redaction audit、当前两阶段SFT数据及metadata。新标记如`〔再作起点ㄱ〕大指九徽挑七弦`，正则避免重复添加ㄱ。测试、raw采集、推理结果不改；不处理历史废弃SFT目录。
+- 两阶段公开119条、单阶段公开101条、SFT119条记录变化；行数仍7990／3995／7990，公私ID及消息／SFT校验均通过；SFTmanifest的源消息／数据hash已更新。旧文件可从报告中指定的废纸篓恢复。
+- 既有runtime对新标记兼容（新增回归）；没有启动训练或同步训练文件至服务器。结构重建前教师输入仍是legacy状态，不因这次改名变为新编号数据。旧HTML未重建；token统计亦未重算，SFT目录token_statistics_status.json明确标为失效，不能继续引用旧长度结果为当前统计。
+
+## 2026-10-13 撮／泼／剌的双泛音审计补齐
+
+- 共享音高审计器新增两个明确“泛音”分量的复合解析，逐分量读取唯一弦和徽位并计算泛音MIDI，支持中英文括号、全／半角加号及前置／后置泛音标识；不再落入ambiguous_multiple_strings。原双按音逻辑保留。
+- 双泛音不建立虚假按音位置、不擅自开启泛起区间；同徽位可供已有泛音区间后续简写继承，不同徽位清除单一徽位继承；外层泛起／泛止仍由统一wrapper处理。缺弦徽或模式冲突不猜测。
+- 实际Sx4mbdGp-p0015 source339／音序281的`撮（大指七徽六弦泛音＋中指七徽一弦泛音）`现matched：MIDI60+72，各0 cents。最新HTML已原地生成，Base／Guqinizer两列均✓而非○；未改原预测或旧工具回执、未重跑模型。
+- 75项音高审计及18项prompt／再作／结构测试通过；共享审计脚本同步实验室并校验sha256。本轮未重建训练数据或重新计算全库统计。
+
+## 2026-10-13 从头再作可衔接再作省略
+
+- 再作省略前置指令明确包含“从头再作／从头再做”，不要求先有再作起点标记；原`再[作做]`匹配已覆盖此情况，本次补充无起点的针对性回归及代码说明。
+- 文案更新为`:warning:再作省略前缺少再作指令（前一个有效减字需含“再作”“从ㄱ再作”或“从头再作”）`。10项再作测试通过，runtime同步服务器；未重跑推理。
+
+## 2026-10-13 湘妃怨p0013续跑完成及最新可视化
+
+- J00242输出15/15、protocol_valid15，跳过0／重复0。下载至`train/eval_outputs_v3_two_stage/Sx4mbdGp_p0013_suffix_repeatfix_20261013/`；前12个预测逐对象核验与prefix完全相同，后3个Base均具有实际request_messages记录。
+- 新页面`visualization_all/Sx4mbdGp.html`及index.html，覆盖全曲15phrase；p0013—p0015来自最新续跑，不混入旧后段。现有分片生成器对当前test输入hash及完整性核验通过。
+
+## 2026-10-13 湘妃怨从p0013续跑J00242
+
+- 用户要求Sx4mbdGp从p0013重跑；保留修复结构后的p0001—p0012共12条最终结果作为只读历史，完整15phrase输入传入，worker00预置仅12条prefix预测，通过--resume跳过前段并真实重算p0013—p0015两个阶段。不是guqinizer-only，也不是把后段孤立运行。
+- J00242使用1张GPU（分配GPU0），同曲后3段需依次传递状态；原3epoch adapter／8192输出／16384上下文／8工具轮／最多3次Guqinizer不变。新增起点与指令重合warning及实际request_messages记录已同步并哈希验证。
+- 入口`train/scripts/run_xiangfeiyuan_p0013_suffix.sh`，输入`train/eval_inputs_v2_text_protocol/Sx4mbdGp_p0013_suffix/`；前12段逐ID／hash／protocol_valid预检通过。
+- 新输出`/home/20223393ljw/guqin-agent/train/eval_outputs_v3_two_stage/Sx4mbdGp_p0013_suffix_repeatfix_20261013/`；总日志eval.log、实时workers/worker_00.log。原四首结果不覆盖；预检通过且vllm_eval_start，GPU0模型加载中。
+
+## 2026-10-13 再作起点与执行指令不能同音重合
+
+- runtime新增`repeat_anchor_instruction_overlap`：同一减字含再作／再做起点或标记，移除标记词后仍含再作／再做执行指令，则公开提示`:warning:再作起点标记与再作指令不能重合`。仅起点标记及不同音上的再作指令不报；不将标记本身当作执行指令。
+- 预览／未修改行／公开当前plan警告均接入；同一个音多个再作warning不再被字典覆盖。沿用warning性质，不新增强制user instruction。
+- 用实际Sx4mbdGp-p0013最终结果重放，source279／音序233及source289／音序241的`〔再作起点〕再作`均命中新warning。14项相关测试通过；runtime已同步实验室。未重跑推理，也未篡改旧工具回执来伪造当时已提示。
+
+## 2026-10-13 推理请求留存与可视化提示词来源修复
+
+- `train/scripts/eval_two_stage_score.py`在每次generation yield前deepcopy实际公开messages及工具schema，存入trace的`request_messages`／`request_tools`／`attempt`（包括生成失败记录）；避免后续messages修改污染快照。多次Guqinizer合并trace仍保留每轮快照。不改模型推理策略。
+- 可视化优先读记录中的system/user，标注“实际请求记录”，每轮可展开完整request_messages；旧预测没有这些字段则只能“重建提示词，非原始请求”，不得冒称实际请求。
+- 旧结果重建时通过共享`harmonic_region_at_phrase_start`重放同曲此前模型最终计划，并补齐Guqinizer当前plan遗留warning。Sx4mbdGp-p0014音249有泛起、段尾无泛止／裸休止，p0015实际段首True；此前HTML遗漏了这个状态而显示False。p0015音272才泛止，模型第一轮判断并未错。
+- 四首45phrase的HTML已原地重新生成；核验p0015 Base/Guqinizer的重建提示均显示“此段开始时仍然处于泛音区间”。14项针对／结构／再作测试通过；上述两文件同步实验室并校验sha256。未重跑模型，已有预测未伪造补写原始请求。
+
+## 2026-10-13 全量现存教师训练轨迹可视化及良宵引排除核验
+
+- 现存两阶段脱敏训练消息7,990条／3,995phrase／153份实际含训练轨迹的曲谱，已用现有分片脚本生成`ABC_J/agent_training/two_stage_audited/full_training_visualization/visualization_sharded/index.html`及同目录153份`<score_key>.html`，逐份存在／数据块／来源说明检查通过。
+- 教师轨迹未重造，故可视化使用废纸篓中与其匹配的旧完整训练inferred source上下文，不混用修复后新音序；索引及每个分片均显式提示这个兼容性限制。未修改训练消息或旧模型。
+- 良宵引三个版本：SBFpPuMq为test；S9j70QqA《良宵引》和SqMgYYGH为excluded_test_alternate。原始训练4,974、筛选训练3,995、两阶段消息／审计7,990、单阶段消息3,995中，三个ID和良宵引标题命中均0；实际SFT数据与metadata各7,990条同样命中0。
+- 详细核验`full_training_visualization/exclusion_check.json`；生成日志`two_stage_audited/full_training_visualization.log`。分片脚本改为磁盘分曲写入、每次仅加载一首，降低本机内存峰值并保留完整曲谱历史。
+
+## 2026-10-13 四首结构修复重跑完成并可视化
+
+- J00241正常完成：45/45、protocol_valid45，跳过0、重复0；predictions.jsonl／run_summary.json已下载至`train/eval_outputs_v3_two_stage/two_stage_test50_structurefix_four_scores_20261013/`。
+- 用现有`train/scripts/visualize_completed_eval.py`生成4个完整曲谱分片及`visualization_all/index.html`；新增`--test-subset`只允许当前test曲目子集且逐sample核验与当前canonical test50输入hash一致，默认全量检查不放宽。四份HTML均通过无等待输出／无prompt重建错误校验。
+- 湘妃怨Sx4mbdGp15phrase、古怨SzV4KbB5 11、良宵引SBFpPuMq6、阳春Sc9dDref13。旧全量HTML未覆盖；本次未计算新自动化指标。
+
+## 2026-10-13 四首修复输入的四卡推理重跑J00241
+
+- 用户指定Sx4mbdGp湘妃怨15phrase、SzV4KbB5古怨11、SBFpPuMq良宵引6、Sc9dDref阳春13，共45；从已重建test50公开输入提取，不使用旧编号。输入`train/eval_inputs_v2_text_protocol/test50_structurefix_four_scores/test_runtime.jsonl`，sha256=`e11f4d102ec78c18784cbea0fdc933ba965996d209d5b0bebcde2a851a2a7f96`。
+- 同步agents／scripts／ABC_J/scripts／train/scripts的代码至实验室服务器（无delete、不上传私有参考）；核心解析、runtime、prompt、审计、评估器及输入9文件哈希核对一致。包含新增再作省略warning。
+- 使用原test50三epoch模型`/home/20223393ljw/jianzi/outputs/qwen35_9b_lora_two_stage_test50_4gpu_bs12_20261012`，不重训。启动脚本`train/scripts/run_structurefix_four_scores_4gpu.sh`，环境guqin-vllm-019；Jobber cip环境仅用于调度。
+- J00240在GPU加载前被workers>=max-num-seqs参数校验拦截；其失败日志目录保留为`two_stage_test50_structurefix_four_scores_20261013_launch_failed`。改为原16worker参数后重新提交**J00241**，实际4个非空score分片／4server／GPU0,1,2,3，预检通过。
+- 输出`/home/20223393ljw/guqin-agent/train/eval_outputs_v3_two_stage/two_stage_test50_structurefix_four_scores_20261013/`，总日志eval.log，workers/worker_*.log；8192输出／16384上下文／8工具轮／最多3次Guqinizer／max-num-seqs8／显存比例0.75。旧全量结果不覆盖。
+- 已确认vllm_ready（4server）和4个worker_started；GPU0／worker00湘妃怨15、GPU1／worker01阳春13、GPU2／worker02古怨11、GPU3／worker03良宵引6。不是只入队或仍等待GPU。
+
+## 2026-10-13 修复结构解析后正式重建train/test输入
+
+- 已运行`scripts/rebuild_structural_phrase_inputs.py`，从原始采集重渲染当前208份训练／测试源谱；原始raw_data不改，已核验调号与调弦元数据保留，调弦名称及七弦MIDI与原产物逐曲一致。只允许结构行变化，非结构行意外变化会中止。
+- **曲目归属不变**：训练158版本，测试50首／每首一个版本；同作品其他版本仍排除，保护曲目仍留train，无validation。此次“重新划分”是修正结构后重新划分phrase，并非重新随机选曲。
+- 原始训练phrase 4,969→4,974，筛选后仍3,995（入选ID新增29／移除29，不能因总数相同当作同一批输入）；测试999，不筛选。训练沿用原音高资格、普通连续空行及全空参考剔除规则，跨phrase源标注上下文参与审计。
+- 逐曲源索引完整／无重复、非结构音序连续、结构行音序None、调弦数组与元数据一致均验证通过；湘妃怨source39现为`:|`／原始`:||`／音序None，source41的新音序为33，不再沿用旧35。
+- 唯一正式原始phrase：`ABC_J/agent_training/two_stage_audited/inferred_all/`；唯一筛选结果：同级`pitch_eligible_train_test/`；新测试公开输入和封存标注：`train/eval_inputs_v2_text_protocol/test50/{test_runtime,evaluation_pairs_test}.jsonl`。编号、边界及reference/baseline由修复解析器重新计算。
+- 报告`ABC_J/agent_training/two_stage_audited/structural_rebuild_report.json`，日志同级`structural_rebuild.log`。旧mapped三件套／inferred／selection／test50输入已移入可恢复废纸篓`/Users/lijiawei/.Trash/guqin_before_structure_rebuild.hmpqomor/`；重建临时目录已清理。
+- **未重造教师、未修改现有模型、未训练、未同步服务器**。两阶段／单阶段旧教师及旧SFT保留，新增`input_compatibility_status.json`标记旧输入不可直接用于新训练；需要后续核对复用、编号重映射或重造。已有测试预测／HTML仍属于旧输入，不能与新编号直接混用。下方“尚未重建正式数据”是此前状态，已由本节取代。
+
+## 2026-10-13 再作省略首行缺少指令warning
+
+- `agents/ToolRuntime/runtime.py`新增`missing_repeat_instruction`：单个再作省略行／连续省略首行的前一个有效减字必须含“再做／再作”（包含“从ㄱ再作”）；只有再作起点／标记不算。空减字与结构行跳过，后续连续省略不重复报警；按同曲更早模型历史跨phrase延续检查。
+- edit_plan预览（包括未修改行）显示`:warning:再作省略前缺少再作指令（前一个有效减字需含“再作”或“从ㄱ再作”）`；识别仍兼容“再做”。已有plan的公开warning渲染共用同一路径。原有“从ㄱ再作”缺少更早起点检查保留。
+- 新增6项针对性测试，与旧起点及结构／GQS回归合计14项通过。仅改本地代码，未重建数据、同步服务器或重跑推理／训练。
+
+## 2026-10-13 结构符号正式解析与模型上下文渲染修复
+
+- 新增共享模块`agents/abc_to_jianzipu/score_structure.py`，提取、分段、连续音序、GQS往返、教师及评估prompt和审计使用同一结构识别规则。
+- 双小节线、反复开始／结束、反复房子保留结构含义与原始符号；模型上下文显示如`双小节线（||）`、`反复结束（:||）`，不占音序、不作为休止清除泛音。真实裸休止的既有规则未改。
+- 湘妃怨Sx4mbdGp source39原始`:||`现解析为反复结束、ABC`:|`，不再是`z4`；内存重放原模型减字后source41（旧音序35）恢复MIDI76匹配，无须额外添加泛起或改减字。
+- 解析、结构、GQS、分段及审计95项回归通过；inverse及evaluation另19项通过。教师规则旧测试另有既存失败，本次未修改其预期或无关规则。
+- **仅代码修复：未重建正式数据／已有可视化，未重跑教师／评估／训练，未同步实验室服务器。**下方只读影响报告描述修复前数据及影子评估，不代表正式产物已更新。
+
+## 2026-10-13 结构符号误作休止的phrase影响评估（只读）
+
+- 用户要求先查影响范围。入口`scripts/assess_structural_rest_phrase_impact.py`，报告`ABC_J/results/structural_rest_phrase_impact.json`；仅内存影子修正已确认误判结构行，不改正式解析器／数据／教师轨迹，不启动重跑或训练。
+- 修正策略：保持原始source index，把错误结构行认作不发音的小节边界；重算连续音序，按现有16发音音／超8兜底规则重划分。修正前分段与当前所有5,968个原始phrase边界完全一致（baseline disagreement0），确保不是拿不同分段规则冒充该bug影响。
+- 当前筛选训练3,995个phrase：813个直接含错行；连续音序变化扩大到3,363个；632个同ID／同source范围／同本段字段音序／同更早上下文，可原样复用。3,363并不是已证明必须重新调用教师3,363次。
+- 受影响的3,363中，1,019个属于“直接错行／phrase ID或范围变化／源标注泛音起始状态变化”之一；另外2,344个本段内容、范围、源标注泛音起始状态仍同，但音序或更早历史改变，需进一步回放工具结果／评估是否能可靠编号重映射，不能直接称为可复用。
+- 分项（相互重叠）：训练190个ID或范围变化，115个源标注起始泛音状态变化；训练原始phrase数4,969→影子4,974。影子数据尚未重新计算baseline、参考patch及筛选，所以最终新增／剔除训练phrase数量仍未定。
+- test50曲目不变，原始／影子都是999个phrase；818个旧phrase输入音序变化，19个旧phrase范围改变。15个训练score＋5个测试score出现边界变化，共20个score。
+- 湘妃怨Sx4mbdGp源错行11个；15个测试phrase全部有音序变化；p0002 source范围仍25—50，但公开音序已不一致。全曲p0010/p0011边界也变；不能原样复用旧评估记录。
+- 原样复用和受影响ID清单、逐曲新旧边界、逐phrase分类在报告中。此轮不模拟反复展开、不处理其他装饰音疑似误识别，也不把源标注泛音状态等同于新教师最终状态。
+
+## 2026-10-13 原始休止时值排查：结构符号被误作休止
+
+- 用户要求核对原始采集数据是否有全休止时值被回退。只读扫描`ABC_J/final/*/out/raw_data.json`和现代曲主目录`raw_data.json`，254份采集、154,782行；全部有runtime duration字段。
+- 捕获的时值仅crotchet 0.25、quaver 0.125、semiquaver 0.0625、demisemiquaver 0.03125，以及unknow 0的结构／特殊符号；真正零音高休止569行。未发现semibreve或value>=1的全休止候选，未证明有全休止被回退成四分。
+- 发现更直接的问题：decode_jianpu_token只把精确`|`认作小节线；`||`、`|||`、`:||`、`||:`以及反复房子组合符号会被通用正则吞作pitch缺失的rest，然后导出`z4`。mapped中共1,579行、234份曲谱有该现象。
+- 当前正式划分：train147个score版本有1,084行；test46首有259行；排除的其他版本27份191行；其他原始曲目14份45行。统计是源行，不是受影响教师phrase/模型行为的最终数。
+- 用户指出湘妃怨`Sx4mbdGp-p0002`：公开音序33／source_index39原始token**`:||`**，被渲染为四分休止`z4`；因此当前audit把其当裸休止清除泛音，导致音序35“食指九徽挑五弦”按音解析64.02而报目标76不匹配。此前将其当真实休止的解释不完整，根源是上游结构符号误判，不宜只改泛音状态清理规则掩盖。
+- 排查入口`scripts/check_raw_rest_durations.py`，详细只读报告`ABC_J/results/raw_rest_duration_audit.json`。本轮未修改原始数据、解析器、训练集或模型，也未启动重跑。
+
+## 2026-10-13 test50评估完成并全量可视化
+
+- 远端run_summary：expected/completed/protocol_valid均999，跳过0、重复丢弃0。已下载当前结果到`train/eval_outputs_v3_two_stage/two_stage_test50_3epoch_4gpu/predictions.jsonl`。
+- 输入ID、输入sha256、封存标注ID与当前正式test split核验一致，确认为50首／999个phrase；不是此前旧43首结果；潇湘水云、广陵散、酒狂不在索引中。
+- 沿用`ABC_J/scripts/visualize_running_eval_score.py`生成50个完整曲谱HTML；完整曲谱模型历史用于音高审计，标注单独显示。全部分片已检查无未完成phrase、无prompt重建错误。
+- 当前索引：`train/eval_outputs_v3_two_stage/two_stage_test50_3epoch_4gpu/visualization_all/index.html`，分片同目录`<score_key>.html`。
+- 新通用批量入口：`train/scripts/visualize_completed_eval.py`，按曲谱暂存输入与结果再逐曲生成，避免每个子进程读取整库；日志在结果目录`visualize.log`，核验报告在`visualization_all/visualization_report.json`。
+- 本次只生成可视化，未重跑推理、未计算新test50自动化指标；旧43首指标不可当成本轮指标。
+
+## 2026-10-12 四卡test50评估已提交J00239
+
+- SSH恢复后核验J00237已succeeded；trainer_state为epoch3.0、global_step1998，最终adapter_model.safetensors为86,630,872字节，train_results.json存在。
+- 当前test50输入与SFT哈希、999个phrase／50首、作品组隔离guard再次通过。未重复提交既有评估任务。
+- 已上传`train/scripts/run_test50_eval_4gpu.sh`，提交**J00239**：4 GPU、depends_on=J00237、name=guqin-eval-test50-e3-4gpu；使用本轮最终adapter，不是旧checkpoint-2574。
+- 输出：`/home/20223393ljw/guqin-agent/train/eval_outputs_v3_two_stage/two_stage_test50_3epoch_4gpu/`；总日志`eval.log`，各worker日志`workers/worker_*.log`；Jobber日志`/home/20223393ljw/code/training/runtime/gpu_queue/logs/J00239.log`。
+- 配置：4个独立vLLM实例、总16workers，8192输出tokens、16384上下文、最多3次Guqinizer、max-num-seqs8、显存比例0.75。下方“尚未提交／连接失败”是已被本节取代的历史状态。
+
 ## 2026-10-12 待提交：四卡test50评估依赖J00237
 
 - 用户要求四卡评估挂Jobber，训练成功后衔接。已准备`train/scripts/run_test50_eval_4gpu.sh`：当前test50 50首／999条，adapter使用四卡训练最终输出目录；4个独立vLLM实例、总16workers，8192输出tokens、16384上下文、最多3次Guqinizer、max-num-seqs8、显存比例0.75。
