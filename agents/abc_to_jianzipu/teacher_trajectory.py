@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from .jianzi_renderer import hui_label, render_jianzi_surface
+from .score_structure import is_structural_note, render_structure
 from .pitch_candidates import abc_chord_tones
 from .repeat_materializer import OMITTED_PLACEHOLDER
 from .trajectory_replay import compare_replay_to_patch_targets, replay_patches
@@ -103,9 +104,7 @@ def _public_input(item: dict) -> dict:
                 # public event-index protocol; omit only that non-sounding
                 # artifact.  A real note without event_index remains a hard
                 # schema failure below.
-                if (str(note.get("abc") or "") == "|"
-                        or str(note.get("duration") or "") == "小节线"
-                        or str(note.get("jianpu") or "") == "|"):
+                if is_structural_note(note):
                     continue
                 raise ValueError(
                     f"public trajectory protocol requires event_index for source_index={source}"
@@ -249,8 +248,8 @@ def _render_phrase_lines(
         # 和弦音（撮等）的简谱列显示完整双谱字（第二个谱字存储于 jianpu_alt）。
         jianpu = chord_jianpu_label(note.get("abc"), written, note.get("jianpu_alt"))
         stored_action = by_index.get(source_index)
-        if note.get("duration") == "小节线" or note.get("abc") == "|":
-            lines.append("小节线")
+        if is_structural_note(note):
+            lines.append(render_structure(note))
             continue
         if index is None:
             raise ValueError(

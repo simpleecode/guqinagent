@@ -1,9 +1,19 @@
 import unittest
 
-from agents.abc_to_jianzipu.repeat_materializer import materialize_repeats
+from agents.abc_to_jianzipu.repeat_materializer import materialize_repeats, extract_repeat_markers, is_marker_only
 
 
 class RepeatMaterializerTests(unittest.TestCase):
+    def test_new_named_anchor_is_not_a_repeat_instruction(self):
+        self.assertEqual(extract_repeat_markers('〔再作起点ㄱ〕'), ['再作起点ㄱ'])
+        self.assertTrue(is_marker_only('〔再作起点ㄱ〕'))
+        notes = [{'index': 0, 'jianpu': '1', 'jianzi': '〔再作起点ㄱ〕勾三弦'},
+                 {'index': 1, 'jianpu': '1', 'jianzi': '从ㄱ再作'},
+                 {'index': 2, 'jianpu': '2', 'jianzi': ''}]
+        output, report = materialize_repeats(notes, is_sounding=lambda n: True)
+        self.assertEqual(report['copy_markers'][0]['anchor_index'], 0)
+        self.assertTrue(output[2]['notation_omitted'])
+
     def test_anchor_and_from_marker_flag_existing_copy_without_inserting_rows(self):
         notes = [
             {"index": 0, "jianpu": "1", "jianzi": "〔再作起点〕勾3弦"},

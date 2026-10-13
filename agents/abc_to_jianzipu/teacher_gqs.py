@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from .score_structure import is_structural_note, render_structure
 
 SCHEMA = "teacher-gqs-1.2"
 LEGACY_SCHEMA = "teacher-gqs-1.1"
@@ -14,9 +15,7 @@ ROW_FIELDS = ("event_index",) + COMPACT_FIELDS
 
 
 def _is_bar(note: dict[str, Any]) -> bool:
-    return (str(note.get("jianpu") or "").strip() == "|"
-            or str(note.get("abc") or "").strip() == "|"
-            or note.get("duration") == "小节线")
+    return is_structural_note(note)
 
 
 def _marker(section: dict[str, Any] | None) -> str:
@@ -53,7 +52,8 @@ def render_teacher_gqs(data: dict[str, Any]) -> str:
             lines.extend(["", "序号｜简谱｜ABC｜时值｜减字"])
             header_written = True
         if _is_bar(note):
-            lines.append("小节线")
+            lines.append('小节线' if render_structure(note) == '小节线'
+                         else '结构｜' + render_structure(note))
             if note.get("index") is not None:
                 bar_sources.append({
                     "index": int(note["index"]),
@@ -64,6 +64,7 @@ def render_teacher_gqs(data: dict[str, Any]) -> str:
                     "lyric": note.get("lyric"),
                     "jianzi": note.get("jianzi"),
                     "jianzi_text": note.get("jianzi_text"),
+                    **({'structure_token': note['structure_token']} if note.get('structure_token') else {}),
                 })
             section = note.get("section")
             key = json.dumps(section, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -105,7 +106,7 @@ def render_teacher_gqs(data: dict[str, Any]) -> str:
     standard_bar = {"jianpu": "|", "jianpu_alt": None, "abc": "|",
                     "duration": "小节线", "lyric": "", "jianzi": "",
                     "jianzi_text": None}
-    if any(any(bar.get(key) != value for key, value in standard_bar.items())
+    if any(bar.get('structure_token') or any(bar.get(key) != value for key, value in standard_bar.items())
            for bar in bar_sources):
         mapping["线字段"] = bar_sources
     lines.insert(3, "索引映射｜" + json.dumps(
@@ -125,7 +126,7 @@ def _parse_v12(text: str) -> dict[str, Any]:
             metadata = json.loads(line.split("｜", 1)[1])
         elif line.startswith("索引映射｜"):
             mapping = json.loads(line.split("｜", 1)[1])
-        elif line == "小节线":
+        elif line == "小节线" or line.startswith('结构｜'):
             rows.append(("bar", None))
         elif line.startswith("音｜"):
             values = json.loads(line.split("｜", 1)[1])
@@ -185,6 +186,8 @@ def _parse_v12(text: str) -> dict[str, Any]:
             if isinstance(bar_info, dict):
                 bar_note = {field: bar_info.get(field) for field in FIELDS if field != "section"}
                 bar_note["index"] = source
+                if bar_info.get('structure_token'):
+                    bar_note['structure_token'] = bar_info['structure_token']
             else:
                 bar_note = {"index": source, "jianpu": "|", "jianpu_alt": None,
                             "abc": "|", "duration": "小节线", "lyric": "",

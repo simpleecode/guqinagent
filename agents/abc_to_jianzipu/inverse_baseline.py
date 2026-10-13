@@ -6,6 +6,7 @@ from pathlib import Path
 from .models import CanonicalScore, Phrase, ScoreEvent
 from .pitch_candidates import generate_candidates
 from .route_planner import routes_to_plan, top_k_routes
+from .score_structure import is_structural_note
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,7 +40,7 @@ def build_phrase_baseline(data: dict, start: int, end: int, *,
     bar = 1
     for note in source_notes:
         abc = str(note.get("abc", ""))
-        if abc.strip() == "|":
+        if is_structural_note(note):
             bar += 1
             continue
         pitches = [

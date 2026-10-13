@@ -11,6 +11,7 @@ from agents.abc_to_jianzipu.jianzi_renderer import hui_label, render_jianzi_surf
 from agents.abc_to_jianzipu.models import ScoreEvent
 from agents.abc_to_jianzipu.pitch_candidates import abc_chord_midis, abc_chord_tones, candidates_for_event
 from agents.abc_to_jianzipu.repeat_materializer import OMITTED_PLACEHOLDER
+from agents.abc_to_jianzipu.score_structure import is_structural_note
 from agents.abc_to_jianzipu.teacher_trajectory import (
     _render_phrase_lines, chord_jianpu_label,
 )
@@ -361,12 +362,12 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         if warning.get("code") == "low_hui_stopped_too_cramped"
         and warning.get("source_index") is not None
     }
-    repeat_anchor_warnings_by_source = {
-        int(warning["source_index"]): warning
-        for warning in (warnings or [])
-        if warning.get("code") == "missing_repeat_anchor"
-        and warning.get("source_index") is not None
-    }
+    repeat_anchor_warnings_by_source: dict[int, list[dict]] = {}
+    for warning in warnings or []:
+        if (warning.get("code") in {"missing_repeat_anchor", "missing_repeat_instruction",
+                                   "repeat_anchor_instruction_overlap"}
+                and warning.get("source_index") is not None):
+            repeat_anchor_warnings_by_source.setdefault(int(warning['source_index']), []).append(warning)
 
     def warning_suffix(index: int) -> str:
         parts: list[str] = []
@@ -454,8 +455,13 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
                 else "5弦尽量避免四徽以内按音"
             )
             parts.append(f":warning:低徽按音过紧（{boundary}）")
-        if index in repeat_anchor_warnings_by_source:
-            parts.append(":warning:缺少再作起点标记（“从ㄱ再作”前需先有“〔再作起点〕”）")
+        for repeat_warning in repeat_anchor_warnings_by_source.get(index, []):
+            if repeat_warning["code"] == "repeat_anchor_instruction_overlap":
+                parts.append(":warning:再作起点标记与再作指令不能重合")
+            elif repeat_warning["code"] == "missing_repeat_instruction":
+                parts.append(":warning:再作省略前缺少再作指令（前一个有效减字需含“再作”“从ㄱ再作”或“从头再作”）")
+            else:
+                parts.append(":warning:缺少再作起点标记（“从ㄱ再作”前需先有“〔再作起点ㄱ〕”）")
         return "".join(parts)
 
     for index in sorted(changed):
@@ -533,7 +539,7 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         elif unmodified_codes == {"low_hui_stopped_too_cramped"}:
             lines.append("仍有未修改的低徽按音警告｜以下行按音位置过紧；请考虑更高徽位、换弦或其他指法：")
         elif unmodified_codes == {"missing_repeat_anchor"}:
-            lines.append("仍有未修改的再作警告｜“从ㄱ再作”前需先有“〔再作起点〕”：")
+            lines.append("仍有未修改的再作警告｜“从ㄱ再作”前需先有“〔再作起点ㄱ〕”：")
         else:
             lines.append("仍有未修改的警告｜以下行未包含在本轮提交；请核对：")
     for index in unmodified_warning_indices:
@@ -628,9 +634,7 @@ class RealToolRuntime:
         missing_event_indices = [
             int(note["index"]) for note in notes
             if note.get("index") is not None
-            and not (str(note.get("abc") or "").strip() == "|"
-                     or str(note.get("jianpu") or "").strip() == "|"
-                     or note.get("duration") == "小节线")
+            and not is_structural_note(note)
             and note.get("event_index") is None
         ]
         if missing_event_indices:
@@ -937,6 +941,8 @@ class RealToolRuntime:
                         "same_finger_reach_too_large",
                         "low_hui_stopped_too_cramped",
                         "missing_repeat_anchor",
+                        "missing_repeat_instruction",
+                        "repeat_anchor_instruction_overlap",
                     }
                 ]
                 if remaining_warnings:
@@ -1125,7 +1131,7 @@ def repeat_anchor_warnings(
     item: dict, actions_by_source: dict[int, dict], *,
     historical: dict[tuple[str, str], dict] | None = None,
 ) -> list[dict]:
-    """Find ``从ㄱ再作`` rows that lack an earlier authored repeat anchor."""
+    """Check repeat anchors and the instruction preceding each omission run."""
     event_range = (item.get("input") or {}).get("event_range") or {}
     current_start = int(event_range.get("start", event_range.get("start_index", 0)))
 
@@ -1161,6 +1167,8 @@ def repeat_anchor_warnings(
     ))
 
     anchor_seen = False
+    previous_effective_text = ""
+    omission_run = False
     warnings: list[dict] = []
     for notes, action_map, is_current in phrase_rows:
         for note in notes:
@@ -1170,6 +1178,13 @@ def repeat_anchor_warnings(
             action = action_map.get(int(source_index))
             text = str((action or {}).get("jianzi_text")
                        or (action or {}).get("text") or "")
+            has_anchor = bool(re.search(r"再[作做](?:起点|标记)", text))
+            instruction_text = re.sub(r"再[作做](?:起点|标记)", "", text)
+            if is_current and has_anchor and re.search(r"再[作做]", instruction_text):
+                warnings.append({
+                    "source_index": int(source_index),
+                    "code": "repeat_anchor_instruction_overlap",
+                })
             # Test before setting the anchor so malformed text containing both
             # terms cannot satisfy its own prerequisite.
             if is_current and "从ㄱ再作" in text and not anchor_seen:
@@ -1181,6 +1196,25 @@ def repeat_anchor_warnings(
                 "再作起点", "再作标记", "再做起点", "再做标记",
             )):
                 anchor_seen = True
+            if is_structural_note(note) or not text.strip():
+                continue
+            if text.strip() == OMITTED_PLACEHOLDER:
+                # A start marker is not an instruction to repeat now.
+                # 再作／再做 also covers 从ㄱ再作 and 从头再作／从头再做;
+                # repeating from the beginning requires no authored anchor.
+                instruction_text = re.sub(
+                    r"再[作做](?:起点|标记)", "", previous_effective_text,
+                )
+                if (is_current and not omission_run
+                        and not re.search(r"再[作做]", instruction_text)):
+                    warnings.append({
+                        "source_index": int(source_index),
+                        "code": "missing_repeat_instruction",
+                    })
+                omission_run = True
+            else:
+                previous_effective_text = text
+                omission_run = False
     return warnings
 
 def validate_jianzi_only(
@@ -1536,6 +1570,10 @@ def public_plan_warning_messages(
             text = "低徽按音过紧"
         elif code == "missing_repeat_anchor":
             text = "缺少再作起点标记"
+        elif code == "missing_repeat_instruction":
+            text = "再作省略前缺少再作指令"
+        elif code == "repeat_anchor_instruction_overlap":
+            text = "再作起点标记与再作指令不能重合"
         else:
             continue
         messages.setdefault(int(source_index), []).append(text)

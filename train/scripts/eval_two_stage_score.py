@@ -640,6 +640,11 @@ def main() -> int:
                         for action in current_replay.actions
                     }
                     constraint_table = build_walk_constraints(item, current_text)
+                # Freeze the actual public conversation before the caller sends
+                # it. Later tool turns mutate messages; the viewer must not
+                # reconstruct these inputs from newer templates or state.
+                request_messages = deepcopy(messages)
+                request_tools = deepcopy(openai_tools(tools))
                 generation = yield {
                     "messages": messages,
                     "tools": tools,
@@ -650,6 +655,9 @@ def main() -> int:
                     error = str(generation["generation_error"])
                     round_entry = {
                         "round": round_number,
+                        "attempt": attempt + 1,
+                        "request_messages": request_messages,
+                        "request_tools": request_tools,
                         "raw_output": "",
                         "truncated": False,
                         "tool_calls": [],
@@ -678,6 +686,9 @@ def main() -> int:
                 calls = parse_calls(raw)
                 round_entry = {
                     "round": round_number, "raw_output": raw,
+                    "attempt": attempt + 1,
+                    "request_messages": request_messages,
+                    "request_tools": request_tools,
                     "truncated": truncated, "tool_calls": calls,
                     "tool_results": [],
                 }
