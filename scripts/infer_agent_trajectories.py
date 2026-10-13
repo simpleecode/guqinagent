@@ -22,6 +22,7 @@ from agents.abc_to_jianzipu.inverse_diff import infer_minimal_patches
 from agents.abc_to_jianzipu.reference_parser import parse_reference_actions
 from agents.abc_to_jianzipu.context_handoff import attach_inferred_handoffs
 from agents.abc_to_jianzipu.phrase_splitter import split_phrase_ranges
+from agents.abc_to_jianzipu.score_structure import is_structural_note
 from agents.abc_to_jianzipu.repeat_materializer import (
     OMITTED_PLACEHOLDER,
     materialize_repeats,
@@ -72,9 +73,7 @@ def assign_event_indices(notes: list[dict]) -> None:
     """Assign continuous agent-facing ordinals, excluding structural bars."""
     event_index = 0
     for note in notes:
-        is_bar = (str(note.get("jianpu") or "").strip() == "|"
-                  or str(note.get("abc") or "").strip() == "|"
-                  or note.get("duration") == "小节线")
+        is_bar = is_structural_note(note)
         if is_bar:
             note["event_index"] = None
         else:
@@ -83,14 +82,15 @@ def assign_event_indices(notes: list[dict]) -> None:
 
 
 def infer_score(row: dict, max_sounding: int, *, gqs_dir: Path | None = None,
-                materialize_repeats_enabled: bool = False) -> list[dict]:
+                materialize_repeats_enabled: bool = False,
+                mapped_dir: Path | None = None) -> list[dict]:
     if gqs_dir is not None:
         source = gqs_dir / row["score_key"] / "teacher.gqs"
         if not source.exists():
             raise FileNotFoundError(f"missing canonical GQS: {source}")
         data = parse_teacher_gqs(source.read_text(encoding="utf-8"))
     else:
-        source = mapped_score_dir(row) / "jianpu_jianzi_readable.json"
+        source = (mapped_dir / row['score_key'] if mapped_dir else mapped_score_dir(row)) / "jianpu_jianzi_readable.json"
         data = json.loads(source.read_text(encoding="utf-8"))
     assign_event_indices(data["notes"])
     repeat_report = None
@@ -126,8 +126,7 @@ def infer_score(row: dict, max_sounding: int, *, gqs_dir: Path | None = None,
         action = all_references.get(index)
         note = notes_by_index.get(index) or {}
         raw_text = str(note.get("jianzi") or "").strip()
-        is_bar = (str(note.get("jianpu") or "").strip() == "|"
-                  or str(note.get("abc") or "").strip() == "|")
+        is_bar = is_structural_note(note)
         if action is None:
             continue
         if raw_text or is_bar:
@@ -203,6 +202,7 @@ def infer_score(row: dict, max_sounding: int, *, gqs_dir: Path | None = None,
                         "index", "abc", "jianpu", "jianpu_alt", "duration", "lyric",
                         "section", "notation_omitted", "event_index",
                     )}
+                    | ({'structure_token': note['structure_token']} if note.get('structure_token') else {})
                     for note in data["notes"][start:end]
                 ],
             },
@@ -236,6 +236,8 @@ def main() -> int:
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--gqs-dir", type=Path,
                         help="read canonical teacher.gqs files instead of source JSON")
+    parser.add_argument("--mapped-dir", type=Path,
+                        help="read staged readable JSON by score key before promotion")
     parser.add_argument("--max-sounding", type=int, default=16,
                         help="超过 N 个发音音后截到下一小节线；分节边界（如 <一>）永远优先")
     parser.add_argument("--materialize-repeats", action="store_true",
@@ -280,7 +282,8 @@ def main() -> int:
     try:
         for index, row in enumerate(rows, 1):
             for item in infer_score(row, args.max_sounding, gqs_dir=args.gqs_dir,
-                                    materialize_repeats_enabled=args.materialize_repeats):
+                                    materialize_repeats_enabled=args.materialize_repeats,
+                                    mapped_dir=args.mapped_dir):
                 handles[item["split"]].write(json.dumps(item, ensure_ascii=False) + "\n")
                 counts[item["split"]] += 1
                 classes.update(item["quality"]["reference_classes"])

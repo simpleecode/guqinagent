@@ -20,6 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+from agents.abc_to_jianzipu.score_structure import is_structural_note, render_structure
 
 OMITTED_PLACEHOLDER = "无（由于是再作部分，省略）"
 SCORE_BLACKLIST_PATH = ROOT / "ABC_J/results/score_blacklist.json"
@@ -35,9 +36,7 @@ def load_blacklisted_score_keys() -> set[str]:
 
 
 def is_bar(note: dict) -> bool:
-    return (str(note.get("abc") or "").strip() == "|"
-            or str(note.get("jianpu") or "").strip() == "|"
-            or str(note.get("duration") or "") == "小节线")
+    return is_structural_note(note)
 
 
 def event_indices_by_score(rows: list[dict]) -> dict[str, dict[int, int | None]]:
@@ -99,7 +98,7 @@ def render_rows(notes: list[dict], actions: list[dict], *, readonly: bool) -> st
         abc = str(note.get("abc") or "-")
         jianpu = str(note.get("jianpu") or note.get("jianpu_alt") or "休止")
         if is_bar(note):
-            lines.append("小节线")
+            lines.append(render_structure(note))
             continue
         if note.get("jianpu_alt") and abc.startswith("["):
             jianpu += " " + str(note["jianpu_alt"])

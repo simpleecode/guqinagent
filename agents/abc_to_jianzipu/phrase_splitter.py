@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from .score_structure import is_structural_note
 
 
 def split_phrase_ranges(
@@ -42,7 +43,7 @@ def split_phrase_ranges(
                     break
             # 小节线行本身不发音，判断必须在发音分支之外。
             if sounding_count > max_sounding and \
-                    str(note.get("abc", "")).strip() == "|":
+                    is_structural_note(note):
                 end = index + 1
                 break
         if end <= start:

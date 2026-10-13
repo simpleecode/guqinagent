@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from agents.abc_to_jianzipu.compound_gestures import find_compound_gesture  # noqa: E402
+from agents.abc_to_jianzipu.score_structure import is_structural_note
 
 MAPPER_PATH = (
     ROOT / "skills" / "guqin-pitch-mapper" / "scripts"
@@ -217,7 +218,7 @@ def normalize_context(context: dict | None) -> dict:
 def is_bare_rest_note(note: dict, text: str | None = None) -> bool:
     """Whether this row is a rest with no notation that continues a state."""
     surface = str(note.get("jianzi") or "").strip() if text is None else text.strip()
-    return "休止" in str(note.get("jianpu") or "") and not surface
+    return not is_structural_note(note) and "休止" in str(note.get("jianpu") or "") and not surface
 
 
 def advance_context_for_bare_rest(context: dict, note: dict, text: str | None = None) -> bool:
@@ -442,6 +443,31 @@ def _parse_jianzi(
         components = [part.strip() for part in re.split(
             r"[＋+]", double_stopped.group(1)
         ) if part.strip()]
+        # Two explicitly harmonic components are independent pitches, not
+        # an ambiguous scalar glyph. Do not treat their touch points as
+        # stopped left-hand positions or implicitly open a 泛起 region.
+        if len(components) == 2 and all('泛音' in c for c in components):
+            harmonic_parts = []
+            for component in components:
+                strings = parse_string_numbers(component)
+                hui = parse_hui(component)
+                if len(strings) != 1 or hui is None:
+                    return [], 'double_harmonic_position_missing'
+                if '按音' in component or '散音' in component:
+                    return [], 'double_harmonic_mode_conflict'
+                pitch, error = position_pitch(strings[0], hui, open_midi, 'harmonic')
+                if error or pitch is None:
+                    return [], error or 'double_harmonic_pitch_unavailable'
+                harmonic_parts.append((hui, pitch))
+            huis = {hui for hui, _pitch in harmonic_parts}
+            context['sound_mode'] = 'harmonic'
+            context['harmonic_hui'] = next(iter(huis)) if len(huis) == 1 else None
+            context['stopped_string'] = None
+            context['stopped_hui'] = None
+            context['active_left_string'] = None
+            context['active_left_hui'] = None
+            context['left_finger'] = None
+            return [pitch for _hui, pitch in harmonic_parts], None
         parsed_components: list[tuple[int, float | str, float, str | None]] = []
         for component in components:
             if "按音" not in component:
@@ -1040,9 +1066,7 @@ def consecutive_walk_warnings(data: dict, threshold: int = 4) -> list[dict]:
     warnings: list[dict] = []
     for note in data.get("notes", []):
         text = str(note.get("jianzi") or "").strip()
-        is_bar = (str(note.get("abc") or "").strip() == "|"
-                  or str(note.get("jianpu") or "").strip() == "|"
-                  or note.get("duration") == "小节线")
+        is_bar = is_structural_note(note)
         if is_bar:
             continue
         if advance_context_for_bare_rest(context, note, text):
@@ -1093,9 +1117,7 @@ def open_to_stopped_transition_warnings(data: dict) -> list[dict]:
     warnings: list[dict] = []
     for note in data.get("notes", []):
         text = str(note.get("jianzi") or "").strip()
-        is_bar = (str(note.get("abc") or "").strip() == "|"
-                  or str(note.get("jianpu") or "").strip() == "|"
-                  or note.get("duration") == "小节线")
+        is_bar = is_structural_note(note)
         if is_bar:
             # A barline is structural, not an intervening sound.
             continue
@@ -1171,12 +1193,12 @@ def harmonic_continuity_warnings(data: dict) -> list[dict]:
     context = new_context()
     pending_harmonic_strings: set[int] = set()
     pending_harmonic_is_compound = False
+    pending_harmonic_hui = None
+    pending_harmonic_right = None
     warnings: list[dict] = []
     for note in data.get("notes", []):
         text = str(note.get("jianzi") or "").strip()
-        is_bar = (str(note.get("abc") or "").strip() == "|"
-                  or str(note.get("jianpu") or "").strip() == "|"
-                  or note.get("duration") == "小节线")
+        is_bar = is_structural_note(note)
         if is_bar:
             continue
 
@@ -1189,6 +1211,8 @@ def harmonic_continuity_warnings(data: dict) -> list[dict]:
         if advance_context_for_bare_rest(context, note, text):
             pending_harmonic_strings = set()
             pending_harmonic_is_compound = False
+            pending_harmonic_hui = None
+            pending_harmonic_right = None
             continue
 
         context_before = dict(context)
@@ -1220,7 +1244,20 @@ def harmonic_continuity_warnings(data: dict) -> list[dict]:
             })
 
         shared = sorted(pending_harmonic_strings & strings)
-        if shared and actual and reason is None and not pending_harmonic_is_compound:
+        current_hui = parse_hui(text)
+        if current_hui is None:
+            current_hui = context_before.get('harmonic_hui')
+        right_techniques = {technique for technique in RIGHT_HAND_TECHNIQUES if technique in text}
+        current_right = next(iter(right_techniques)) if len(right_techniques) == 1 else None
+        alternating_same_position = bool(
+            is_harmonic_attack and len(actual) == 1
+            and len(strings) == 1 and strings == pending_harmonic_strings
+            and current_hui is not None and current_hui == pending_harmonic_hui
+            and current_right is not None and pending_harmonic_right is not None
+            and current_right != pending_harmonic_right
+        )
+        if (shared and actual and reason is None and not pending_harmonic_is_compound
+                and not alternating_same_position):
             warnings.append({
                 "index": note.get("index"),
                 "code": "harmonic_to_same_string_attack",
@@ -1234,6 +1271,9 @@ def harmonic_continuity_warnings(data: dict) -> list[dict]:
             else set()
         )
         pending_harmonic_is_compound = is_continuity_exempt_compound(text)
+        single_harmonic = is_harmonic_attack and len(strings) == 1 and len(actual) == 1
+        pending_harmonic_hui = current_hui if single_harmonic else None
+        pending_harmonic_right = current_right if single_harmonic else None
     return warnings
 
 

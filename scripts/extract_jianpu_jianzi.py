@@ -41,6 +41,9 @@ from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+from agents.abc_to_jianzipu.score_structure import structural_token_info
 
 # ---------------------------------------------------------------------------
 # Mapping tables (丝桐里 internal pinyin-letter codes  ->  human readable)
@@ -205,7 +208,7 @@ DECOR_TAG = {
     ":ts":     "同声",       # tóng-shēng (simultaneous)
     # ---- repetition / position markers ----
     ":bd":     "不动",       # bù-dòng (no movement)
-    ":k":      "〔再作起点〕", # mark: repetition start point
+    ":k":      "〔再作起点ㄱ〕", # mark: repetition start point (not repeat execution)
     ":zkez":   "再作二声",   # from :k to here, repeat twice more
     ":zksz":   "再作三声",   # from :k to here, repeat three times more
     ":ztzz":   "从头再作",   # repeat once more from the beginning
@@ -327,11 +330,14 @@ def shift_jianpu_octave(note: dict, shift: int) -> None:
 def decode_jianpu_token(token: str) -> dict:
     """Parse a raw jianpu token such as \"q1'\" into structured fields."""
     info = {"raw": token, "rest": False, "prolong": False}
-    if token == "|":
+    structure = structural_token_info(token)
+    if structure:
         info["barline"] = True
         info["pitch"] = None
         info["pitch_name"] = "|"
         info["duration_name"] = "小节线"
+        info["structure_token"] = structure['token']
+        info["structure_kind"] = structure['kind']
         return info
     if token == "-":
         info["prolong"] = True
@@ -553,7 +559,8 @@ def jianpu_to_abc(jianpu: dict, tonic="C", octave_lowering=0,
                   degree1_midi: float | None = None) -> tuple[str, str | None]:
     """Convert one numbered-notation event, including stacked pitches, to ABC."""
     if jianpu.get("barline"):
-        return "|", previous_pitch
+        structure = structural_token_info(jianpu.get('structure_token') or jianpu.get('raw'))
+        return structure['abc'] if structure else '|', previous_pitch
     if jianpu.get("ornament"):
         ornament_pitches = jianpu.get("ornament_pitches") or []
         if ornament_pitches:
@@ -1332,6 +1339,8 @@ def main():
             "duration": d["jianpu"].get("duration_name", ""),
             "lyric": d["lyric"] or "",
             "jianzi": "".join(g["cn"] for g in d["jianzi"]) if d["jianzi"] else "",
+            **({"structure_token": d['jianpu']['structure_token']}
+               if d['jianpu'].get('structure_token') else {}),
             **({"section": d["section"]} if d.get("section") else {}),
         }
         for d in decoded

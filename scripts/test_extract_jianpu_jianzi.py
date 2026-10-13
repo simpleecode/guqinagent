@@ -10,6 +10,9 @@ SPEC.loader.exec_module(MODULE)
 
 
 class JianpuDecodeTests(unittest.TestCase):
+    def test_repeat_anchor_tag_names_the_explicit_symbol(self):
+        self.assertEqual(MODULE.DECOR_TAG[':k'], '〔再作起点ㄱ〕')
+
     def test_demisemiquaver_pitch_is_not_a_rest(self):
         decoded = MODULE.decode_jianpu_token("d5'")
         self.assertFalse(decoded["rest"])
@@ -71,6 +74,20 @@ class JianpuDecodeTests(unittest.TestCase):
         decoded = MODULE.decode_jianpu_token("|")
         self.assertTrue(decoded["barline"])
         self.assertEqual(MODULE.jianpu_to_abc(decoded)[0], "|")
+
+    def test_structural_tokens_never_fall_back_to_rest(self):
+        for token, abc in [('||','||'),('|||','|]'),(':||',':|'),('||:','|:'),
+                           ('|[1','|[1'),(']|','|'),(']:||[2',':|[2'),
+                           (']|[2','|[2'),(']|||','|]'),(']||','||')]:
+            with self.subTest(token=token):
+                decoded=MODULE.decode_jianpu_token(token)
+                self.assertTrue(decoded['barline'])
+                self.assertFalse(decoded['rest'])
+                self.assertEqual(decoded['structure_token'],token)
+                self.assertEqual(decoded['duration_name'],'小节线')
+                result,previous=MODULE.jianpu_to_abc(decoded,previous_pitch='c')
+                self.assertEqual(result,abc)
+                self.assertEqual(previous,'c')
 
     def test_runtime_accidental_overrides_compact_note_token(self):
         decoded = MODULE.decode_note({

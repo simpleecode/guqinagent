@@ -18,6 +18,49 @@ class AuditPitchTests(unittest.TestCase):
         self.assertIsNone(reason)
         self.assertAlmostEqual(pitches[0], 64.01955, places=4)
 
+    def test_explicit_double_harmonics(self):
+        for technique in ('撮', '泼', '剌'):
+            for text in (f'{technique}（大指七徽六弦泛音＋中指七徽一弦泛音）',
+                         f'{technique}(泛音大指七徽六弦+泛音中指七徽一弦)'):
+                with self.subTest(text=text):
+                    pitches, reason = MODULE.parse_jianzi(text, self.opens)
+                    self.assertIsNone(reason)
+                    self.assertEqual(pitches, [72, 60])
+
+    def test_double_harmonic_chord_audit_matches_and_detects_wrong_pitch(self):
+        text = '撮（大指七徽六弦泛音＋中指七徽一弦泛音）'
+        data = {'metadata': {'tonic': '1=C'}, 'open_midi': self.opens,
+                'notes': [{'index': 0, 'jianpu': '1', 'jianpu_alt': '1̇', 'jianzi': text}]}
+        self.assertEqual(MODULE.audit(data, 50)['details'][0]['status'], 'matched')
+        data['notes'][0]['jianpu_alt'] = '2̇'
+        self.assertEqual(MODULE.audit(data, 50)['details'][0]['status'], 'mismatched')
+
+    def test_double_harmonic_context_is_not_a_stopped_position(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi('大指七徽勾一弦', self.opens, context)
+        MODULE.parse_jianzi('撮（大指七徽六弦泛音＋中指七徽一弦泛音）', self.opens, context)
+        self.assertIsNone(context['active_left_hui'])
+        self.assertFalse(context['harmonic_scope'])
+        context['harmonic_scope'] = True
+        pitches, reason = MODULE.parse_jianzi('勾二弦', self.opens, context)
+        self.assertIsNone(reason)
+        self.assertEqual(pitches, [62])
+
+    def test_double_harmonic_stop_and_different_hui(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi('泛起撮（大指七徽六弦泛音＋中指七徽一弦泛音）泛止', self.opens, context)
+        self.assertFalse(context['harmonic_scope'])
+        self.assertIsNone(context['harmonic_hui'])
+        pitches, reason = MODULE.parse_jianzi('撮（大指七徽六弦泛音＋中指五徽一弦泛音）', self.opens, context)
+        self.assertIsNone(reason)
+        self.assertEqual(pitches, [72, 67])
+        self.assertIsNone(context['harmonic_hui'])
+
+    def test_double_harmonic_incomplete_positions_are_not_guessed(self):
+        pitches, reason = MODULE.parse_jianzi('撮（大指七徽六弦泛音＋中指一弦泛音）', self.opens)
+        self.assertEqual(pitches, [])
+        self.assertEqual(reason, 'double_harmonic_position_missing')
+
     def test_fu_restores_walk_origin_and_allows_repeated_slide(self):
         context = MODULE.new_context()
         origin, _ = MODULE.parse_jianzi("大指七徽九分挑四弦", self.opens, context)
@@ -274,6 +317,26 @@ class AuditPitchTests(unittest.TestCase):
             "code": "harmonic_to_same_string_attack",
             "strings": [1],
         }])
+
+    def test_same_harmonic_position_alternating_right_hand_is_exempt(self):
+        for second in ['食指七徽挑二弦', '挑二弦']:
+            warnings = MODULE.harmonic_continuity_warnings({'open_midi': self.opens,
+                'notes': [{'index': 0, 'jianpu': '2', 'jianzi': '泛起食指七徽勾二弦'},
+                          {'index': 1, 'jianpu': '2', 'jianzi': second}]})
+            self.assertEqual(warnings, [])
+
+    def test_harmonic_same_position_same_or_missing_right_still_warns(self):
+        for second in ['食指七徽勾二弦', '食指七徽二弦']:
+            warnings = MODULE.harmonic_continuity_warnings({'open_midi': self.opens,
+                'notes': [{'index': 0, 'jianpu': '2', 'jianzi': '泛起食指七徽勾二弦'},
+                          {'index': 1, 'jianpu': '2', 'jianzi': second}]})
+            self.assertEqual([w['code'] for w in warnings], ['harmonic_to_same_string_attack'])
+
+    def test_stopped_reattack_is_not_exempt_by_alternating_right_hand(self):
+        warnings = MODULE.harmonic_continuity_warnings({'open_midi': self.opens,
+            'notes': [{'index': 0, 'jianpu': '2', 'jianzi': '泛起食指七徽勾二弦'},
+                      {'index': 1, 'jianpu': '2', 'jianzi': '食指七徽挑二弦按音'}]})
+        self.assertEqual([w['code'] for w in warnings], ['harmonic_to_same_string_attack'])
 
     def test_bare_rest_ends_harmonic_scope_for_continuity_warning(self):
         warnings = MODULE.harmonic_continuity_warnings({
