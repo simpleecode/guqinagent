@@ -27,7 +27,11 @@ if str(ROOT) not in sys.path:
 from ABC_J.scripts.generate_teacher_tool_trajectories import (  # noqa: E402
     blank_fingering_plan, public_system_for,
 )
-from agents.ToolRuntime.runtime import pitch_audit_notes  # noqa: E402
+from agents.ToolRuntime.runtime import (  # noqa: E402
+    pitch_audit_notes, harmonic_region_at_phrase_start, public_plan_warning_messages,
+    public_pitch_warning_source_indices,
+)
+from agents.abc_to_jianzipu.score_structure import is_structural_note  # noqa: E402
 from agents.abc_to_jianzipu.teacher_trajectory import render_public_prompt  # noqa: E402
 from scripts.audit_jianpu_jianzi_pitch import audit as audit_pitch  # noqa: E402
 
@@ -119,15 +123,24 @@ def final_warnings(stage: dict | None, event_to_source: dict[int, int] | None = 
     return warnings
 
 
-def prompt_block(stage: str, system_prompt: str, user_prompt: str) -> str:
-    """Render the exact public stage prompts used by the evaluator.
+def recorded_stage_prompts(stage: dict | None) -> tuple[str, str] | None:
+    """Read original first-turn prompts; never manufacture missing records."""
+    for turn in (stage or {}).get('trace') or []:
+        messages = turn.get('request_messages')
+        if not isinstance(messages, list):
+            continue
+        system = next((m.get('content') for m in messages if m.get('role') == 'system'), None)
+        user = next((m.get('content') for m in messages if m.get('role') == 'user'), None)
+        if isinstance(system, str) and isinstance(user, str):
+            return system, user
+    return None
 
-    The evaluator keeps prompts implicit in its deterministic loop, so the
-    trace records do not contain them.  Reconstructing them here makes each
-    phrase self-contained for inspection without exposing private references.
-    """
+
+def prompt_block(stage: str, system_prompt: str, user_prompt: str, *, recorded: bool = False) -> str:
+    """Distinguish stored requests from legacy best-effort reconstructions."""
+    origin = '实际请求记录' if recorded else '重建提示词，非原始请求'
     return (
-        "<details class='prompt'><summary>模型输入 prompt（公开）</summary>"
+        f"<details class='prompt'><summary>模型输入 prompt（公开｜{origin}）</summary>"
         f"<h4>system｜{esc(stage)}</h4><pre>{esc(system_prompt)}</pre>"
         f"<h4>user｜{esc(stage)}</h4><pre>{esc(user_prompt)}</pre>"
         "</details>"
@@ -144,6 +157,12 @@ def stage_trace(stage: dict | None, title: str, prompt_html: str = "") -> str:
         calls = item.get("tool_calls") or []
         results = item.get("tool_results") or []
         raw = item.get("raw_output") or ""
+        request_html = ''
+        if isinstance(item.get('request_messages'), list):
+            request_html = (
+                "<details><summary>本轮实际请求 messages</summary>"
+                f"<pre>{esc(pretty(item['request_messages']))}</pre></details>"
+            )
         suffix = "｜输出被截断" if item.get("truncated") else ""
         # ③ must show exactly what the model receives next round: the tool
         # RESULT only.  The record's name/arguments are audit provenance and
@@ -156,6 +175,7 @@ def stage_trace(stage: dict | None, title: str, prompt_html: str = "") -> str:
         sections.append(
             "<article class='round'>"
             f"<h4>第 {esc(round_no)} 轮<span>assistant → tool{esc(suffix)}</span></h4>"
+            + request_html +
             "<div class='round-step'><b>① 模型输出</b>"
             f"<pre>{esc(assistant_content(raw))}</pre></div>"
             "<div class='round-step'><b>② 解析出的工具调用</b>"
@@ -179,6 +199,8 @@ def stage_prompts(
     runtime: dict,
     base: dict | None,
     previous_phrase: dict | None = None,
+    historical: dict | None = None,
+    guqinizer: dict | None = None,
 ) -> tuple[str, str, str, str]:
     """Return Base and Guqinizer public system/user prompts for a phrase."""
     def with_previous(item: dict) -> dict:
@@ -187,6 +209,8 @@ def stage_prompts(
         handoff.pop("previous_phrase", None)
         if previous_phrase:
             handoff["previous_phrase"] = deepcopy(previous_phrase)
+        if historical is not None:
+            result['harmonic_region_at_start'] = harmonic_region_at_phrase_start(result, historical)
         return result
 
     # Base starts from the blank scaffold used by eval_two_stage_score.py.
@@ -197,10 +221,14 @@ def stage_prompts(
     base_system = public_system_for("fingering_agent", basic=True)
     # Re-render with the preceding model-produced handoff.  The stored prompt
     # is retained as a fallback for older inputs that cannot be rendered.
-    try:
-        base_user = render_public_prompt(base_runtime, "fingering_agent")
-    except Exception:
-        base_user = str(source.get("public_prompt") or "")
+    stored_base = recorded_stage_prompts(base)
+    if stored_base:
+        base_system, base_user = stored_base
+    else:
+        try:
+            base_user = render_public_prompt(base_runtime, "fingering_agent")
+        except Exception:
+            base_user = str(source.get("public_prompt") or "")
 
     guqin_runtime = with_previous(runtime)
     if base and isinstance(base.get("plan"), dict):
@@ -208,7 +236,15 @@ def stage_prompts(
     else:
         guqin_runtime["baseline_plan"] = base_runtime["baseline_plan"]
     guqin_system = public_system_for("guqinization", basic=False)
-    guqin_user = render_public_prompt(guqin_runtime, "guqinization")
+    stored_guqin = recorded_stage_prompts(guqinizer)
+    if stored_guqin:
+        guqin_system, guqin_user = stored_guqin
+    else:
+        guqin_runtime['public_plan_warning_messages_by_source'] = public_plan_warning_messages(
+            guqin_runtime, historical=historical)
+        guqin_runtime['public_pitch_warning_source_indices'] = sorted(public_pitch_warning_source_indices(
+            guqin_runtime, historical=historical))
+        guqin_user = render_public_prompt(guqin_runtime, "guqinization")
     return base_system, base_user, guqin_system, guqin_user
 
 
@@ -333,7 +369,7 @@ def notation_overview(source_rows: list[dict], predictions: dict[str, dict]) -> 
                 continue
             index = int(note["index"])
             jianpu = str(note.get("jianpu") or note.get("jianpu_alt") or "—")
-            if str(note.get("abc") or "").strip() == "|":
+            if is_structural_note(note):
                 jianpu = "｜"
             jianzi = actions.get(index)
             event = note.get("event_index")
@@ -474,7 +510,7 @@ def render_notation_pdf(
                 continue
             index = int(note["index"])
             jianpu = str(note.get("jianpu") or note.get("jianpu_alt") or "—")
-            if str(note.get("abc") or "").strip() == "|":
+            if is_structural_note(note):
                 jianpu = "｜"
             event = note.get("event_index")
             ordinal = str(int(event)) if event is not None else "—"
@@ -626,13 +662,13 @@ def main() -> int:
             status = "阶段失败"
         try:
             base_system, base_user, guqin_system, guqin_user = stage_prompts(
-                source, runtime, base, previous_for_prompt
+                source, runtime, base, previous_for_prompt, historical, guqinizer
             )
             base_prompt_html = prompt_block(
-                "fingering_agent", base_system, base_user
+                "fingering_agent", base_system, base_user, recorded=recorded_stage_prompts(base) is not None
             )
             guqin_prompt_html = prompt_block(
-                "guqinization", guqin_system, guqin_user
+                "guqinization", guqin_system, guqin_user, recorded=recorded_stage_prompts(guqinizer) is not None
             )
         except Exception as exc:
             # Keep partially written/legacy inputs viewable even if one prompt
