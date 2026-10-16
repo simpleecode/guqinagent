@@ -132,8 +132,9 @@ We fit a stage-conditioned student policy to the assistant-side actions and mess
 \end{equation}
 where $\mathcal{Y}(\tilde\tau)$ indexes supervised assistant tokens; tool outputs form context but are not prediction targets. At deployment, neither expert annotations nor private semantic guidance are provided. The resulting student must recover its actions from the input score, its own previous edits, and the executable feedback it has observed.
 
-\section{Experimental Setup}
-\subsection{Benchmark and Data Protocol}
+\section{Experiments}
+\subsection{Experimental Setup}
+\paragraph{Benchmark and Data Protocol.}
 \begin{table}[t]
 \centering\small
 \begin{tabularx}{\linewidth}{@{}lX@{}}
@@ -150,7 +151,7 @@ Reference & Expert annotation, private to the offline teacher and evaluation pip
 \end{table}
 The benchmark uses score-level splits. A high-confidence test subset retains scores with reference pitch-match rate strictly above $70\%$ under the current 50-cent auditor, calculated over parseable reference events only. The current test inventory has 44 scores; 39 meet this condition. The other scores remain available for diagnostic analysis rather than being silently treated as clean gold pitch labels.
 
-\subsection{Evaluation Metrics}
+\paragraph{Evaluation Metrics.}
 We parse predictions and references into unified events containing source and event IDs, target pitch, string, left-hand position and finger, right-hand technique, tone type, ornaments, and necessary state. We do not use BLEU, ROUGE, or direct final-string equality as primary metrics. Let $\hat{q}_i$ and $q_i^{\mathrm{ref}}$ denote the pitches realized by the prediction and the reference at event $i$, let $\delta_i=d_c(\hat{q}_i,q_i^{\mathrm{ref}})$ measure their distance in cents, and let $\mathcal{I}_{\mathrm{pitch}}=\{i:\hat{q}_i \text{ and } q_i^{\mathrm{ref}} \text{ are both resolvable}\}$ be the jointly resolvable set. Our primary pitch metrics are
 \begin{equation}
 \begin{aligned}
@@ -163,8 +164,8 @@ We parse predictions and references into unified events containing source and ev
 \end{equation}
 Unresolved events are excluded from the denominator rather than counted as errors, and $|\mathcal{I}_{\mathrm{pitch}}|$ is reported alongside every pitch number. Beyond pitch, we report string accuracy; left- and right-hand fingering precision, recall, and F1; ornament precision, recall, and F1; deterministic rule-violation rate; and technique-usage statistics to expose collapsed or overused techniques. Each violation is stored with an event ID, relevant state, and explanation. Rules that cannot yet be determined reliably are excluded from automatic scoring and listed as expert-review TODOs.
 
-\section{Results and Discussion}
-\subsection{Comparisons and Ablations}
+\subsection{Results and Discussion}
+\paragraph{Comparisons and Ablations.}
 We will compare direct generation, a single-stage interactive agent, and the two-stage \system. Ablations will remove pitch candidates, warning feedback, stateful audit, or compact context retrieval. We ask whether tools improve pitch correctness and rule compliance, whether warning feedback improves repair behavior without inducing unproductive loops, whether stage decomposition improves idiomatic notation, and whether inverse trajectories improve performance without simply increasing tool length.
 
 \begin{table}[t]
@@ -199,15 +200,14 @@ With warning feedback (\system) & \todo{--} & \todo{--} & \todo{--} & \todo{--} 
 \label{tab:warning-ablation}
 \end{table}
 
-\section{Limitations, Ethics, and Resource Availability}
-\subsection{Limitations and Ethics}
-The auditor is conservative and incomplete: no warning is not proof of musical correctness, and unresolved notation is not a success. Fine-grained left-hand reachability, timbre, and lineage-specific style still require expert review or additional physical modeling. The digitized score collection may not represent all historical sources or playing traditions. We position \system as an assistive research system, not a replacement for performers or tradition bearers. Before release, we will review source licenses and provenance, remove private teacher material, and publish only redacted trajectories intended for public supervision.
-
-\subsection{Open Science and Resource Availability}
-We will release the trained model, redacted training trajectories, the test benchmark, and the executable runtime used by teacher generation and inference. The release will include score-level split definitions, event-indexed schemas, evaluation scripts, filtering manifests, and instructions for reproducing the benchmark. Private teacher prompts, unredacted teacher reasoning, and any source material that cannot be redistributed will not be included. The archival repository URL, model license, dataset license, and versioned release identifier will be added before submission: \todo{repository URL and licenses}.
-
 \section{Conclusion}
 \system frames jianzipu generation as executable, stateful plan editing. Its benchmark makes score events, tuning, and notation state explicit; its two-stage architecture separates basic realization from idiomatic refinement; and its inverse trajectories create auditable public tool-use supervision from private annotations. Together, these components enable evaluation beyond text overlap and establish a practical basis for musically grounded notation agents.
+
+\section{Limitations, Ethics, and Resource Availability}
+The auditor is conservative and incomplete: no warning is not proof of musical correctness, and unresolved notation is not a success. Fine-grained left-hand reachability, timbre, and lineage-specific style still require expert review or additional physical modeling. The digitized score collection may not represent all historical sources or playing traditions. We position \system as an assistive research system, not a replacement for performers or tradition bearers. Before release, we will review source licenses and provenance, remove private teacher material, and publish only redacted trajectories intended for public supervision.
+
+\paragraph{Open Science and Resource Availability.}
+We will release the trained model, redacted training trajectories, the test benchmark, and the executable runtime used by teacher generation and inference. The release will include score-level split definitions, event-indexed schemas, evaluation scripts, filtering manifests, and instructions for reproducing the benchmark. Private teacher prompts, unredacted teacher reasoning, and any source material that cannot be redistributed will not be included. The archival repository URL, model license, dataset license, and versioned release identifier will be added before submission: \todo{repository URL and licenses}.
 
 \bibliography{references}
 \end{document}
