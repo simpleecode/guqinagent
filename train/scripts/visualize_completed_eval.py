@@ -42,6 +42,8 @@ def main():
     parser.add_argument('--expected-scores',type=int,required=True)
     parser.add_argument('--test-subset',action='store_true',
                         help='Visualize a verified subset of the current test inputs')
+    parser.add_argument('--allow-partial',action='store_true',
+                        help='Show pending phrases and explicitly label an incomplete snapshot')
     args=parser.parse_args()
     sources={}; scores=defaultdict(list);titles={}
     for row in rows(args.inputs):
@@ -56,7 +58,7 @@ def main():
         assert sid not in seen and sid in sources,sid
         assert row.get('protocol_valid') and row['input_sha256']==sources[sid],sid
         seen.add(sid)
-    assert seen==set(sources), 'Incomplete benchmark'
+    assert args.allow_partial or seen==set(sources), 'Incomplete benchmark'
     # Check the CURRENT split, rather than validating only against a stale input.
     with (ROOT/'ABC_J/results/agent_dataset_splits.csv').open(encoding='utf-8-sig') as handle:
         split_rows=list(csv.DictReader(handle))
@@ -72,10 +74,12 @@ def main():
     entries=[]
     with tempfile.TemporaryDirectory(prefix='guqin-eval-score-') as dirname:
         temp=Path(dirname)
-        assert partition(args.inputs,temp,'input')==seen
+        assert partition(args.inputs,temp,'input')==set(sources)
         assert partition(args.predictions,temp,'prediction')==seen
-        assert partition(args.references,temp,'reference')==seen
+        assert partition(args.references,temp,'reference')==set(sources)
         for number,score in enumerate(sorted(scores),1):
+            prediction_path=temp/f'{score}.prediction.jsonl'
+            prediction_path.touch(exist_ok=True)
             target=args.output_dir/(score+'.html')
             subprocess.run([sys.executable,str(ROOT/'ABC_J/scripts/visualize_running_eval_score.py'),
                 '--score',score,'--input',str(temp/f'{score}.input.jsonl'),
@@ -84,15 +88,18 @@ def main():
                 '--skip-pull','--output',str(target)],cwd=ROOT,check=True,stdout=subprocess.DEVNULL)
             content=target.read_text(encoding='utf-8')
             assert 'prompt reconstruction failed' not in content,score
-            assert '等待输出' not in content,score
-            entries.append(f'<li><a href="{score}.html">{html.escape(score)}｜{html.escape(titles[score])}</a><span>{len(scores[score])} phrase</span></li>')
+            if not args.allow_partial:
+                assert '等待输出' not in content,score
+            completed=sum(sid in seen for sid in scores[score])
+            entries.append(f'<li><a href="{score}.html">{html.escape(score)}｜{html.escape(titles[score])}</a><span>{completed}/{len(scores[score])} phrase</span></li>')
             print(f'[{number}/{len(scores)}] {score}: {len(scores[score])}',flush=True)
     page='<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+html.escape(args.label)+'</title><style>body{max-width:1000px;margin:30px auto;padding:0 18px;background:#181818;color:#eee;font:16px/1.8 system-ui}a{color:#a9ccff;text-decoration:none}li{display:flex;justify-content:space-between;border-bottom:1px solid #444;padding:8px}ul{padding:0;list-style:none}span{color:#bbb}</style></head><body><h1>'+html.escape(args.label)+'</h1>'
     scope='当前测试集子集' if args.test_subset else '当前测试集'
-    page+=f'<p>{scope}：{len(scores)}首，{len(seen)}个phrase；全部完成，输入哈希与当前划分核验通过。</p><ul>'+''.join(entries)+'</ul></body></html>'
+    status='全部完成' if seen==set(sources) else '部分结果，仍在运行'
+    page+=f'<p>{scope}：{len(scores)}首，已完成{len(seen)}/{len(sources)}个phrase；{status}，输入哈希与当前划分核验通过。</p><ul>'+''.join(entries)+'</ul></body></html>'
     (args.output_dir/'index.html').write_text(page,encoding='utf-8')
     report={'scores':len(scores),'phrases':len(seen),'protocol_valid':len(seen),'current_test_split_matches':True,
-            'test_subset':args.test_subset,
+            'test_subset':args.test_subset,'complete':seen==set(sources),'expected_phrases':len(sources),
             'source_inputs':str(args.inputs.resolve()),'predictions':str(args.predictions.resolve()),
             'index':str((args.output_dir/'index.html').resolve()),'all_shards_validated':True}
     (args.output_dir/'visualization_report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')

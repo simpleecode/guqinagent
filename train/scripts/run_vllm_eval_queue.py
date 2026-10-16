@@ -15,6 +15,37 @@ from collections import defaultdict
 from pathlib import Path
 
 
+def idle_server_indices(client_indices, server_count: int, released: set[int]) -> list[int]:
+    """Find replicas with no remaining assigned client processes."""
+    busy = {index % server_count for index in client_indices}
+    return [index for index in range(server_count) if index not in busy and index not in released]
+
+
+def stop_server_group(server, server_file) -> None:
+    """Stop only this launch's dedicated process group, including engine children.
+
+    The conda/vLLM launcher may exit before its descendants; checking only
+    server.poll() would leave such descendants occupying the GPU.
+    """
+    try:
+        for sig, timeout in ((signal.SIGINT, 30), (signal.SIGTERM, 10), (signal.SIGKILL, 5)):
+            try:
+                os.killpg(server.pid, sig)
+            except ProcessLookupError:
+                server.wait(timeout=timeout)
+                break
+            try:
+                server.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                continue
+            try:
+                os.killpg(server.pid, 0)
+            except ProcessLookupError:
+                break
+    finally:
+        server_file.close()
+
+
 def patch_evaluator(source: Path, destination: Path) -> None:
     """Make an isolated vLLM-enabled copy; leave the production evaluator intact."""
     text = source.read_text(encoding="utf-8")
@@ -303,6 +334,7 @@ def main() -> int:
         base_urls.append(f"http://127.0.0.1:{server_port}/v1")
     clients: dict[int, subprocess.Popen] = {}
     log_files = {}
+    released_servers: set[int] = set()
     try:
         for server_index, (server, _, server_log) in enumerate(servers):
             base_url = base_urls[server_index]
@@ -361,6 +393,19 @@ def main() -> int:
                 if code != 0:
                     failures[index] = code
                 del clients[index]
+                log_files[index].close()
+            # Each worker uses replica index % server_count. Release only
+            # when every assigned worker has exited, not on the first finish.
+            for server_index in idle_server_indices(clients, len(servers), released_servers):
+                server, server_file, server_log = servers[server_index]
+                stop_server_group(server, server_file)
+                released_servers.add(server_index)
+                print(json.dumps({
+                    'event': 'vllm_server_released', 'server': server_index,
+                    'gpu': visible_devices[server_index] if visible_devices else None,
+                    'workers': [index for index, _ in active if index % args.server_count == server_index],
+                    'reason': 'all_assigned_workers_finished', 'log': str(server_log),
+                }, ensure_ascii=False), flush=True)
             if clients:
                 time.sleep(5)
         if failures:
@@ -430,18 +475,9 @@ def main() -> int:
                 process.kill()
         for log_file in log_files.values():
             log_file.close()
-        for server, server_file, _ in servers:
-            if server.poll() is None:
-                os.killpg(server.pid, signal.SIGINT)
-                try:
-                    server.wait(timeout=30)
-                except subprocess.TimeoutExpired:
-                    os.killpg(server.pid, signal.SIGTERM)
-                    try:
-                        server.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(server.pid, signal.SIGKILL)
-            server_file.close()
+        for server_index, (server, server_file, _) in enumerate(servers):
+            if server_index not in released_servers:
+                stop_server_group(server, server_file)
         evaluator_copy.unlink(missing_ok=True)
 
 

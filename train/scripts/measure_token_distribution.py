@@ -114,7 +114,7 @@ def main() -> int:
                 "line": line_number,
                 "tokens": length,
                 "source_sample_id": (metadata[line_number - 1].get("source_sample_id")
-                                     if line_number <= len(metadata) else None),
+                                     if line_number <= len(metadata) else row.get('sample_id')),
                 "agent_stage": (metadata[line_number - 1].get("agent_stage")
                                 if line_number <= len(metadata) else row.get("agent_stage")),
             })

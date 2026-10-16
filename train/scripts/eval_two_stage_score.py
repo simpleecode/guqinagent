@@ -615,7 +615,7 @@ def main() -> int:
             runtime = RealToolRuntime(item, historical, basic_fingering=basic)
             messages = [
                 {"role": "system", "content": public_system_for(stage, basic=basic)},
-                {"role": "user", "content": render_public_prompt(item, stage)},
+                {"role": "user", "content": render_public_prompt(item, stage, historical=historical)},
             ]
             trace = []
             # A warning asks for one deliberate follow-up edit, not an

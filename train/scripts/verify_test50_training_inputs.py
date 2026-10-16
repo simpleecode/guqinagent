@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Fail closed if an obsolete split or train/test leakage reaches training."""
 import csv
+import argparse
 import hashlib
 import json
 from collections import Counter
@@ -23,11 +24,15 @@ def sha(path):
 
 
 def main():
-    data=ROOT/'train/data/guqin_agent_sft_two_stage_test50'
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--dataset-dir',type=Path,default=ROOT/'train/data/guqin_agent_sft_two_stage_test50')
+    parser.add_argument('--expected-rows',type=int,default=7990)
+    args=parser.parse_args()
+    data=args.dataset_dir
     evaluation=ROOT/'train/eval_inputs_v2_text_protocol/test50'
     manifest=json.loads((data/'dataset_manifest.json').read_text())
     validation=json.loads((data/'sft_export_validation_report.json').read_text())
-    assert validation['valid'] and validation['rows']==manifest['training_rows']==7990
+    assert validation['valid'] and validation['rows']==manifest['training_rows']==args.expected_rows
     assert sha(data/'guqin_agent_train.jsonl')==manifest['dataset_sha256']
     assert sha(data/'guqin_agent_train_metadata.jsonl')==manifest['metadata_sha256']
     expected=json.loads((evaluation/'export_manifest.json').read_text())
@@ -48,8 +53,9 @@ def main():
     assert not {splits[k]['leakage_group_id'] for k in train}&set(groups)
     assert {'SBAwX43Q','ST65Msa6','SDcE3Geq','SMcjde29','STGsvZsA','SbEnRCX9','SkAD4fmu'}<=train
     stages=Counter(r['agent_stage'] for r in metadata)
-    assert dict(stages)=={'fingering_agent':3995,'guqinization':3995}
-    print(json.dumps({'valid':True,'training_rows':7990,'training_phrases':3995,'test_scores':50,
+    assert args.expected_rows%2==0
+    assert dict(stages)=={'fingering_agent':args.expected_rows//2,'guqinization':args.expected_rows//2}
+    print(json.dumps({'valid':True,'training_rows':args.expected_rows,'training_phrases':args.expected_rows//2,'test_scores':50,
                       'test_phrases':999,'train_test_group_overlap':[],'all_file_hashes_match':True},ensure_ascii=False))
 
 
