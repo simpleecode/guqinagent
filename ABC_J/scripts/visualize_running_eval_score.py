@@ -33,7 +33,7 @@ from agents.ToolRuntime.runtime import (  # noqa: E402
 )
 from agents.abc_to_jianzipu.score_structure import is_structural_note  # noqa: E402
 from agents.abc_to_jianzipu.teacher_trajectory import render_public_prompt  # noqa: E402
-from scripts.audit_jianpu_jianzi_pitch import audit as audit_pitch  # noqa: E402
+from scripts.audit_jianpu_jianzi_pitch import audit as audit_pitch, NOTE_NAMES  # noqa: E402
 
 
 def esc(value: object) -> str:
@@ -42,6 +42,27 @@ def esc(value: object) -> str:
 
 def pretty(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2)
+
+
+def tuning_header(runtime: dict) -> str:
+    """Show the authoritative normalized tuning, not inferred string pitches."""
+    payload = runtime.get('input') or {}
+    metadata = payload.get('metadata') or {}
+    tuning = payload.get('normalized_tuning') or {}
+    name = tuning.get('name') or (metadata.get('tuning') or {}).get('name') or '未知'
+    midis = tuning.get('open_midi') or []
+    lines = [f'调弦｜{name}']
+    if midis:
+        labels = []
+        for index, value in enumerate(midis, 1):
+            midi = float(value)
+            pitch = (f'{NOTE_NAMES[int(midi) % 12]}{int(midi) // 12 - 1}'
+                     if midi.is_integer() else f'MIDI {midi:g}')
+            labels.append(f'{index}弦 {pitch}')
+        lines.extend([f'开弦 MIDI｜{midis}', '弦音（1→7弦）｜' + ' · '.join(labels)])
+    if metadata.get('tonic'):
+        lines.append(f'简谱调号｜{metadata["tonic"]}')
+    return "<p class='tuning-info'>" + '<br>'.join(esc(line) for line in lines) + '</p>'
 
 
 def assistant_content(raw: object) -> str:
@@ -226,7 +247,7 @@ def stage_prompts(
         base_system, base_user = stored_base
     else:
         try:
-            base_user = render_public_prompt(base_runtime, "fingering_agent")
+            base_user = render_public_prompt(base_runtime, "fingering_agent", historical=historical)
         except Exception:
             base_user = str(source.get("public_prompt") or "")
 
@@ -244,7 +265,7 @@ def stage_prompts(
             guqin_runtime, historical=historical)
         guqin_runtime['public_pitch_warning_source_indices'] = sorted(public_pitch_warning_source_indices(
             guqin_runtime, historical=historical))
-        guqin_user = render_public_prompt(guqin_runtime, "guqinization")
+        guqin_user = render_public_prompt(guqin_runtime, "guqinization", historical=historical)
     return base_system, base_user, guqin_system, guqin_user
 
 
@@ -700,8 +721,9 @@ def main() -> int:
                     "actions": deepcopy(final_stage.get("actions") or []),
                 }
     overview = notation_overview(source_rows, predictions)
+    first_runtime = (source_rows[0].get("runtime_item") or source_rows[0]) if source_rows else {}
+    tuning_info_html = tuning_header(first_runtime)
     if args.notation_pdf:
-        first_runtime = (source_rows[0].get("runtime_item") or source_rows[0]) if source_rows else {}
         pdf_tuning = ((first_runtime.get("input") or {}).get("normalized_tuning") or {})
         render_notation_pdf(
             source_rows, predictions, args.score, title, pdf_tuning, args.notation_pdf,
@@ -716,7 +738,7 @@ def main() -> int:
 </style><style>
 .notation-overview{{margin:20px 0}}.notation-line{{margin:10px 0;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}}.notation-strip+.notation-strip{{border-top:2px solid var(--line)}}.notation-strip header{{display:flex;gap:10px;justify-content:space-between;padding:7px 10px;background:#303030;color:var(--muted)}}.notation-grid{{display:grid;grid-template-columns:60px repeat(var(--note-count),minmax(0,1fr));width:100%}}.notation-label{{padding:8px;background:var(--accent);font-weight:500;border-bottom:1px solid var(--line)}}.notation-cell{{min-width:0;min-height:42px;padding:5px 7px;border-left:1px solid var(--line);border-bottom:1px solid var(--line);white-space:pre-wrap;overflow-wrap:anywhere}}.notation-cell small{{display:block;color:var(--muted);font:11px ui-monospace,monospace}}.notation-cell.jianzi{{min-height:50px;background:#202020}}.round{{margin:12px 0;border:1px solid var(--line);border-radius:8px;overflow:hidden}}.round h4{{display:flex;justify-content:space-between;gap:12px;margin:0;padding:8px 10px;background:#2c2c2c}}.round h4 span{{color:var(--muted);font-weight:400}}.round-step{{border-top:1px solid var(--line)}}.round-step b{{display:block;padding:6px 10px;background:var(--accent);font-weight:500}}
 </style></head><body><h1>{esc(args.score)}｜{esc(title)}｜当前评估状态</h1>
-<div class='status'>已拉取远端结果：{completed} / {len(ordered_ids)} 个 phrase。重新运行本脚本即可刷新；表格包含本地标注，仅用于检查，不会发送到服务器。</div>
+{tuning_info_html}
 {overview}
 {''.join(blocks)}
 </body></html>"""

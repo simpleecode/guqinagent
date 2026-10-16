@@ -4,10 +4,22 @@ from unittest.mock import patch
 
 from ABC_J.scripts.visualize_running_eval_score import (
     stage_prompts, prompt_block, recorded_stage_prompts, stage_trace,
+    tuning_header,
 )
 
 
 class EvalPromptTests(unittest.TestCase):
+    def test_page_header_shows_authoritative_tuning(self):
+        item, _ = self.fixture()
+        item['input']['normalized_tuning']['name'] = '正调'
+        text = tuning_header(item)
+        self.assertIn('调弦｜正调', text)
+        self.assertIn('开弦 MIDI｜[48, 50, 53, 55, 57, 60, 62]', text)
+        self.assertIn('1弦 C3', text)
+        self.assertIn('7弦 D4', text)
+        self.assertIn('简谱调号｜1=C', text)
+        self.assertNotIn('已拉取远端结果', text)
+
     def fixture(self):
         item = {'score_key': 'test', 'phrase_id': 'p0002', 'trajectory_id': 'test-p0002',
                 'harmonic_region_at_start': False,

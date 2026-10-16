@@ -234,6 +234,8 @@ def main() -> int:
     parser.add_argument("--manifest", type=Path, default=MANIFEST)
     parser.add_argument("--split-manifest", type=Path, default=SPLIT_MANIFEST)
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
+    parser.add_argument("--include-legacy-inference-fields", action="store_true",
+                        help="retain legacy canonical_trajectory/patches/quality/differences for old algorithm-patch exporters; teacher pipelines do not need them")
     parser.add_argument("--gqs-dir", type=Path,
                         help="read canonical teacher.gqs files instead of source JSON")
     parser.add_argument("--mapped-dir", type=Path,
@@ -284,7 +286,11 @@ def main() -> int:
             for item in infer_score(row, args.max_sounding, gqs_dir=args.gqs_dir,
                                     materialize_repeats_enabled=args.materialize_repeats,
                                     mapped_dir=args.mapped_dir):
-                handles[item["split"]].write(json.dumps(item, ensure_ascii=False) + "\n")
+                exported = item if args.include_legacy_inference_fields else {
+                    key: value for key, value in item.items()
+                    if key not in {"canonical_trajectory", "patches", "quality", "unresolved_differences"}
+                }
+                handles[item["split"]].write(json.dumps(exported, ensure_ascii=False) + "\n")
                 counts[item["split"]] += 1
                 classes.update(item["quality"]["reference_classes"])
                 patch_types.update(patch["patch_type"] for patch in item["patches"])
@@ -299,6 +305,7 @@ def main() -> int:
         for handle in handles.values():
             handle.close()
     summary = {
+        "legacy_inference_fields_included": args.include_legacy_inference_fields,
         "schema_version": "inverse-1.3", "scores": len(rows),
         "source_format": "teacher.gqs" if args.gqs_dir else "readable.json",
         "trajectories": dict(counts), "reference_action_classes": dict(classes),

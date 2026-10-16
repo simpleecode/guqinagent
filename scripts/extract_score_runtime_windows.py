@@ -593,10 +593,10 @@ def main():
     parser.add_argument("--api-response", type=Path)
     parser.add_argument("--score-id", type=int, default=161749)
     parser.add_argument("--score-key", default="SWDFmDZX")
-    parser.add_argument("--from-id", type=int, default=155861)
-    parser.add_argument("--from-key", default="SkvmkgjX")
+    parser.add_argument("--from-id", type=int, help="Verified source score ID; unknown stays null.")
+    parser.add_argument("--from-key", help="Verified source score key; unknown stays null.")
     parser.add_argument("--title", default="《秋风词》")
-    parser.add_argument("--notes-length", type=int, default=140)
+    parser.add_argument("--notes-length", type=int, help="Length shown on the target detail page; unknown stays null.")
     parser.add_argument(
         "--tonic",
         required=True,

@@ -18,6 +18,27 @@ class AuditPitchTests(unittest.TestCase):
         self.assertIsNone(reason)
         self.assertAlmostEqual(pitches[0], 64.01955, places=4)
 
+    def test_invalid_string_numbers_are_reported_and_not_pitch_matched(self):
+        for text, numbers in [
+            ('按音大指四徽挑九弦', [9]), ('散挑8弦', [8]),
+            ('泛音名指十一徽勾十一弦', [11]), ('挑0弦', [0]),
+            ('撮（大指七徽六弦泛音＋中指七徽九弦泛音）', [9]),
+            ('泛音食指五徽拂一至八弦', [8]),
+        ]:
+            with self.subTest(text=text):
+                self.assertEqual(MODULE.invalid_string_numbers(text), numbers)
+                self.assertEqual(MODULE.parse_jianzi(text, self.opens), ([], 'invalid_string_number'))
+                self.assertEqual(MODULE.invalid_string_warnings({'notes': [
+                    {'index': 82, 'jianzi': text}]}), [
+                        {'index': 82, 'code': 'invalid_string_number', 'strings': numbers}])
+
+    def test_valid_compact_strings_and_hui_are_not_invalid_strings(self):
+        for text in ['名指九徽勾四弦', '食指十三徽勾七弦',
+                     '散历六五弦', '泛音名指五徽拂一至六弦',
+                     '剔五弦散如一四弦', '撮四七弦', '撮47弦', '历7六弦', '历3二弦']:
+            with self.subTest(text=text):
+                self.assertEqual(MODULE.invalid_string_numbers(text), [])
+
     def test_explicit_double_harmonics(self):
         for technique in ('撮', '泼', '剌'):
             for text in (f'{technique}（大指七徽六弦泛音＋中指七徽一弦泛音）',
@@ -304,6 +325,28 @@ class AuditPitchTests(unittest.TestCase):
             "technique": "绰上",
         }])
 
+    def test_fractional_harmonic_position_reports_warning(self):
+        for glyph in ['大指二徽三分挑五弦', '泛音大指二徽三分挑五弦',
+                      '撮（大指二徽三分五弦泛音＋中指七徽一弦泛音）']:
+            warnings = MODULE.harmonic_continuity_warnings({
+                'open_midi': self.opens, 'notes': [
+                    {'index': 0, 'jianpu': '2', 'jianzi': '泛起大指七徽挑五弦'},
+                    {'index': 1, 'jianpu': '3', 'jianzi': glyph},
+                ],
+            })
+            self.assertIn('fractional_hui_in_harmonic', [w['code'] for w in warnings], glyph)
+
+    def test_fractional_stopped_and_integer_harmonic_are_allowed(self):
+        for glyph in ['泛音大指二徽挑五弦', '大指二徽三分挑五弦按音',
+                      '泛止大指二徽三分挑五弦']:
+            warnings = MODULE.harmonic_continuity_warnings({
+                'open_midi': self.opens, 'notes': [
+                    {'index': 0, 'jianpu': '2', 'jianzi': '泛起大指七徽挑五弦'},
+                    {'index': 1, 'jianpu': '3', 'jianzi': glyph},
+                ],
+            })
+            self.assertNotIn('fractional_hui_in_harmonic', [w['code'] for w in warnings], glyph)
+
     def test_harmonic_same_string_reattack_warns(self):
         warnings = MODULE.harmonic_continuity_warnings({
             "open_midi": self.opens,
@@ -325,12 +368,103 @@ class AuditPitchTests(unittest.TestCase):
                           {'index': 1, 'jianpu': '2', 'jianzi': second}]})
             self.assertEqual(warnings, [])
 
-    def test_harmonic_same_position_same_or_missing_right_still_warns(self):
-        for second in ['食指七徽勾二弦', '食指七徽二弦']:
+    def test_same_pitch_different_harmonic_hui_has_specific_advisory(self):
+        warnings = MODULE.harmonic_continuity_warnings({
+            'open_midi': self.opens,
+            'notes': [
+                {'index': 0, 'jianpu': '2̇', 'jianzi': '泛起食指三徽勾四弦'},
+                {'index': 1, 'jianpu': '2̇', 'jianzi': '大指六徽挑四弦'},
+            ],
+        })
+        self.assertEqual(len(warnings), 1)
+        self.assertTrue(warnings[0]['same_pitch_different_hui'])
+
+    def test_suffix_fanzhi_same_hui_continuity_is_exempt(self):
+        for first, second in [
+            ('泛音食指三徽勾四弦', '泛音食指三徽挑四弦泛止'),
+            ('泛起食指三徽勾四弦', '挑四弦泛止'),
+        ]:
+            with self.subTest(second=second):
+                data = {'open_midi': self.opens, 'notes': [
+                    {'index': 90, 'jianpu': '2̇', 'jianzi': first},
+                    {'index': 91, 'jianpu': '2̇', 'jianzi': second},
+                ]}
+                self.assertEqual(MODULE.harmonic_continuity_warnings(data), [])
+
+    def test_suffix_fanzhi_different_hui_keeps_specific_advisory(self):
+        data = {'open_midi': self.opens, 'notes': [
+            {'index': 90, 'jianpu': '2̇', 'jianzi': '泛音食指八徽勾四弦'},
+            {'index': 91, 'jianpu': '2̇', 'jianzi': '泛音食指三徽挑四弦泛止'},
+        ]}
+        warnings = MODULE.harmonic_continuity_warnings(data)
+        self.assertEqual(len(warnings), 1)
+        self.assertTrue(warnings[0]['same_pitch_different_hui'])
+
+    def test_parser_keeps_current_attack_evidence_after_suffix_stop(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi('泛起食指三徽勾四弦', self.opens, context)
+        MODULE.parse_jianzi('挑四弦泛止', self.opens, context)
+        self.assertEqual(context['current_note_attacks'], [
+            {'string': 4, 'hui': 3.0, 'mode': 'harmonic'},
+        ])
+        self.assertFalse(context['harmonic_scope'])
+        MODULE.parse_jianzi('泛止食指三徽挑四弦', self.opens, context)
+        self.assertEqual(context['current_note_attacks'][0]['mode'], 'stopped')
+
+    def test_harmonic_wheel_inherits_same_hui_and_is_exempt(self):
+        for wheel in ['轮四弦', '輪四弦']:
+            data = {'open_midi': self.opens, 'notes': [
+                {'index': 0, 'jianpu': '2̇', 'jianzi': '泛起大指十一徽挑四弦'},
+                {'index': 1, 'jianpu': '2̇', 'jianzi': wheel},
+            ]}
+            self.assertEqual(MODULE.harmonic_continuity_warnings(data), [])
+            context = MODULE.new_context()
+            first, _ = MODULE.parse_jianzi(data['notes'][0]['jianzi'], self.opens, context)
+            second, reason = MODULE.parse_jianzi(wheel, self.opens, context)
+            self.assertIsNone(reason)
+            self.assertEqual(first, second)
+
+    def test_harmonic_region_warns_on_other_left_hand_walks(self):
+        for glyph in ['上三徽二分', '下九徽', '进五徽', '退八徽', '淌七徽', '浒上七徽', '引上七徽']:
+            warnings = MODULE.harmonic_continuity_warnings({
+                'open_midi': self.opens, 'notes': [
+                    {'index': 0, 'jianpu': '2', 'jianzi': '泛起大指十一徽挑四弦'},
+                    {'index': 1, 'jianpu': '3', 'jianzi': glyph},
+                ],
+            })
+            self.assertIn('walk_inside_harmonic_region', [w['code'] for w in warnings], glyph)
+
+    def test_walk_after_fanzhi_is_not_harmonic_walk(self):
+        warnings = MODULE.harmonic_continuity_warnings({
+            'open_midi': self.opens, 'notes': [
+                {'index': 0, 'jianpu': '2', 'jianzi': '泛起大指十一徽挑四弦'},
+                {'index': 1, 'jianpu': '3', 'jianzi': '泛止上三徽二分'},
+            ],
+        })
+        self.assertNotIn('walk_inside_harmonic_region', [w['code'] for w in warnings])
+
+    def test_different_pitch_or_stopped_note_keeps_general_advisory(self):
+        for target, glyph in [
+            ('2', '大指六徽挑四弦'),
+            ('2̇', '大指六徽挑四弦按音'),
+        ]:
+            warnings = MODULE.harmonic_continuity_warnings({
+                'open_midi': self.opens,
+                'notes': [
+                    {'index': 0, 'jianpu': '2̇', 'jianzi': '泛起食指三徽勾四弦'},
+                    {'index': 1, 'jianpu': target, 'jianzi': glyph},
+                ],
+            })
+            self.assertEqual(len(warnings), 1)
+            self.assertNotIn('same_pitch_different_hui', warnings[0])
+
+    def test_harmonic_same_position_is_exempt_without_technique_enumeration(self):
+        for second in ['食指七徽勾二弦', '食指七徽二弦', '二弦',
+                       '勾剔二弦', '抹勾二弦', '涓二弦', '自定义指法二弦']:
             warnings = MODULE.harmonic_continuity_warnings({'open_midi': self.opens,
                 'notes': [{'index': 0, 'jianpu': '2', 'jianzi': '泛起食指七徽勾二弦'},
                           {'index': 1, 'jianpu': '2', 'jianzi': second}]})
-            self.assertEqual([w['code'] for w in warnings], ['harmonic_to_same_string_attack'])
+            self.assertEqual(warnings, [], second)
 
     def test_stopped_reattack_is_not_exempt_by_alternating_right_hand(self):
         warnings = MODULE.harmonic_continuity_warnings({'open_midi': self.opens,
@@ -481,6 +615,41 @@ class AuditPitchTests(unittest.TestCase):
         self.assertIsNone(reason)
         self.assertEqual(pitches, [57])
         self.assertNotIn("中指", context["left_positions"])
+
+    def test_mixed_cuo_records_named_stopped_finger_for_daiqi(self):
+        for text in ['撮（中指七徽一弦按音＋六弦散音）',
+                     '撮（六弦散音＋中指一弦七徽按音）']:
+            with self.subTest(text=text):
+                context = MODULE.new_context()
+                MODULE.parse_jianzi('食指九徽勾七弦', self.opens, context)
+                context['left_finger'] = None
+                MODULE.parse_jianzi(text, self.opens, context)
+                self.assertEqual(context['left_finger'], '中指')
+                self.assertEqual(context['left_positions']['中指']['string'], 1)
+                self.assertEqual(MODULE.parse_jianzi('带起', self.opens, context), ([48], None))
+
+    def test_other_open_string_does_not_lose_latest_stopped_finger(self):
+        context = MODULE.new_context()
+        # 名指 existed before 食指 in the cache; updating it must renew recency.
+        MODULE.parse_jianzi('名指九徽挑一弦', self.opens, context)
+        MODULE.parse_jianzi('食指九徽挑七弦', self.opens, context)
+        MODULE.parse_jianzi('名指十徽挑六弦', self.opens, context)
+        MODULE.parse_jianzi('散勾三弦', self.opens, context)
+        self.assertEqual(context['left_positions']['名指']['string'], 6)
+        self.assertEqual(MODULE.parse_jianzi('带起', self.opens, context), ([60], None))
+
+    def test_open_same_string_releases_its_cached_left_position(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi('名指十徽挑六弦', self.opens, context)
+        MODULE.parse_jianzi('散勾六弦', self.opens, context)
+        self.assertEqual(MODULE.parse_jianzi('带起', self.opens, context),
+                         ([], 'daiqi_requires_previous_stopped_note'))
+
+    def test_explicit_daiqi_finger_without_position_does_not_use_other_finger(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi('食指九徽挑七弦', self.opens, context)
+        self.assertEqual(MODULE.parse_jianzi('中指带起', self.opens, context),
+                         ([], 'daiqi_requires_previous_stopped_note'))
 
     def test_daiqi_without_stopped_context_is_unresolved(self):
         pitches, reason = MODULE.parse_jianzi("散挑7弦带起同声", self.opens)

@@ -65,7 +65,7 @@ NOTE_NAMES = ("C", "C♯", "D", "E♭", "E", "F",
               "F♯", "G", "A♭", "A", "B♭", "B")
 RIGHT_HAND_TECHNIQUES = (
     "挑", "勾", "抹", "剔", "托", "擘", "打", "摘", "撮", "泼", "剌",
-    "历", "歷", "厉",
+    "历", "歷", "厉", "轮", "輪",
 )
 LEFT_HAND_FINGERS = ("大指", "名指", "中指", "食指", "跪指")
 ORNAMENTS = {"吟", "猱", "撞", "逗", "往来", "复", "掐起", "带起", "抓起", "爪起", "滔起"}
@@ -143,6 +143,35 @@ def parse_string_numbers(text: str) -> list[int]:
             if 1 <= value <= 7:
                 values.append(value)
     return values
+
+
+def invalid_string_numbers(text: str) -> list[int]:
+    """Detect out-of-range explicit strings without mistaking hui for strings.
+
+    Preserve compact valid spellings such as 四七弦 / 47弦.
+    """
+    invalid = set()
+    for token in re.findall(r'([零〇一二三四五六七八九十百\d]+)\s*弦', str(text)):
+        if token.isdigit():
+            values = [int(c) for c in token] if all(c in '1234567' for c in token) else [int(token)]
+        elif '百' in token:
+            invalid.add(100)
+            continue
+        elif '十' in token:
+            left, right = token.split('十', 1)
+            values = [(ZH_NUMBERS.get(left, 1) if left else 1) * 10 + ZH_NUMBERS.get(right, 0)]
+        else:
+            values = [int(c) if c.isdigit() else ZH_NUMBERS.get(c, 0) for c in token]
+        invalid.update(value for value in values if not 1 <= value <= 7)
+    return sorted(invalid)
+
+
+def invalid_string_warnings(data: dict) -> list[dict]:
+    return [
+        {'index': note.get('index'), 'code': 'invalid_string_number', 'strings': numbers}
+        for note in data.get('notes', [])
+        if (numbers := invalid_string_numbers(note.get('jianzi') or ''))
+    ]
 
 
 def string_number(token: str) -> int:
@@ -261,6 +290,8 @@ def remember_left_position(
         return
     resolved_finger = finger or context.get("left_finger")
     if resolved_finger in LEFT_HAND_FINGERS:
+        # Dict order is the fallback recency order, not first-ever use order.
+        context['left_positions'].pop(str(resolved_finger), None)
         context["left_positions"][str(resolved_finger)] = {
             "string": int(string), "hui": hui,
         }
@@ -286,12 +317,16 @@ def release_position_for_daiqi(context: dict, text: str) -> tuple[str, int] | No
     """
     requested = first_token(text, LEFT_HAND_FINGERS)
     positions = context["left_positions"]
-    if requested and requested in positions:
-        return requested, int(positions[requested]["string"])
+    if requested:
+        return (requested, int(positions[requested]['string'])) if requested in positions else None
     active_finger = context.get("left_finger")
     active_string = context.get("active_left_string")
     if active_finger in LEFT_HAND_FINGERS and active_string is not None:
         return str(active_finger), int(active_string)
+    if active_finger in positions:
+        # An intervening open-string pluck clears melodic inheritance, but
+        # need not release a finger still pressing a DIFFERENT string.
+        return str(active_finger), int(positions[active_finger]['string'])
     if positions:
         finger = next(reversed(positions))
         return str(finger), int(positions[finger]["string"])
@@ -459,6 +494,9 @@ def _parse_jianzi(
                 if error or pitch is None:
                     return [], error or 'double_harmonic_pitch_unavailable'
                 harmonic_parts.append((hui, pitch))
+                context['current_note_attacks'].append({
+                    'string': strings[0], 'hui': hui, 'mode': 'harmonic',
+                })
             huis = {hui for hui, _pitch in harmonic_parts}
             context['sound_mode'] = 'harmonic'
             context['harmonic_hui'] = next(iter(huis)) if len(huis) == 1 else None
@@ -796,7 +834,16 @@ def _parse_jianzi(
         context["stopped_hui"] = hui
         context["active_left_string"] = stopped_string
         context["active_left_hui"] = hui
-        remember_left_position(context, stopped_string, hui)
+        stopped_component = next((part for part in re.split(r'[＋+]', double_stopped.group(1))
+                                  if '散音' not in part and stopped_string in parse_string_numbers(part)), '') if double_stopped else text
+        stopped_finger = first_token(stopped_component, LEFT_HAND_FINGERS)
+        if stopped_finger is not None:
+            context['left_finger'] = stopped_finger
+        remember_left_position(context, stopped_string, hui, stopped_finger)
+        context['current_note_attacks'] = [
+            {'string': stopped_string, 'hui': hui, 'mode': 'stopped'},
+            {'string': string_number(compound.group('open')), 'hui': None, 'mode': 'open'},
+        ]
         context["sound_mode"] = None
         return ([stopped, opened] if error is None else []), error
 
@@ -837,9 +884,14 @@ def _parse_jianzi(
     if explicit_open:
         mode = "open"
         context["sound_mode"] = "open"
-        # “散” is explicit left-hand information: it releases any former
-        # stopped position, so a following abbreviated pluck cannot inherit
-        # an obsolete hui.
+        # Release only the sounded open strings; other fingers may remain
+        # pressed for a subsequent 带起. Still clear melodic hui inheritance.
+        context['left_positions'] = {
+            finger: position for finger, position in context['left_positions'].items()
+            if position.get('string') not in strings
+        }
+        if context.get('left_finger') not in context['left_positions']:
+            context['left_finger'] = None
         context["active_left_string"] = None
         context["active_left_hui"] = None
     elif "按音" in text:
@@ -877,6 +929,9 @@ def _parse_jianzi(
         if error:
             return [], error
         pitches.append(pitch)
+        context['current_note_attacks'].append({
+            'string': string, 'hui': effective_hui, 'mode': string_mode,
+        })
         if string_mode == "harmonic":
             context["harmonic_hui"] = effective_hui
         elif effective_hui is not None:
@@ -905,6 +960,11 @@ def parse_jianzi(
     of relying on every branch to remember the same cleanup.
     """
     normalized = normalize_context(context)
+    # Per-note evidence is recorded where pitch mode and inherited position
+    # are resolved, before a trailing control marker clears persistent state.
+    normalized['current_note_attacks'] = []
+    if invalid_string_numbers(text):
+        return [], 'invalid_string_number'
     compact = str(text or "").strip()
     if (parse_string_numbers(compact)
             or first_token(compact, RIGHT_HAND_TECHNIQUES) is not None
@@ -926,6 +986,9 @@ def parse_jianzi(
             normalized["harmonic_hui"] = marker_hui
         normalized["active_left_string"] = None
         normalized["active_left_hui"] = None
+    normalized['current_note_harmonic_scope'] = bool(
+        normalized.get('harmonic_scope') and not compact.startswith('泛止')
+    )
     pitches, reason = _parse_jianzi(text, open_midi, normalized)
     if "泛止" in compact and not compact.startswith("泛止"):
         normalized["harmonic"] = False
@@ -1194,7 +1257,8 @@ def harmonic_continuity_warnings(data: dict) -> list[dict]:
     pending_harmonic_strings: set[int] = set()
     pending_harmonic_is_compound = False
     pending_harmonic_hui = None
-    pending_harmonic_right = None
+    pending_harmonic_target = None
+    tonic_midi = parse_tonic_midi(metadata)
     warnings: list[dict] = []
     for note in data.get("notes", []):
         text = str(note.get("jianzi") or "").strip()
@@ -1212,57 +1276,64 @@ def harmonic_continuity_warnings(data: dict) -> list[dict]:
             pending_harmonic_strings = set()
             pending_harmonic_is_compound = False
             pending_harmonic_hui = None
-            pending_harmonic_right = None
+            pending_harmonic_target = None
             continue
 
         context_before = dict(context)
         strings = set(parse_string_numbers(text))
         actual, reason = parse_jianzi(text, open_midi, context)
 
-        # A prefixed 泛止 closes the region before a following articulated
-        # note; a suffix 泛止 belongs to the current harmonic note and closes
-        # it only afterwards.  The latter remains a harmonic attack here.
-        prefix_fanzhi = (
-            "泛止" in text
-            and ("泛起" not in text or text.find("泛止") < text.find("泛起"))
-        )
+        # Invalid harmonic positions cannot produce an audited pitch. Report
+        # the physical constraint explicitly instead of silently skipping it.
+        if reason == "fractional_hui_not_valid_for_harmonic":
+            warnings.append({
+                "index": note.get("index"),
+                "code": "fractional_hui_in_harmonic",
+            })
+
+        attacks = context.get('current_note_attacks') or []
         is_harmonic_attack = bool(
             actual and reason is None and strings
-            and not prefix_fanzhi
-            and "按音" not in text
-            and "散" not in text
-            and ("泛音" in text or "泛起" in text
-                 or context_before.get("harmonic_scope"))
+            and attacks and all(a['mode'] == 'harmonic' for a in attacks)
         )
 
-        if (context_before.get("harmonic_scope")
-                and text.startswith(("绰上", "注下"))):
+        harmonic_walk = re.match(
+            r"^(?:急|缓|少)?(绰上|注下|引上|上|下|进|退|淌|浒)", text
+        )
+        if (context.get('current_note_harmonic_scope')
+                and harmonic_walk and not strings
+                and first_token(text, RIGHT_HAND_TECHNIQUES) is None):
             warnings.append({
                 "index": note.get("index"),
                 "code": "walk_inside_harmonic_region",
-                "technique": "绰上" if text.startswith("绰上") else "注下",
+                "technique": harmonic_walk.group(1),
             })
 
         shared = sorted(pending_harmonic_strings & strings)
-        current_hui = parse_hui(text)
-        if current_hui is None:
-            current_hui = context_before.get('harmonic_hui')
-        right_techniques = {technique for technique in RIGHT_HAND_TECHNIQUES if technique in text}
-        current_right = next(iter(right_techniques)) if len(right_techniques) == 1 else None
-        alternating_same_position = bool(
+        current_hui = attacks[0]['hui'] if len(attacks) == 1 else None
+        # Rearticulating a harmonic at the same effective position does not
+        # move the contact point. Technique names (including compound or
+        # abbreviated spellings) are irrelevant to this continuity advisory.
+        same_harmonic_position = bool(
             is_harmonic_attack and len(actual) == 1
             and len(strings) == 1 and strings == pending_harmonic_strings
             and current_hui is not None and current_hui == pending_harmonic_hui
-            and current_right is not None and pending_harmonic_right is not None
-            and current_right != pending_harmonic_right
         )
         if (shared and actual and reason is None and not pending_harmonic_is_compound
-                and not alternating_same_position):
-            warnings.append({
+                and not same_harmonic_position):
+            warning = {
                 "index": note.get("index"),
                 "code": "harmonic_to_same_string_attack",
                 "strings": shared,
-            })
+            }
+            current_target = parse_jianpu(note.get("jianpu"), tonic_midi)
+            if (is_harmonic_attack and len(actual) == 1 and len(strings) == 1
+                    and current_hui is not None and pending_harmonic_hui is not None
+                    and current_hui != pending_harmonic_hui
+                    and current_target is not None and pending_harmonic_target is not None
+                    and current_target == pending_harmonic_target):
+                warning["same_pitch_different_hui"] = True
+            warnings.append(warning)
 
         # The advisory only spans the immediately following sounded event.
         # A bare rest, sustain, malformed glyph, or non-harmonic note ends it.
@@ -1273,7 +1344,10 @@ def harmonic_continuity_warnings(data: dict) -> list[dict]:
         pending_harmonic_is_compound = is_continuity_exempt_compound(text)
         single_harmonic = is_harmonic_attack and len(strings) == 1 and len(actual) == 1
         pending_harmonic_hui = current_hui if single_harmonic else None
-        pending_harmonic_right = current_right if single_harmonic else None
+        pending_harmonic_target = (
+            parse_jianpu(note.get("jianpu"), tonic_midi)
+            if single_harmonic and not note.get("jianpu_alt") else None
+        )
     return warnings
 
 

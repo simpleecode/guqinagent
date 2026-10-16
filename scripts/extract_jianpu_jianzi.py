@@ -208,7 +208,7 @@ DECOR_TAG = {
     ":ts":     "同声",       # tóng-shēng (simultaneous)
     # ---- repetition / position markers ----
     ":bd":     "不动",       # bù-dòng (no movement)
-    ":k":      "〔再作起点ㄱ〕", # mark: repetition start point (not repeat execution)
+    ":k":      "[再作标记ㄱ]", # mark: repetition start point (not repeat execution)
     ":zkez":   "再作二声",   # from :k to here, repeat twice more
     ":zksz":   "再作三声",   # from :k to here, repeat three times more
     ":ztzz":   "从头再作",   # repeat once more from the beginning

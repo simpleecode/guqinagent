@@ -11,7 +11,7 @@ SPEC.loader.exec_module(MODULE)
 
 class JianpuDecodeTests(unittest.TestCase):
     def test_repeat_anchor_tag_names_the_explicit_symbol(self):
-        self.assertEqual(MODULE.DECOR_TAG[':k'], '〔再作起点ㄱ〕')
+        self.assertEqual(MODULE.DECOR_TAG[':k'], '[再作标记ㄱ]')
 
     def test_demisemiquaver_pitch_is_not_a_rest(self):
         decoded = MODULE.decode_jianpu_token("d5'")
