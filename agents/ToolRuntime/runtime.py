@@ -17,6 +17,15 @@ from agents.abc_to_jianzipu.teacher_trajectory import (
 )
 from agents.abc_to_jianzipu.trajectory_replay import compare_replay_to_patch_targets, replay_patches
 
+def harmonic_resonance_warning_text(warning: dict) -> str:
+    strings = "、".join(f"{value}弦" for value in warning.get("strings") or [])
+    if warning.get("same_pitch_different_hui"):
+        return (
+            f"泛音后紧接同弦不同徽泛音（{strings}；不适宜演奏；"
+            "考虑对前一音使用锁／涓／勾剔／抹勾／抹挑／轮等同一徽位连续起音技法），或选择其他弦"
+        )
+    return f"泛音后紧接同弦起音（{strings}；会止住泛音，可能破坏余韵）"
+
 def target_midis(item: dict, source_index: int) -> list[float]:
     """Every sounding target of a note: all ABC chord tones, else jianpu.
 
@@ -42,6 +51,92 @@ def target_midis(item: dict, source_index: int) -> list[float]:
     if not values:
         raise ValueError(f"source_index {source_index} has no sounding target")
     return [float(value) for value in values]
+
+NUMBERED_REPEAT_PATTERN = r'从\s*(?:音序\s*)?(\d+)\s*(?:[（(]音序[）)]\s*)?再[作做]'
+MISSING_REPEAT_ANCHOR_TEXT = '缺少再作标记（“从ㄱ再作”前需先有“[再作标记ㄱ]”；也可改用“从n再作”，n为匹配的历史音序）'
+
+
+def related_repeat_phrases(item: dict, historical: dict | None = None) -> list[dict]:
+    """Retrieve earlier score phrases sharing >8 consecutive pitched events.
+
+    Only public target pitches (including octave/chord tones) are compared;
+    rests, unavailable pitches and missing source ranges break a sequence.
+    """
+    def start(row):
+        span = row.get('input', {}).get('event_range') or {}
+        return int(span.get('start', span.get('start_index', 0)))
+
+    prior = sorted((row for (score, _), row in (historical or {}).items()
+                    if score == item.get('score_key') and start(row) < start(item)), key=start)
+    if not prior:
+        return []
+
+    def sequence(rows):
+        result = []
+        previous_index = None
+        for row in rows:
+            for note in row['input'].get('notes_without_jianzi') or []:
+                index = note.get('index')
+                if index is None:
+                    continue
+                if previous_index is not None and int(index) != previous_index + 1:
+                    result.append((None, None, None))
+                previous_index = int(index)
+                if is_structural_note(note):
+                    continue
+                key = None
+                if not str(note.get('abc') or '').startswith(('z', '-')) and not any(
+                        s in str(note.get('jianpu')) for s in ('休止', '延音')):
+                    try:
+                        key = tuple(sorted(target_midis(row, int(index))))
+                    except (ValueError, TypeError, KeyError):
+                        pass
+                result.append((key, row, note))
+        return result
+
+    earlier, current = sequence(prior), sequence([item])
+    previous = [0] * (len(earlier) + 1)
+    matches = {}
+    for i, (key, _, note) in enumerate(current):
+        lengths = [0] * (len(earlier) + 1)
+        for j, (past_key, row, past_note) in enumerate(earlier):
+            if key is not None and key == past_key:
+                length = lengths[j+1] = previous[j] + 1
+                if length >= 9:
+                    for _, matched_row, _ in earlier[j-length+1:j+1]:
+                        phrase = matched_row['phrase_id']
+                        if length > matches.get(phrase, {}).get('matched_events', 0):
+                            matches[phrase] = {
+                                'phrase_id': phrase, 'status': 'confirmed_readonly',
+                                'notes': deepcopy(matched_row['input']['notes_without_jianzi']),
+                                'actions': deepcopy((matched_row.get('reference_plan') or {}).get('actions', [])),
+                                'matched_events': length,
+                                'matched_from_event': earlier[j-length+1][2].get('event_index'),
+                                'matched_current_event': current[i-length+1][2].get('event_index'),
+                                'matched_sources_in_phrase': [n['index'] for _, r, n in earlier[j-length+1:j+1]
+                                                              if r['phrase_id'] == phrase],
+                            }
+        previous = lengths
+    # Keep only the earliest matching phrase to bound prompt context.
+    for row in prior:
+        if row['phrase_id'] in matches:
+            candidate = matches[row['phrase_id']]
+            texts = {int(a['source_index']): str(a.get('jianzi_text') or a.get('text') or '').strip()
+                     for a in candidate['actions'] if a.get('source_index') is not None}
+            def has_notation(index):
+                return texts.get(index, '') not in {
+                    '', '空', '[空]', '—', '减字待填写', '[减字待填写]', OMITTED_PLACEHOLDER,
+                }
+            sounded = [n['index'] for key, r, n in earlier if key is not None and r['phrase_id'] == row['phrase_id']]
+            matched = candidate['matched_sources_in_phrase']
+            # Reject mostly empty phrases, and also mostly empty matched
+            # spans within an otherwise populated phrase. Exact half is OK.
+            if any(sum(has_notation(index) for index in indices) * 2 < len(indices)
+                   for indices in (sounded, matched)):
+                continue
+            return [candidate]
+    return []
+
 
 def jianpu_symbol_for_target(note: dict, target_midi: float, tonic_midi: float) -> str:
     """Return the written jianpu component that actually denotes ``target_midi``.
@@ -338,6 +433,18 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         if warning.get("code") == "harmonic_to_same_string_attack"
         and warning.get("source_index") is not None
     }
+    fractional_harmonic_warnings = {
+        int(warning["source_index"]): warning
+        for warning in (warnings or [])
+        if warning.get("code") == "fractional_hui_in_harmonic"
+        and warning.get("source_index") is not None
+    }
+    invalid_string_warnings = {
+        int(warning['source_index']): warning
+        for warning in (warnings or [])
+        if warning.get('code') == 'invalid_string_number'
+        and warning.get('source_index') is not None
+    }
     pluck_pair_warnings = {
         int(warning["source_index"]): warning
         for warning in (warnings or [])
@@ -365,7 +472,9 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
     repeat_anchor_warnings_by_source: dict[int, list[dict]] = {}
     for warning in warnings or []:
         if (warning.get("code") in {"missing_repeat_anchor", "missing_repeat_instruction",
-                                   "repeat_anchor_instruction_overlap"}
+                                   "repeat_anchor_instruction_overlap", "repeat_from_head_pitch_mismatch",
+                                   "repeat_omission_marker_missing", 'repeat_numbered_start_missing',
+                                   'repeat_numbered_pitch_mismatch'}
                 and warning.get("source_index") is not None):
             repeat_anchor_warnings_by_source.setdefault(int(warning['source_index']), []).append(warning)
 
@@ -410,16 +519,18 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
                 f":warning:散音后紧接同弦按音（{strings}；会止住散音，可能破坏韵味）"
             )
         harmonic_walk_warning = harmonic_walk_warnings.get(index)
+        if index in fractional_harmonic_warnings:
+            parts.append(":warning:泛音只能在徽位上弹出（请使用整数徽位，或先泛止并改用按音）")
+        if index in invalid_string_warnings:
+            numbers = '、'.join(str(n) for n in invalid_string_warnings[index]['strings'])
+            parts.append(f':warning:非法弦号（{numbers}弦；古琴只有一至七弦，请修正弦号）')
         if harmonic_walk_warning:
             technique = harmonic_walk_warning.get("technique") or "走手"
             parts.append(f":warning:泛音区间内不能使用{technique}（请先泛止并重新起音）")
         harmonic_resonance_warning = harmonic_resonance_warnings.get(index)
         if harmonic_resonance_warning:
-            strings = "、".join(
-                f"{value}弦" for value in harmonic_resonance_warning.get("strings") or []
-            )
             parts.append(
-                f":warning:泛音后紧接同弦起音（{strings}；会止住泛音，可能破坏余韵）"
+                ":warning:" + harmonic_resonance_warning_text(harmonic_resonance_warning)
             )
         pluck_pair_warning = pluck_pair_warnings.get(index)
         if pluck_pair_warning:
@@ -456,12 +567,22 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
             )
             parts.append(f":warning:低徽按音过紧（{boundary}）")
         for repeat_warning in repeat_anchor_warnings_by_source.get(index, []):
-            if repeat_warning["code"] == "repeat_anchor_instruction_overlap":
-                parts.append(":warning:再作起点标记与再作指令不能重合")
+            if repeat_warning['code'] == 'repeat_numbered_start_missing':
+                parts.append(f':warning:再作指定音序不存在或不在当前音之前（音序{repeat_warning["target_event_index"]}）')
+            elif repeat_warning['code'] == 'repeat_numbered_pitch_mismatch':
+                parts.append(f':warning:指定音序再作序列不匹配（从{repeat_warning["target_event_index"]}再作；按省略长度核验{repeat_warning["compared_events"]}音）')
+            elif repeat_warning['code'] == 'repeat_from_head_pitch_mismatch':
+                parts.append(':warning:从头再作序列与曲首或段首不匹配')
+            elif repeat_warning['code'] == 'repeat_omission_marker_missing':
+                affected = '、'.join(str(i) for i in repeat_warning.get('missing_event_indices', []))
+                detail = f'（音序{affected}；请填写“{OMITTED_PLACEHOLDER}”）' if affected else ''
+                parts.append(':warning:再作省略音缺少省略标记' + detail)
+            elif repeat_warning["code"] == "repeat_anchor_instruction_overlap":
+                parts.append(":warning:再作标记与再作指令不能重合")
             elif repeat_warning["code"] == "missing_repeat_instruction":
                 parts.append(":warning:再作省略前缺少再作指令（前一个有效减字需含“再作”“从ㄱ再作”或“从头再作”）")
             else:
-                parts.append(":warning:缺少再作起点标记（“从ㄱ再作”前需先有“〔再作起点ㄱ〕”）")
+                parts.append(':warning:' + MISSING_REPEAT_ANCHOR_TEXT)
         return "".join(parts)
 
     for index in sorted(changed):
@@ -539,7 +660,7 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
         elif unmodified_codes == {"low_hui_stopped_too_cramped"}:
             lines.append("仍有未修改的低徽按音警告｜以下行按音位置过紧；请考虑更高徽位、换弦或其他指法：")
         elif unmodified_codes == {"missing_repeat_anchor"}:
-            lines.append("仍有未修改的再作警告｜“从ㄱ再作”前需先有“〔再作起点ㄱ〕”：")
+            lines.append('仍有未修改的再作警告｜' + MISSING_REPEAT_ANCHOR_TEXT + '：')
         else:
             lines.append("仍有未修改的警告｜以下行未包含在本轮提交；请核对：")
     for index in unmodified_warning_indices:
@@ -935,6 +1056,8 @@ class RealToolRuntime:
                         "consecutive_walks_without_attack",
                         "open_to_stopped_same_string",
                         "walk_inside_harmonic_region",
+                        "fractional_hui_in_harmonic",
+                        "invalid_string_number",
                         "harmonic_to_same_string_attack",
                         "nonadjacent_pluck_pair",
                         "same_string_cuo_pair",
@@ -943,6 +1066,10 @@ class RealToolRuntime:
                         "missing_repeat_anchor",
                         "missing_repeat_instruction",
                         "repeat_anchor_instruction_overlap",
+                        "repeat_from_head_pitch_mismatch",
+                        "repeat_omission_marker_missing",
+                        'repeat_numbered_start_missing',
+                        'repeat_numbered_pitch_mismatch',
                     }
                 ]
                 if remaining_warnings:
@@ -1217,6 +1344,188 @@ def repeat_anchor_warnings(
                 omission_run = False
     return warnings
 
+def repeat_content_warnings(
+    item: dict, actions_by_source: dict[int, dict], *,
+    historical: dict[tuple[str, str], dict] | None = None,
+) -> list[dict]:
+    """Check public repeat tails, comparing at most five sounded target events.
+
+    Candidate heads come from the score or explicit score sections, never a
+    phrase boundary or sealed annotation. Sustain/rest timing is not compared.
+    """
+    def start(row):
+        span = row.get('input', {}).get('event_range') or {}
+        return int(span.get('start', span.get('start_index', 0)))
+
+    prior = sorted((row for (score, _), row in (historical or {}).items()
+                    if score == item.get('score_key') and start(row) < start(item)), key=start)
+    entries = []
+    for row in [*prior, item]:
+        current = row is item
+        action_map = actions_by_source if current else {
+            int(a['source_index']): a for a in (row.get('reference_plan') or {}).get('actions', [])
+            if a.get('source_index') is not None}
+        notes = row.get('input', {}).get('notes_without_jianzi') or row.get('input', {}).get('phrase_notes') or []
+        for note in notes:
+            if note.get('index') is None:
+                continue
+            action = action_map.get(int(note['index'])) or {}
+            text = str(action.get('jianzi_text') or action.get('text') or '').strip()
+            section = note.get('section') or {}
+            section_key = (section.get('number'), section.get('label'), section.get('title')) if section else None
+            midi = None
+            silent = (is_structural_note(note)
+                      or any(s in str(note.get('jianpu')) for s in ('休止', '延音'))
+                      or str(note.get('abc') or '').startswith(('z', '-')))
+            if not silent:
+                try:
+                    midi = tuple(sorted(float(v) for v in target_midis(row, int(note['index']))))
+                except (ValueError, TypeError, KeyError):
+                    pass
+            entries.append({'note': note, 'text': text, 'current': current,
+                            'section': section_key, 'midi': midi,
+                            'unresolved': not silent and midi is None})
+    entries.sort(key=lambda entry: int(entry['note']['index']))
+    if not entries:
+        return []
+
+    command_pattern = NUMBERED_REPEAT_PATTERN + r'|从头再[作做]|从ㄱ再[作做]|再[作做](?:[二三]声)?'
+
+    def instruction(text):
+        if text == OMITTED_PLACEHOLDER:
+            return None, ''
+        without_anchor = re.sub(r'再[作做](?:起点|标记)(?:ㄱ)?', '', text)
+        match = re.search(command_pattern, without_anchor)
+        return (match.group(), re.sub(command_pattern, '', without_anchor).strip('〔〕【】[]()（） 。；;：:、\t\n')) if match else (None, '')
+
+    # A head is known only at source zero or a genuine section transition.
+    section_heads = {}
+    active_section = None
+    active_head = None
+    for pos, entry in enumerate(entries):
+        note = entry['note']
+        contiguous = pos > 0 and note['index'] == entries[pos-1]['note']['index'] + 1
+        if pos == 0:
+            active_head = pos if note['index'] == 0 or (note.get('section') or {}).get('start') else None
+        elif (note.get('section') or {}).get('start') or entry['section'] != active_section:
+            active_head = pos if contiguous or (note.get('section') or {}).get('start') else None
+        elif not contiguous:
+            active_head = None
+        active_section = entry['section']
+        section_heads[pos] = active_head
+
+    warnings = []
+    for pos, entry in enumerate(entries):
+        command, ordinary = instruction(entry['text'])
+        if not command:
+            continue
+        numbered = re.fullmatch(NUMBERED_REPEAT_PATTERN, command)
+        tail = []
+        if not ordinary and entry['midi'] is not None:
+            tail.append(entry)
+        incomplete_probe = entry['unresolved'] and not ordinary
+        previous_source = int(entry['note']['index'])
+        # Structural bars do not stop a repeat, but score sections do.
+        for later in entries[pos+1:]:
+            if later['note']['index'] != previous_source + 1:
+                incomplete_probe = bool(numbered) or len(tail) < 5
+                break
+            previous_source = int(later['note']['index'])
+            if ((later['note'].get('section') or {}).get('start')
+                    or later['section'] != entry['section']):
+                break
+            if instruction(later['text'])[0]:
+                break
+            if is_structural_note(later['note']):
+                continue
+            if later['unresolved']:
+                incomplete_probe = bool(numbered) or len(tail) < 5
+                break
+            if later['text'] and later['text'] != OMITTED_PLACEHOLDER:
+                # Allow an explicit non-sounding control, e.g. 泛止, but an
+                # authored attack ends the omitted repeat interval.
+                if later['midi'] is not None:
+                    break
+            if later['midi'] is not None:
+                tail.append(later)
+        missing = [e for e in tail if e['current'] and not e['text']]
+        if missing:
+            warnings.append({'source_index': int(missing[0]['note']['index']),
+                             'code': 'repeat_omission_marker_missing',
+                             'command_source_index': int(entry['note']['index']),
+                             'missing_source_indices': [int(e['note']['index']) for e in missing],
+                             'missing_event_indices': [int(e['note']['event_index']) for e in missing
+                                                       if e['note'].get('event_index') is not None]})
+        if numbered and (entry['current'] or any(e['current'] for e in tail)):
+            event_index = int(numbered.group(1))
+            candidates = [p for p, e in enumerate(entries[:pos])
+                          if e['note'].get('event_index') == event_index and e['midi'] is not None]
+            location = entry if entry['current'] else next(e for e in tail if e['current'])
+            warning = {'source_index': int(location['note']['index']),
+                       'target_event_index': event_index, 'compared_events': len(tail)}
+            if not candidates:
+                warning['code'] = 'repeat_numbered_start_missing'
+                warnings.append(warning)
+            else:
+                pitches = []
+                previous_index = None
+                for candidate in entries[candidates[-1]:pos]:
+                    index = int(candidate['note']['index'])
+                    if (previous_index is not None and index != previous_index + 1) or candidate['unresolved']:
+                        break
+                    previous_index = index
+                    if candidate['midi'] is not None:
+                        pitches.append(candidate['midi'])
+                    if len(pitches) == len(tail):
+                        break
+                target = [e['midi'] for e in tail]
+                if not target or incomplete_probe or pitches != target:
+                    warning.update(code='repeat_numbered_pitch_mismatch',
+                                   target_midis=target, candidate_midis=pitches)
+                    warnings.append(warning)
+            continue
+        probe = tail[:5]
+        if (command not in {'从头再作', '从头再做'} or not probe or incomplete_probe
+                or not any(e['current'] for e in probe)):
+            continue
+        candidates = []
+        unknown = False
+        heads = {section_heads.get(pos)}
+        if entries[0]['note']['index'] == 0:
+            heads.add(0)
+        else:
+            unknown = True
+        for head in heads:
+            if head is None:
+                unknown = True
+                continue
+            pitches = []
+            previous_index = None
+            for candidate in entries[head:pos]:
+                index = int(candidate['note']['index'])
+                if previous_index is not None and index != previous_index + 1:
+                    break
+                previous_index = index
+                if candidate['unresolved']:
+                    break
+                if candidate['midi'] is not None:
+                    pitches.append(candidate['midi'])
+                if len(pitches) == len(probe):
+                    break
+            if len(pitches) == len(probe):
+                candidates.append(pitches)
+            else:
+                unknown = True
+        target = [e['midi'] for e in probe]
+        if not unknown and candidates and all(candidate != target for candidate in candidates):
+            location = entry if entry['current'] else next(e for e in probe if e['current'])
+            warnings.append({'source_index': int(location['note']['index']),
+                             'code': 'repeat_from_head_pitch_mismatch',
+                             'command_source_index': int(entry['note']['index']),
+                             'compared_events': len(probe), 'target_midis': target,
+                             'candidate_midis': candidates})
+    return warnings
+
 def validate_jianzi_only(
     item: dict, patches: list[dict], *, toward_reference: bool = False,
     require_complete: bool = True,
@@ -1295,6 +1604,7 @@ def validate_jianzi_only(
     warnings.extend(repeat_anchor_warnings(
         item, by_index, historical=historical,
     ))
+    warnings.extend(repeat_content_warnings(item, by_index, historical=historical))
     pitch_report = {"counts": {"matched": 0, "mismatched": 0, "skipped": 0},
                     "details": []}
     try:
@@ -1401,6 +1711,15 @@ def validate_jianzi_only(
                     "code": detail.get("code"),
                     "technique": detail.get("technique"),
                     "strings": list(detail.get("strings") or []),
+                    "same_pitch_different_hui": bool(detail.get("same_pitch_different_hui")),
+                })
+        for detail in AUDIT.invalid_string_warnings({'notes': notes}):
+            source_index = detail.get('index')
+            if source_index is not None and int(source_index) in current_source_indices:
+                warnings.append({
+                    'source_index': int(source_index),
+                    'code': 'invalid_string_number',
+                    'strings': detail['strings'],
                 })
         for detail in AUDIT.nonadjacent_pluck_pair_warnings({"notes": notes}):
             source_index = detail.get("index")
@@ -1557,9 +1876,13 @@ def public_plan_warning_messages(
         elif code == "walk_inside_harmonic_region":
             technique = warning.get("technique") or "走手"
             text = f"泛音区间内不能使用{technique}"
+        elif code == "fractional_hui_in_harmonic":
+            text = "泛音只能在徽位上弹出（请使用整数徽位，或先泛止并改用按音）"
+        elif code == 'invalid_string_number':
+            numbers = '、'.join(str(n) for n in warning['strings'])
+            text = f'非法弦号（{numbers}弦；古琴只有一至七弦，请修正弦号）'
         elif code == "harmonic_to_same_string_attack":
-            strings = "、".join(f"{value}弦" for value in warning.get("strings") or [])
-            text = f"泛音后紧接同弦起音（{strings}；会止住泛音，可能破坏余韵）"
+            text = harmonic_resonance_warning_text(warning)
         elif code == "nonadjacent_pluck_pair":
             text = f"{warning.get('technique') or '泼'}双弦不相邻"
         elif code == "same_string_cuo_pair":
@@ -1569,11 +1892,22 @@ def public_plan_warning_messages(
         elif code == "low_hui_stopped_too_cramped":
             text = "低徽按音过紧"
         elif code == "missing_repeat_anchor":
-            text = "缺少再作起点标记"
+            text = MISSING_REPEAT_ANCHOR_TEXT
         elif code == "missing_repeat_instruction":
             text = "再作省略前缺少再作指令"
         elif code == "repeat_anchor_instruction_overlap":
-            text = "再作起点标记与再作指令不能重合"
+            text = "再作标记与再作指令不能重合"
+        elif code == 'repeat_from_head_pitch_mismatch':
+            text = '从头再作序列与曲首或段首不匹配'
+        elif code == 'repeat_numbered_start_missing':
+            text = f'再作指定音序不存在或不在当前音之前（音序{warning["target_event_index"]}）'
+        elif code == 'repeat_numbered_pitch_mismatch':
+            text = f'指定音序再作序列不匹配（从{warning["target_event_index"]}再作；按省略长度核验{warning["compared_events"]}音）'
+        elif code == 'repeat_omission_marker_missing':
+            text = '再作省略音缺少省略标记'
+            affected = '、'.join(str(i) for i in warning.get('missing_event_indices', []))
+            if affected:
+                text += f'（音序{affected}；请填写“{OMITTED_PLACEHOLDER}”）'
         else:
             continue
         messages.setdefault(int(source_index), []).append(text)

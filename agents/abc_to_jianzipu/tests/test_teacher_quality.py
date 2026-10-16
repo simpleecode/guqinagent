@@ -234,7 +234,7 @@ class EditableProtocolTests(unittest.TestCase):
             item["baseline_plan"]["actions"], [], True, [], item,
             report["warnings"],
         )
-        self.assertIn(":warning:缺少再作起点标记", preview)
+        self.assertIn(":warning:缺少再作标记", preview)
 
         history = {
             ("repeat-test", "p0001"): {

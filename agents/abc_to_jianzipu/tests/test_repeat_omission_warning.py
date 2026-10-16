@@ -44,8 +44,8 @@ class RepeatOmissionWarningTests(unittest.TestCase):
         item, actions = self.item(['〔再作起点〕从ㄱ再作'])
         warnings = repeat_anchor_warnings(item, actions)
         preview = render_edit_preview(list(actions.values()), [], True, [], item, warnings)
-        self.assertIn(':warning:再作起点标记与再作指令不能重合', preview)
-        self.assertIn(':warning:缺少再作起点标记', preview)
+        self.assertIn(':warning:再作标记与再作指令不能重合', preview)
+        self.assertIn(':warning:缺少再作标记', preview)
 
     def test_instruction_allows_run(self):
         for instruction in ['再做', '再作', '从ㄱ再作', '从头再作', '从头再做', '大指七徽挑七弦再作']:

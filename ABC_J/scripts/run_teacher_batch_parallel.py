@@ -115,7 +115,13 @@ def main() -> int:
                         help="partition source rows by stable score hash so workers do not each load the full corpus")
     parser.add_argument("--shard-by-trajectory-id", action="store_true",
                         help="balance selected IDs across workers while every worker retains full score context")
+    parser.add_argument("--balance-by-score", action="store_true",
+                        help="greedily balance phrase counts while keeping whole scores in one worker")
+    parser.add_argument("--resume-existing-shards", action="store_true",
+                        help="reuse worker ID assignments and their stage checkpoints without rebalancing")
     args = parser.parse_args()
+    if args.balance_by_score and args.shard_by_trajectory_id:
+        parser.error("choose either --balance-by-score or --shard-by-trajectory-id")
     if args.workers < 1:
         raise SystemExit("--workers must be positive")
     if not args.merge_only and (args.input is None or args.target_count is None):
@@ -204,7 +210,30 @@ def main() -> int:
         return int.from_bytes(digest, "big") % score_shard_count
 
     shards: list[list[str]] = [[] for _ in range(args.workers)]
-    if args.shard_by_trajectory_id:
+    if args.resume_existing_shards:
+        wanted = set(remaining)
+        assigned = set()
+        for index in range(args.workers):
+            id_path = parallel_root / f"{args.worker_prefix}_{index:02d}" / "trajectory_ids.txt"
+            if not id_path.exists():
+                raise SystemExit(f"missing existing shard: {id_path}")
+            ids = [line.strip() for line in id_path.read_text(encoding='utf-8').splitlines()
+                   if line.strip() in wanted]
+            if len(ids) != len(set(ids)) or assigned.intersection(ids):
+                raise SystemExit('duplicate IDs in existing shards')
+            shards[index] = ids
+            assigned.update(ids)
+        if assigned != wanted:
+            raise SystemExit(f'existing shards miss {len(wanted - assigned)} requested IDs')
+    elif args.balance_by_score:
+        source_by_id = {str(row['trajectory_id']): row for row in source_rows}
+        score_ids: dict[str, list[str]] = {}
+        for trajectory_id in remaining:
+            score_ids.setdefault(str(source_by_id[trajectory_id]['score_key']), []).append(trajectory_id)
+        for score, ids in sorted(score_ids.items(), key=lambda pair: (-len(pair[1]), pair[0])):
+            index = min(range(args.workers), key=lambda i: (len(shards[i]), i))
+            shards[index].extend(ids)
+    elif args.shard_by_trajectory_id:
         # Round-robin assignment balances small retry sets. Each worker still
         # receives all phrases of its assigned scores for historical context,
         # without multiplying the unrelated full corpus in RAM seven times.
@@ -227,7 +256,7 @@ def main() -> int:
         log_path = worker_dir / "worker.log"
         log_handle = log_path.open("a", encoding="utf-8", newline="\n")
         worker_input = args.input
-        if args.shard_by_trajectory_id:
+        if args.shard_by_trajectory_id or args.balance_by_score:
             assigned_ids = set(ids)
             assigned_scores = {row.get("score_key") for row in source_rows
                                if row["trajectory_id"] in assigned_ids}
@@ -246,7 +275,7 @@ def main() -> int:
                    "--resume"]
         if args.retry_failed:
             command.append("--retry-failed")
-        if not args.shard_by_trajectory_id:
+        if not args.shard_by_trajectory_id and not args.balance_by_score:
             if args.stage == "single_stage":
                 command.extend(("--shard-count", str(score_shard_count),
                                 "--shard-index", str(index)))

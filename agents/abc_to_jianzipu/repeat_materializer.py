@@ -24,8 +24,9 @@ import re
 from collections import Counter
 from copy import deepcopy
 from typing import Callable
+from .repeat_anchor import REPEAT_ANCHOR_NAMES
 
-MARKER_PRIORITY = ("从头再作", "从ㄱ再作", "再作三声", "再作二声", "再作起点ㄱ", "再作起点", "再作")
+MARKER_PRIORITY = ("从头再作", "从ㄱ再作", "再作三声", "再作二声", *REPEAT_ANCHOR_NAMES, "再作")
 REPEAT_COPY_COUNT = {"再作": 1, "从ㄱ再作": 1, "从头再作": 1, "再作二声": 2, "再作三声": 3}
 OMITTED_PLACEHOLDER = "无（由于是再作部分，省略）"
 
@@ -110,13 +111,13 @@ def materialize_repeats(notes: list[dict], *,
         only_markers = is_marker_only(note.get("jianzi"))
         if only_markers:
             marker_only_notes += 1
-        if any(marker in {"再作起点", "再作起点ㄱ"} for marker in markers):
+        if any(marker in REPEAT_ANCHOR_NAMES for marker in markers):
             pending_anchor = (position, markers[0], int(note.get("index", position)))
             anchors.append({"position": position, "index": note.get("index"),
                             "marker": markers[0]})
 
         for marker in markers:
-            if marker in {"再作起点", "再作起点ㄱ"}:
+            if marker in REPEAT_ANCHOR_NAMES:
                 continue
             if marker not in REPEAT_COPY_COUNT:
                 continue

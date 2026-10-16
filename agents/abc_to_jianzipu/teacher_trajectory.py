@@ -124,6 +124,9 @@ def _public_input(item: dict) -> dict:
         previous = deepcopy(previous)
         previous["actions"] = publicize_actions(previous.get("actions"), previous.get("notes") or [])
         phrase_context["previous_phrase"] = previous
+    phrase_context['related_phrases'] = deepcopy(item.get('related_phrases') or [])
+    for related in phrase_context['related_phrases']:
+        related['actions'] = publicize_actions(related.get('actions'), related.get('notes') or [])
     return {
         "score_context": {
             "metadata": metadata,
@@ -284,8 +287,13 @@ def _render_phrase_lines(
     return "\n".join(lines)
 
 
-def render_public_prompt(item: dict, stage: str) -> str:
+def render_public_prompt(item: dict, stage: str, *, historical: dict | None = None) -> str:
     """Render the student-visible task as compact, compiler-like score text."""
+    if historical is not None:
+        # Lazy import avoids the runtime/renderer module import cycle.
+        from agents.ToolRuntime.runtime import related_repeat_phrases
+        item = deepcopy(item)
+        item['related_phrases'] = related_repeat_phrases(item, historical)
     public = _public_input(item)
     score = public["score_context"]
     metadata = score.get("metadata") or {}
@@ -313,6 +321,21 @@ def render_public_prompt(item: dict, stage: str) -> str:
         "泛音区间提示｜常规写法：要进入泛音区间，在减字开头添加“泛起”；要结束泛音区间时，可在当前减字末尾添加“泛止”，也可在随后的延音行单独填写“泛止”。",
         "",
     ]
+    previous_match_lines = []
+    for related in (context.get('related_phrases') or [])[:1]:
+        if previous and related['phrase_id'] == previous.get('phrase_id'):
+            previous_match_lines.extend([
+                f'相关匹配｜已展示的前一段{related["phrase_id"]}：当前音序{related["matched_current_event"]}起与历史音序{related["matched_from_event"]}起，连续{related["matched_events"]}音相同。可用“从n再作”（n为历史音序），后续省略音填写“无（由于是再作部分，省略）”。',
+                '',
+            ])
+            continue  # Already shown in full as the read-only previous phrase.
+        lines.extend([
+            f'【只读相关段 {related["phrase_id"]}｜confirmed_readonly】',
+            f'匹配｜当前音序{related["matched_current_event"]}起与历史音序{related["matched_from_event"]}起，连续{related["matched_events"]}音相同',
+            _render_phrase_lines(related.get('notes') or [], related.get('actions') or [], readonly=True),
+            '可用“从n再作”（n为上述历史音序）引用；后续省略音填写“无（由于是再作部分，省略）”，工具会按省略长度核验音高序列。',
+            '',
+        ])
     if previous:
         previous_marker = section_marker(previous.get("notes") or [])
         lines.extend([
@@ -322,6 +345,7 @@ def render_public_prompt(item: dict, stage: str) -> str:
             "注｜前一段已在此完整提供，直接使用；仅需更早段时才先 list_context 再 expand_context。",
             "",
         ])
+    lines.extend(previous_match_lines)
     lines.extend([
         f'【当前段 {context.get("current_phrase_id")}｜待编辑】',
         *([section_marker(public["notes"])] if section_marker(public["notes"]) else []),

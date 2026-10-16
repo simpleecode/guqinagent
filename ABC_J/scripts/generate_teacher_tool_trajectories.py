@@ -33,6 +33,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from agents.abc_to_jianzipu.inverse_baseline import AUDIT  # noqa: E402
+from agents.abc_to_jianzipu.jianzi_surface_checks import duplicate_string_prefixes  # noqa: E402
 from agents.abc_to_jianzipu.jianzi_renderer import (  # noqa: E402
     hui_label, render_jianzi_surface,
 )
@@ -226,7 +227,7 @@ WARNING_RESOLUTION_GUIDE = (
 PUBLIC_SYSTEM = {
     "fingering_agent": (
         "你是减字谱初稿 Agent。阅读简谱、ABC、时值和前一段减字，"
-        "为当前段每个演奏事件填写基础减字；也可以填写\"从头再作\"/\"再作\"/\"从ㄱ再作\"等表示省略的减字；要使用\"从ㄱ再作\"，确保前面有\"再作起点ㄱ\"。通过 edit_plan.jianzi_rows 进行编辑；"
+        "为当前段每个演奏事件填写基础减字；也可以填写\"从头再作\"/\"再作\"/\"从ㄱ再作\"等表示省略的减字；要使用\"从ㄱ再作\"，前面应有\"[再作标记ㄱ]\"。通过 edit_plan.jianzi_rows 进行编辑；"
         "基础初稿只使用泛音、按音、散音三种取音方式，右手只使用抹、挑、勾、剔、擘、托、打、摘、撮；"
         "填写或编辑曲谱只能使用 edit_plan.jianzi_rows；尽量为当前段每个发音事件填写减字，"
         "暂不主动加入绰、注、吟、猱、走手或其他复杂技法。"
@@ -994,7 +995,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
     else:
         item.pop("public_pitch_warning_source_indices", None)
         item.pop("public_plan_warning_messages_by_source", None)
-    user_payload = render_public_prompt(item, stage)
+    user_payload = render_public_prompt(item, stage, historical=historical)
     api_messages: list[dict[str, Any]] = [
         {"role": "user", "content": user_payload}
     ]
@@ -1025,7 +1026,10 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             {"type": "adaptive"}
             if thinking_mode == "adaptive" else {"type": "disabled"}
         )
-        response = client.messages.create(**options)
+        response = create_teacher_response(
+            client, options, trajectory_id=item['trajectory_id'],
+            stage=stage, round_number=round_number,
+        )
         teacher_io_trace.append({
             "round": round_number,
             "request": deepcopy(options),
@@ -1254,6 +1258,53 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
     return public, private
 
 
+class RequestRetryExhausted(RuntimeError):
+    """A transient request failed repeatedly; do not restart the whole stage."""
+
+
+def is_transient_api_error(exc: Exception) -> bool:
+    status = getattr(exc, 'status_code', None)
+    return (
+        isinstance(status, int) and (status in {408, 409, 429} or status >= 500)
+    ) or type(exc).__name__ in {
+        'RateLimitError', 'APIConnectionError', 'APITimeoutError',
+        'ConnectError', 'ReadError', 'TimeoutError',
+    }
+
+
+def create_teacher_response(client, options: dict, *, trajectory_id: str,
+                            stage: str, round_number: int):
+    """Retry only this API request; leave dialogue and tool state untouched."""
+    attempts = max(1, int(os.getenv('GLM_REQUEST_MAX_ATTEMPTS', '6')))
+    for attempt in range(1, attempts + 1):
+        try:
+            return client.messages.create(**options)
+        except Exception as exc:
+            if not is_transient_api_error(exc):
+                raise
+            if attempt == attempts:
+                raise RequestRetryExhausted(
+                    f'{trajectory_id} {stage} round {round_number}: '
+                    f'current request exhausted {attempts} attempts; '
+                    f'{type(exc).__name__}: {exc}'
+                ) from exc
+            delay = min(60.0, 5.0 * (2 ** (attempt - 1))) + random.uniform(0.0, 2.0)
+            response = getattr(exc, 'response', None)
+            headers = getattr(response, 'headers', {}) or {}
+            try:
+                retry_after = float(headers.get('retry-after', '0'))
+            except (ValueError, TypeError):
+                retry_after = 0.0
+            delay = max(delay, min(300.0, retry_after))
+            print(
+                f'transient API error: retrying current request {trajectory_id} '
+                f'{stage} round {round_number}, attempt {attempt+1}/{attempts} '
+                f'after {delay:.1f}s; previous rounds preserved; '
+                f'cause={type(exc).__name__}: {exc}', flush=True,
+            )
+            time.sleep(delay)
+
+
 class _RecordingMessages:
     def __init__(self, messages, trace: list[dict]):
         self._messages = messages
@@ -1338,6 +1389,47 @@ class _RateLimitedClient:
         self.messages = _RateLimitedMessages(client.messages, min_interval)
 
 
+class DuplicateStringPrefixError(ValueError):
+    def __init__(self, cases):
+        self.duplicate_string_cases = cases
+        super().__init__('duplicate string before hui and after fingering: ' +
+                         '; '.join(str(c['text']) for c in cases[:3]))
+
+
+def verify_teacher_string_surface(public, private):
+    """Reject actual bad demonstrations even if a later turn corrects them."""
+    cases = []
+
+    def check(text, location):
+        if duplicate_string_prefixes(text):
+            cases.append({'text': text, 'location': location})
+
+    for message in public.get('messages', []):
+        if message.get('role') != 'assistant':
+            continue
+        for call in message.get('tool_calls') or []:
+            function = call.get('function') or {}
+            if function.get('name') != 'edit_plan':
+                continue
+            arguments = function.get('arguments') or {}
+            if isinstance(arguments, str):
+                arguments = json.loads(arguments)
+            entries = arguments.get('jianzi_rows') or []
+            if isinstance(entries, dict):
+                entries = list(entries.items())
+            for entry in entries:
+                if isinstance(entry, (list, tuple)) and len(entry) >= 2:
+                    check(entry[1], 'edit_plan')
+                elif isinstance(entry, dict):
+                    for value in entry.values():
+                        if isinstance(value, str):
+                            check(value, 'edit_plan')
+    for action in (private.get('teacher_private') or {}).get('accepted_plan', {}).get('actions', []):
+        check(action.get('jianzi_text') or '', 'accepted_plan')
+    if cases:
+        raise DuplicateStringPrefixError(cases)
+
+
 def generate_with_retries(client, model: str, item: dict, stage: str,
                           targets: list[dict], historical: dict, max_rounds: int,
                           attempts: int, *, objective: str,
@@ -1348,11 +1440,13 @@ def generate_with_retries(client, model: str, item: dict, stage: str,
     for attempt_number in range(1, attempts + 1):
         trace: list[dict] = []
         try:
-            return generate_one(_RecordingClient(client, trace), model, item, stage,
+            public, private = generate_one(_RecordingClient(client, trace), model, item, stage,
                                 targets, historical,
                                 max_rounds, objective=objective,
                                 retry_notes=retry_notes,
                                 allow_private_reasoning_leakage=allow_private_reasoning_leakage)
+            verify_teacher_string_surface(public, private)
+            return public, private
         except Exception as exc:
             error = f"{type(exc).__name__}: {exc}"
             errors.append(error)
@@ -1363,7 +1457,17 @@ def generate_with_retries(client, model: str, item: dict, stage: str,
                     "attempt": attempt_number, "model": model,
                     "error": f"{type(exc).__name__}: {exc}",
                     "teacher_io_trace": trace,
+                    "duplicate_string_cases": getattr(exc, 'duplicate_string_cases', []),
                 })
+            if isinstance(exc, DuplicateStringPrefixError):
+                print(f"duplicate-string format rejected: {item['trajectory_id']} {stage} "
+                      f"attempt {attempt_number}/{attempts}; "
+                      + ('retrying this stage' if attempt_number < attempts else 'retry limit reached'), flush=True)
+            if isinstance(exc, RequestRetryExhausted):
+                # Replaying generate_one here would throw away all preceding
+                # tool rounds and repeat their API cost. Keep the failed trace
+                # for diagnosis and let the phrase-level failure be recorded.
+                raise
             transient = (
                 "RateLimitError" in error or "rate_limit_error" in error
                 or "429" in error or "APIConnectionError" in error
