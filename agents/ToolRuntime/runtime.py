@@ -557,6 +557,9 @@ def render_edit_preview(actions: list[dict], patches: list[dict], valid: bool,
                     to_string=same_finger_warning.get("to_string") or "?",
                 )
             )
+        if any(w.get('code') == 'missing_independent_attack'
+               and w.get('source_index') == index for w in (warnings or [])):
+            parts.append(':warning:' + MISSING_ATTACK_TEXT)
         low_hui_warning = low_hui_warnings.get(index)
         if low_hui_warning:
             string = low_hui_warning.get("string") or "?"
@@ -1526,6 +1529,59 @@ def repeat_content_warnings(
                              'candidate_midis': candidates})
     return warnings
 
+MISSING_ATTACK_TEXT = "独立发音缺少减字（前序为普通单次起音，不能覆盖此音；请填写起音指法）"
+
+
+def missing_attack_warnings(item: dict, actions_by_source: dict[int, dict]) -> list[dict]:
+    """Conservative: only explicit blanks following a fully known simple attack.
+
+    Unknown/compound notation, rests, ties and repeat omissions break the chain.
+    Do not infer coverage from a private reference or reject unfinished rows.
+    """
+    simple = re.compile(
+        r"(?:泛起|泛音|按音|散音|散)?"
+        r"(?:(?:大指|食指|中指|名指|小指|跪指))?"
+        r"(?:(?:[一二三四五六七八九十\d]+徽(?:[一二三四五六七八九十\d]+分)?|徽外))?"
+        r"[抹挑勾剔擘托劈打摘搓]"
+        r"[一二三四五六七1-7]弦(?:泛止)?"
+    )
+    previous_simple = None
+    previous_pitch = None
+    warnings = []
+    notes = sorted(item.get('input', {}).get('notes_without_jianzi', []),
+                   key=lambda n: int(n['index']))
+    for note in notes:
+        index = int(note['index'])
+        if note.get('structure_token') or note.get('abc') in {'|', '||'}:
+            continue
+        abc = str(note.get('abc') or '').strip()
+        # Require an explicit pitched attack; rests, ties, ornaments and
+        # ambiguous/legacy rows are outside this deliberately narrow check.
+        sounding = bool(re.fullmatch(r"(?:\^{1,2}|_{1,2}|=)?[A-Ga-g][,']*\d*(?:/\d*)?", abc))
+        if not sounding or note.get('notation_omitted'):
+            previous_simple = None
+            previous_pitch = None
+            continue
+        try:
+            pitch = tuple(sorted(float(v) for v in target_midis(item, index))) or None
+        except (ValueError, TypeError, KeyError, StopIteration):
+            pitch = None
+        text = actions_by_source.get(index, {}).get('jianzi_text')
+        if text == '' and previous_simple is not None:
+            # Compare the immediately preceding sounding event, not the first
+            # attack before an entire blank run. Unknown pitch is not evidence
+            # of an uncovered new sound. Duration differences do not matter.
+            if pitch is not None and previous_pitch is not None and pitch != previous_pitch:
+                warnings.append({'source_index': index, 'code': 'missing_independent_attack',
+                                 'previous_attack_source_index': previous_simple})
+        elif isinstance(text, str) and simple.fullmatch(text.strip()):
+            previous_simple = index
+        else:
+            previous_simple = None
+        previous_pitch = pitch
+    return warnings
+
+
 def validate_jianzi_only(
     item: dict, patches: list[dict], *, toward_reference: bool = False,
     require_complete: bool = True,
@@ -1601,6 +1657,7 @@ def validate_jianzi_only(
                 })
 
     warnings: list[dict] = []
+    warnings.extend(missing_attack_warnings(item, by_index))
     warnings.extend(repeat_anchor_warnings(
         item, by_index, historical=historical,
     ))
@@ -1861,6 +1918,8 @@ def public_plan_warning_messages(
         code = str(warning.get("code") or "")
         if code == "jianzi_pitch_mismatch":
             text = "音高不匹配"
+        elif code == "missing_independent_attack":
+            text = MISSING_ATTACK_TEXT
         elif code == "walk_span_too_large":
             text = "走手跨度过大"
         elif code == "walk_endpoint_same_as_start":

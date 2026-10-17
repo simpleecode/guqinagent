@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT=/home/20223393ljw/guqin-agent
-ADAPTER=/home/20223393ljw/jianzi/outputs/qwen35_9b_lora_related_context_3gpu_bs12_03d06bae
+ADAPTER=${EVAL_ADAPTER:-/home/20223393ljw/jianzi/outputs/qwen35_9b_lora_related_context_3gpu_bs12_03d06bae}
 INPUT="$ROOT/train/eval_inputs_v2_text_protocol/meihua_fengqiuhuang_latest"
-OUTPUT="$ROOT/train/eval_outputs_v3_two_stage/related_context_final_meihua_fengqiuhuang_2gpu"
+OUTPUT=${EVAL_OUTPUT_DIR:-"$ROOT/train/eval_outputs_v3_two_stage/related_context_final_meihua_fengqiuhuang_2gpu"}
 source /home/20223393ljw/miniconda3/etc/profile.d/conda.sh
 conda activate guqin-vllm-019
 cd "$ROOT"
