@@ -15,6 +15,51 @@ import shutil
 from pathlib import Path
 
 
+def clean_messages(messages, declared_tools):
+    """Remove only undeclared calls with an explicit matching unknown-tool error.
+
+    Batched tool calls may have several consecutive result messages; the
+    rejected call need not be the first result. Successful calls are untouched.
+    """
+    remove_ids = set()
+    for index, message in enumerate(messages):
+        if message.get('role') != 'assistant':
+            continue
+        results = {}
+        for result in messages[index + 1:]:
+            if result.get('role') != 'tool':
+                break
+            key = str(result.get('tool_call_id'))
+            if key in results:
+                raise ValueError(f'Duplicate tool receipt: {key}')
+            results[key] = result
+        for call in message.get('tool_calls') or []:
+            name = str((call.get('function') or {}).get('name') or '')
+            key = str(call.get('id'))
+            if name in declared_tools or key not in results:
+                continue
+            try:
+                result = json.loads(str(results[key].get('content') or ''))
+            except json.JSONDecodeError:
+                continue
+            if result.get('ok') is False and f'unknown tool: {name}' in str(result.get('error', '')):
+                remove_ids.add(key)
+    cleaned = []
+    for message in messages:
+        if message.get('role') == 'tool' and str(message.get('tool_call_id')) in remove_ids:
+            continue
+        if message.get('role') == 'assistant' and message.get('tool_calls'):
+            kept = [c for c in message['tool_calls'] if str(c.get('id')) not in remove_ids]
+            if len(kept) != len(message['tool_calls']):
+                message = dict(message)
+                if kept:
+                    message['tool_calls'] = kept
+                else:
+                    message.pop('tool_calls')
+        cleaned.append(message)
+    return cleaned, sorted(remove_ids)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-dir", type=Path, required=True)
@@ -40,60 +85,18 @@ def main() -> int:
             row = json.loads(line)
             rows += 1
             messages = row.get("messages") or []
-            cleaned = []
-            index = 0
-            row_changed = False
             declared_tools = {
                 str(tool.get("name") or "") for tool in (row.get("tools") or [])
             }
-            while index < len(messages):
-                message = messages[index]
-                calls = message.get("tool_calls") or []
-                invalid_calls = [
-                    call for call in calls
-                    if str((call.get("function") or {}).get("name") or "") not in declared_tools
-                ]
-                if message.get("role") == "assistant" and invalid_calls:
-                    failed_result = (
-                        messages[index + 1]
-                        if index + 1 < len(messages)
-                        else None
-                    )
-                    failed_ids = {str(call.get("id")) for call in invalid_calls}
-                    failed_text = str((failed_result or {}).get("content") or "")
-                    is_failed_pair = (
-                        failed_result is not None
-                        and failed_result.get("role") == "tool"
-                        and str(failed_result.get("tool_call_id")) in failed_ids
-                        and "unknown tool:" in failed_text
-                    )
-                    if is_failed_pair:
-                        kept_calls = [
-                            call for call in calls
-                            if str((call.get("function") or {}).get("name") or "") in declared_tools
-                        ]
-                        if kept_calls:
-                            updated = dict(message)
-                            updated["tool_calls"] = kept_calls
-                            cleaned.append(updated)
-                        # If no valid call remains, retain the reasoning-only
-                        # assistant; the exporter will merge it with the next
-                        # assistant tool-call turn.
-                        else:
-                            updated = dict(message)
-                            updated.pop("tool_calls", None)
-                            cleaned.append(updated)
-                        removed_calls += len(invalid_calls)
-                        removed_results += 1
-                        row_changed = True
-                        index += 2
-                        continue
-                cleaned.append(message)
-                index += 1
-            if row_changed:
+            cleaned, removed = clean_messages(messages, declared_tools)
+            if removed:
                 row["messages"] = cleaned
                 changed_rows += 1
-            target.write(json.dumps(row, ensure_ascii=False) + "\n")
+                removed_calls += len(removed)
+                removed_results += len(removed)
+                target.write(json.dumps(row, ensure_ascii=False) + "\n")
+            else:
+                target.write(line)
 
     report = {
         "schema_version": "teacher-public-invalid-tool-cleanup-1.0",

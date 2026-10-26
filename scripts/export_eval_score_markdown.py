@@ -54,8 +54,9 @@ def metric_rows(m: dict[str, Any]) -> list[tuple[str, Any, bool]]:
         ("Technique Effective Vocabulary (prediction)", (technique.get("technique_diversity") or {}).get("prediction", {}).get("effective_techniques"), False),
         ("Technique Unique Vocabulary (reference)", (technique.get("technique_diversity") or {}).get("reference", {}).get("unique_techniques"), False),
         ("Technique Effective Vocabulary (reference)", (technique.get("technique_diversity") or {}).get("reference", {}).get("effective_techniques"), False),
-        ("Rule Violation Rate", m.get("rule_violation_rate"), True),
-        ("Rule Violations", m.get("rule_violations"), False),
+        ("Final Replay Warning Phrase Rate", m.get("rule_violation_rate"), True),
+        ("Final Replay Warning Count", m.get("rule_violations"), False),
+        ("Final Replay Audited Phrases", m.get("rule_warning_audited_phrases"), False),
     ]
 
 
@@ -83,19 +84,21 @@ def report(summary: dict[str, Any], events: list[dict[str, Any]], violations: li
     for name, value, percent in metric_rows(summary.get("metrics") or {}):
         lines.append(f"| {name} | {fmt(value, percent)} |")
     warning = summary.get("final_warning") or {}
-    lines.append(f"| Final warning rate | {fmt(warning.get('warning_rate'), True)} |")
-    lines.append(f"| Final warning phrases | {warning.get('warning_phrases', '—')} / {warning.get('phrases', '—')} |")
+    lines.append(f"| Final Replay Warning Phrases | {warning.get('warning_phrases', '—')} / {warning.get('phrases', '—')} |")
 
     lines += ["", "## 按曲谱指标", "", "以下按 `piece_id` 汇总其全部 phrase；空值表示该曲谱没有足够可评估事件。", ""]
     headers = [
         "曲谱", "事件数", "Pitch@50c", "MAE(cents)", "String Acc.",
         "左手 F1", "右手 F1", "Tone Acc.", "Tone Dist.", "Orn. F1",
-        "Technique Dist.", "Tech Eff. Vocab", "Rule Violation",
+        "Technique Dist.", "Tech Eff. Vocab", "Final Warning Count",
     ]
     lines.append("| " + " | ".join(headers) + " |")
     lines.append("|" + "---:|" * len(headers))
     for piece_id in sorted(grouped):
-        m = metrics(grouped[piece_id], violations_by_piece.get(piece_id, []), tolerance)
+        m = metrics(
+            grouped[piece_id], violations_by_piece.get(piece_id, []), tolerance,
+            audited_phrases=(summary.get('rule_warning_audited_phrases_by_score') or {}).get(piece_id, 0),
+        )
         tone = m.get("tone_type") or {}
         ornament = m.get("ornament") or {}
         technique = m.get("performance_technique_usage") or {}
@@ -114,7 +117,7 @@ def report(summary: dict[str, Any], events: list[dict[str, Any]], violations: li
             fmt(ornament.get("f1"), True),
             fmt(technique.get("distribution_similarity"), True),
             fmt(((technique.get("technique_diversity") or {}).get("prediction") or {}).get("effective_techniques")),
-            fmt(m.get("rule_violation_rate"), True),
+            fmt(m.get("rule_violations")) if m.get('rule_warning_audited_phrases') else '—',
         ]
         lines.append("| " + " | ".join(row) + " |")
 
@@ -122,6 +125,10 @@ def report(summary: dict[str, Any], events: list[dict[str, Any]], violations: li
     lines += ["", "## 评估备注", "", f"- Tone replay 不完整曲谱：{len(incomplete)} 条。" ]
     if incomplete:
         lines.append("- ID：" + ", ".join(f"`{x}`" for x in incomplete))
+    warning_incomplete = summary.get('warning_replay_incomplete_scores') or []
+    lines.append(f'- Final warning replay 不完整曲谱：{len(warning_incomplete)} 条。')
+    if warning_incomplete:
+        lines.append('- ID：' + ', '.join(f'`{x}`' for x in warning_incomplete))
     unmatched = summary.get("unmatched_prediction_ids") or []
     lines.append(f"- 未匹配 prediction：{len(unmatched)} 条。")
     lines.append("")

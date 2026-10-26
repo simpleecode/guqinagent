@@ -175,7 +175,7 @@ def _action_columns(action: dict[str, Any] | None, *, readonly: bool = False) ->
     if action.get("mode") is None:
         surface = (("[空]" if readonly else "[减字待填写]")
                    if explicit is None or (readonly and (legacy_pending or explicit == "")) else
-                   ("" if explicit == "" else f"[{explicit}]"))
+                   ("[空]" if explicit == "" else f"[{explicit}]"))
         return ("取音方式／弦徽待定", "左手待定",
                 "右手待定" if action.get("attack") else "续音",
                 "无", surface)
@@ -203,7 +203,7 @@ def _action_columns(action: dict[str, Any] | None, *, readonly: bool = False) ->
     surface = render_jianzi_surface(
         action, prefer_text=True, omitted_placeholder=OMITTED_PLACEHOLDER
     )
-    if readonly and (explicit is None or legacy_pending or explicit == ""):
+    if explicit == "" or (readonly and (explicit is None or legacy_pending)):
         surface = "[空]"
     return mode + position + partner, left, right, techniques, surface
 
@@ -276,7 +276,8 @@ def _render_phrase_lines(
                 stored_action, readonly=readonly
             )
         messages = list(warning_messages_by_source.get(source_index) or [])
-        if source_index in pitch_warning_source_indices and "音高不匹配" not in messages:
+        if (source_index in pitch_warning_source_indices
+                and not any(message.startswith("音高不匹配") for message in messages)):
             messages.append("音高不匹配")
         for message in messages:
             surface += f":warning:{message}"
@@ -325,7 +326,7 @@ def render_public_prompt(item: dict, stage: str, *, historical: dict | None = No
     for related in (context.get('related_phrases') or [])[:1]:
         if previous and related['phrase_id'] == previous.get('phrase_id'):
             previous_match_lines.extend([
-                f'相关匹配｜已展示的前一段{related["phrase_id"]}：当前音序{related["matched_current_event"]}起与历史音序{related["matched_from_event"]}起，连续{related["matched_events"]}音相同。可用“从n再作”（n为历史音序），后续省略音填写“无（由于是再作部分，省略）”。',
+                f'相关匹配｜当前音序{related["matched_current_event"]}-{related["matched_current_end_event"]}与历史音序{related["matched_from_event"]}-{related["matched_from_end_event"]}(位于{related["phrase_id"]}段)，连续{related["matched_events"]}音相同。',
                 '',
             ])
             continue  # Already shown in full as the read-only previous phrase.

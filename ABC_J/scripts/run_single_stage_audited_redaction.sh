@@ -6,9 +6,9 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PYTHON="${TEACHER_PYTHON:-python}"
-BASE="$ROOT/ABC_J/agent_training/single_stage_audited"
+BASE="$ROOT/ABC_J/agent_training/.single_stage_rebuild"
 INPUT="$BASE/teacher_raw"
-WORKER_ROOT="$BASE/redaction_workers_20261010"
+WORKER_ROOT="$BASE/redaction_workers"
 OUTPUT="$BASE/teacher_final_redacted"
 WORKERS=7
 

@@ -85,6 +85,7 @@ def patch_evaluator(source: Path, destination: Path) -> None:
 
     anchor = "    def generate(\n        messages: list[dict], tools: list[dict], sampled: bool,\n"
     helper = '''    def generate_vllm(messages: list[dict], tools: list[dict], sampled: bool):
+        import os
         import time
         import urllib.error
         import urllib.request
@@ -111,6 +112,11 @@ def patch_evaluator(source: Path, destination: Path) -> None:
             "chat_template_kwargs": {"enable_thinking": not args.disable_thinking},
         }
         endpoint = args.vllm_url.rstrip("/") + "/chat/completions"
+        sampling = json.loads(os.environ.get('GUQIN_SAMPLING_PARAMS', '{}'))
+        temperatures = sampling.pop('attempt_temperatures', None)
+        if temperatures:
+            sampling['temperature'] = temperatures[min(int(sampled), len(temperatures)-1)]
+        payload.update(sampling)
         last_error = None
         for retry in range(5):
             request = urllib.request.Request(
@@ -216,10 +222,15 @@ def main() -> int:
         help="optional LoRA adapter; omit to evaluate the unadapted base model",
     )
     parser.add_argument("--vllm-env", default="guqin-vllm-019")
-    parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument("--workers", type=int, default=None,
+                        help="total clients; default: 8 per GPU, capped by score count")
     parser.add_argument("--max-new-tokens", type=int, default=6144)
     parser.add_argument("--max-rounds", type=int, default=8)
     parser.add_argument("--attempts", type=int, default=2)
+    parser.add_argument('--warning-feedback',choices=('on','off'),default='on')
+    parser.add_argument("--sampling-config", type=Path,
+                        default=Path(__file__).resolve().parents[1]/'configs/sampling_retry_schedule.json',
+                        help="JSON sampling parameters applied to all attempts")
     parser.add_argument("--max-guqinizer-passes", type=int, default=3)
     parser.add_argument(
         "--guqinizer-only-baseline", type=Path,
@@ -250,8 +261,32 @@ def main() -> int:
     parser.add_argument("--max-num-seqs", type=int, default=8)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.84)
     args = parser.parse_args()
-    if args.workers < args.max_num_seqs:
-        raise SystemExit("workers must be >= max-num-seqs so there are waiting clients")
+    args.output_dir.mkdir(parents=True,exist_ok=True)
+    policy_path=args.output_dir/'feedback_policy.json'
+    policy={'warning_feedback':args.warning_feedback,
+            'hint_feedback':args.warning_feedback,
+            'warning_driven_followups':args.warning_feedback=='on',
+            'workflow':args.workflow}
+    if policy_path.exists() and json.loads(policy_path.read_text())!=policy:
+        raise ValueError('Cannot resume results under a different diagnostic-feedback policy')
+    if (not policy_path.exists() and args.warning_feedback=='off'
+            and any(args.output_dir.rglob('predictions*.jsonl'))):
+        raise ValueError('Ablation requires a fresh output directory with an explicit policy')
+    policy_path.write_text(json.dumps(policy,indent=2)+'\n')
+    if args.sampling_config:
+        sampling = json.loads(args.sampling_config.read_text())
+        allowed = {'temperature','top_p','top_k','min_p','presence_penalty','repetition_penalty','seed','attempt_temperatures'}
+        if not isinstance(sampling, dict) or set(sampling) - allowed:
+            raise ValueError('Unsupported sampling configuration')
+        if 'attempt_temperatures' in sampling:
+            temperatures = sampling['attempt_temperatures']
+            if (not isinstance(temperatures, list) or not temperatures
+                    or any(not isinstance(t, (int,float)) or not 0 <= t <= 2 for t in temperatures)):
+                raise ValueError('Invalid attempt temperatures')
+            args.attempts = len(temperatures)
+        os.environ['GUQIN_SAMPLING_PARAMS'] = json.dumps(sampling)
+        args.output_dir.mkdir(parents=True, exist_ok=True)
+        (args.output_dir/'sampling_params.json').write_text(json.dumps(sampling, indent=2)+'\n')
     if args.server_count < 1:
         raise SystemExit("--server-count must be positive")
     visible_devices = [device.strip() for device in
@@ -265,11 +300,44 @@ def main() -> int:
     rows = [json.loads(line) for line in args.input.read_text(encoding="utf-8").splitlines() if line.strip()]
     if not rows:
         raise SystemExit("evaluation input is empty")
+    score_count = len({str(row['score_key']) for row in rows})
+    args.workers = min(args.workers if args.workers is not None else 8 * args.server_count,
+                       score_count)
+    if args.workers < 1:
+        raise SystemExit("workers must be positive")
     output_dir = args.output_dir.resolve()
     workers_dir = output_dir / "workers"
     workers_dir.mkdir(parents=True, exist_ok=True)
     shards = balanced_shards(rows, args.workers)
     active = [(index, shard) for index, shard in enumerate(shards) if shard]
+    # A changed client count changes score ownership. Redistribute saved records
+    # before launching clients, so completed phrases and their history survive.
+    existing_inputs = sorted(workers_dir.glob('input_*.jsonl'))
+    expected_layout = {f'input_{i:02d}.jsonl': [r['sample_id'] for r in shard]
+                       for i, shard in active}
+    old_layout = {p.name: [json.loads(line)['sample_id'] for line in
+                          p.read_text(encoding='utf-8').splitlines() if line.strip()]
+                  for p in existing_inputs}
+    if ((existing_inputs and old_layout != expected_layout)
+            or (not existing_inputs and any(workers_dir.glob('predictions_*.jsonl')))):
+        saved = {}
+        expected_ids = {r['sample_id'] for r in rows}
+        for path in sorted(workers_dir.glob('predictions_*.jsonl')):
+            for line in path.read_text(encoding='utf-8').splitlines():
+                if line.strip():
+                    record = json.loads(line)
+                    if record['sample_id'] not in expected_ids:
+                        raise RuntimeError('Cannot reshard predictions from different inputs')
+                    saved[record['sample_id']] = record
+        backup = output_dir / f'.worker_layout_before_{time.time_ns()}'
+        workers_dir.rename(backup)
+        workers_dir.mkdir()
+        for index, shard in active:
+            (workers_dir / f'predictions_{index:02d}.jsonl').write_text(
+                ''.join(json.dumps(saved[r['sample_id']], ensure_ascii=False) + '\n'
+                        for r in shard if r['sample_id'] in saved), encoding='utf-8')
+        print(json.dumps({'event': 'workers_resharded', 'preserved_records': len(saved),
+                          'previous_layout': str(backup)}), flush=True)
     print(json.dumps({
         "event": "vllm_eval_start", "phrases": len(rows),
         "scores": len({str(row["score_key"]) for row in rows}),
@@ -366,7 +434,7 @@ def main() -> int:
                 "--max-guqinizer-passes", str(args.max_guqinizer_passes),
                 "--resume",
             ]
-            cmd.extend(["--workflow", args.workflow])
+            cmd.extend(["--workflow", args.workflow, '--warning-feedback',args.warning_feedback])
             if args.guqinizer_only_baseline:
                 cmd.extend([
                     "--guqinizer-only-baseline", str(args.guqinizer_only_baseline),

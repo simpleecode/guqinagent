@@ -3,10 +3,60 @@ import unittest
 from evaluation.fingering import field_counts, rates
 from evaluation.ornament import ornament_metrics, technique_usage
 from evaluation.techniques import extract_fingering_techniques
+from evaluation.rules import replay_final_warnings
+from evaluation.aggregate import final_warning_stats, metrics
+from evaluation.parser import final_actions
 from agents.abc_to_jianzipu.reference_parser import parse_reference_actions
 
 
 class MetricsTests(unittest.TestCase):
+    def test_single_stage_final_actions_are_evaluated(self):
+        prediction = {'single_stage': {'plan': {'actions': [
+            {'source_index': 7, 'jianzi_text': '散挑一弦'},
+        ]}}}
+        self.assertEqual(final_actions(prediction)[0]['jianzi_text'], '散挑一弦')
+
+    def test_rule_metric_uses_final_plan_replay_not_intermediate_receipt(self):
+        def sample(index, text, trace=None):
+            item = {
+                'score_key': 'T', 'phrase_id': f'p{index + 1:04d}',
+                'input': {
+                    'metadata': {'tonic': '1=C'},
+                    'normalized_tuning': {'open_midi': [48, 50, 53, 55, 57, 60, 62]},
+                    'event_range': {'start': index, 'end_exclusive': index + 1},
+                    'notes_without_jianzi': [
+                        {'index': index, 'event_index': index,
+                         'jianpu': '1̣', 'abc': 'C,', 'duration': '四分'},
+                    ],
+                },
+                'baseline_plan': {'actions': [{'source_index': index, 'jianzi_text': ''}]},
+            }
+            prediction = {
+                'score_key': 'T', 'phrase_id': item['phrase_id'],
+                'guqinizer': {'plan': {'actions': [
+                    {'source_index': index, 'jianzi_text': text},
+                ]}, 'trace': trace or []},
+            }
+            return prediction, {'runtime_item': item}
+
+        stale_warning = [{'tool_results': [{'name': 'edit_plan', 'result': {
+            'result': {'text': ':warning:音高不匹配'},
+        }}]}]
+        rows = [sample(0, '散勾三弦'), sample(1, '散挑一弦', stale_warning)]
+        warnings = replay_final_warnings(rows)
+        self.assertEqual([(row['phrase_id'], row['violation_type']) for row in warnings],
+                         [('p0001', 'jianzi_pitch_mismatch')])
+        stats = final_warning_stats(warnings, 2)
+        self.assertEqual(stats['warning_count'], 1)
+        self.assertEqual(stats['warning_phrases'], 1)
+        self.assertEqual(stats['warning_rate'], 0.5)
+        rule_metrics = metrics([], warnings, 50.0, audited_phrases=2)
+        self.assertEqual(rule_metrics['rule_violations'], 1)
+        self.assertEqual(rule_metrics['rule_violation_rate'], 0.5)
+        incomplete = metrics([], [], 50.0, audited_phrases=0)
+        self.assertIsNone(incomplete['rule_violation_rate'])
+        self.assertEqual(incomplete['rule_warning_audited_phrases'], 0)
+
     def test_chinese_and_arabic_strings_have_identical_semantics(self):
         for chinese, arabic in (
             ('大指九徽挑五弦', '大指九徽挑5弦'),

@@ -48,7 +48,7 @@ def load_seeds(path: Path):
 
 
 def score_metadata(key: str) -> dict:
-    url = f"https://api.sitongli.net/v9/scores/{key}/simple"
+    url = f"https://api.sitongli.net/latest/scores/{key}/simple"
     with urllib.request.urlopen(url, timeout=20) as response:
         payload = json.load(response)
     # The v9 endpoint has shipped both an enveloped `{data: ...}` response

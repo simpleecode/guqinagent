@@ -31,6 +31,16 @@ if str(ROOT) not in sys.path:
 EVAL_SCHEMA_VERSION = "agent-eval-prediction-1.3"
 
 
+def warning_stop_action(has_warnings: bool, edit_attempted: bool,
+                        reminded: bool, rounds_remaining: bool = True) -> str:
+    """A bounded submission reminder, never an obligation to eliminate warnings."""
+    if not has_warnings:
+        return "accept"
+    if not edit_attempted and not reminded and rounds_remaining:
+        return "remind"
+    return "unresolved"
+
+
 def first_json(text: str) -> Any:
     decoder = json.JSONDecoder()
     for pos, char in enumerate(text):
@@ -163,6 +173,8 @@ def main() -> int:
     parser.add_argument("--max-new-tokens", type=int, default=6144)
     parser.add_argument("--max-rounds", type=int, default=8)
     parser.add_argument("--attempts", type=int, default=2)
+    parser.add_argument('--warning-feedback',choices=('on','off'),default='on',
+                        help='off: hide advisory warnings/hints and disable warning-driven followups; retain structural validation and offline scoring')
     parser.add_argument(
         "--max-guqinizer-passes", type=int, default=3,
         help=("maximum total Guqinizer passes per phrase. A further pass runs only "
@@ -235,7 +247,7 @@ def main() -> int:
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from ABC_J.scripts.generate_teacher_tool_trajectories import (
-        blank_plan_from_item, canonical_jianzi_text, public_system_for,
+        blank_plan_from_item, public_system_for,
         public_tools_for, render_public_prompt,
     )
     from agents.ToolRuntime import (
@@ -509,7 +521,7 @@ def main() -> int:
             with ThreadPoolExecutor(max_workers=len(requests)) as executor:
                 futures = [executor.submit(
                     generate_vllm, request["messages"], request["tools"],
-                    bool(request["sampled"]),
+                    request["sampled"],
                 ) for request in requests]
                 results = []
                 for future in futures:
@@ -590,7 +602,7 @@ def main() -> int:
         basic = stage == "fingering_agent"
         tools = public_tools_for(stage, basic=basic)
         constrain = args.constrain_walk_hui and not basic
-        if stage in {"guqinization", "single_stage"}:
+        if args.warning_feedback == 'on' and stage in {"guqinization", "single_stage"}:
             item["public_pitch_warning_source_indices"] = sorted(
                 public_pitch_warning_source_indices(item, historical=historical)
             )
@@ -612,7 +624,8 @@ def main() -> int:
         }
         last_trace = []
         for attempt in range(args.attempts):
-            runtime = RealToolRuntime(item, historical, basic_fingering=basic)
+            runtime = RealToolRuntime(item, historical, basic_fingering=basic,
+                                      warning_feedback=args.warning_feedback == 'on')
             messages = [
                 {"role": "system", "content": public_system_for(stage, basic=basic)},
                 {"role": "user", "content": render_public_prompt(item, stage, historical=historical)},
@@ -624,6 +637,7 @@ def main() -> int:
             warning_followup_required = False
             saw_pitch_warning = False
             last_valid: list | None = None
+            submission_reminded = False
             for round_number in range(1, args.max_rounds + 1):
                 constraint_table = None
                 if constrain:
@@ -648,7 +662,7 @@ def main() -> int:
                 generation = yield {
                     "messages": messages,
                     "tools": tools,
-                    "sampled": attempt > 0,
+                    "sampled": attempt,
                     "constraint_table": constraint_table,
                 }
                 if isinstance(generation, dict) and generation.get("generation_error"):
@@ -710,12 +724,37 @@ def main() -> int:
                     **({"constraint_stats": dict(processor.stats)}
                        if processor is not None else {}),
                 }, ensure_ascii=False), flush=True)
+                if truncated:
+                    # A length-limited response is not a completed decision.
+                    # Retry the stage; never silently promote an older preview.
+                    round_entry['generation_failure'] = 'truncated_response'
+                    last_valid = None
+                    break
                 if not calls:
+                    remaining_warnings = {}
+                    if stage == "guqinization" and args.warning_feedback == 'on':
+                        stop_item = deepcopy(item)
+                        if last_valid is not None:
+                            stop_item['baseline_plan'] = {'actions': last_valid}
+                        remaining_warnings = public_plan_warning_messages(stop_item, historical=historical)
+                        edit_attempted = any(c.get('name') == 'edit_plan'
+                                             for turn in trace for c in turn.get('tool_calls', []))
+                        stop_action = warning_stop_action(bool(remaining_warnings), edit_attempted,
+                                                          submission_reminded, round_number < args.max_rounds)
+                        round_entry['stop_check'] = {'action': stop_action,
+                            'edit_attempted': edit_attempted, 'remaining_warnings': remaining_warnings}
+                        if stop_action == 'remind':
+                            submission_reminded = True
+                            messages.append({'role': 'user', 'content':
+                                '当前方案仍有告警：' + json.dumps(remaining_warnings, ensure_ascii=False)
+                                + '。本轮尚未提交修改；如需调整，请调用 edit_plan，文字描述不会改变方案。'})
+                            continue
                     if last_valid is not None and not warning_followup_required:
                         # The model chose to stop after a valid preview.
                         return {"ok": True, "no_op": False,
                                 "plan": {"actions": last_valid}, "trace": trace,
-                                "final_reply": visible_reasoning(raw) or (
+                                "unresolved_warnings": remaining_warnings,
+                                "final_reply": '已提交修改，仍有告警残留。' if remaining_warnings else visible_reasoning(raw) or (
                                     "工具预览已通过，当前段减字填写完成。"
                                     if basic else
                                     "工具预览已通过，当前段减字润色完成。"
@@ -724,7 +763,9 @@ def main() -> int:
                             and not warning_followup_required):
                         return {"ok": True, "no_op": True,
                                 "plan": item["baseline_plan"], "trace": trace,
-                                "final_reply": "逐音审阅完成，当前段无需修改。"}
+                                "unresolved_warnings": remaining_warnings,
+                                "final_reply": ("未提交有效修改，告警残留。" if remaining_warnings
+                                                else "逐音审阅完成，当前段无需修改。")}
                     # Do not accept an empty final answer immediately after
                     # a pitch warning: ask for one edit attempt.  This is not
                     # a demand that the attempt eliminates every warning.
@@ -756,34 +797,7 @@ def main() -> int:
                                  "tool_calls": assistant_calls})
                 accepted = None
                 warned_now: set[int] = set()
-                repeated_submission: list[int] | None = None
                 for assistant_call, call in zip(assistant_calls, calls):
-                    if call["name"] == "edit_plan":
-                        submitted = [
-                            row for row in (call.get("arguments") or {}).get("jianzi_rows") or []
-                            if isinstance(row, list) and len(row) == 2
-                            and isinstance(row[0], int) and not isinstance(row[0], bool)
-                        ]
-                        if submitted:
-                            current = {
-                                int(action["source_index"]): action.get("jianzi_text")
-                                for action in replay_patches(
-                                    item["baseline_plan"], runtime.accumulated_patches,
-                                    strict_before=False,
-                                ).actions
-                            }
-                            unchanged_events: list[int] = []
-                            for event_index, text in submitted:
-                                try:
-                                    source_index = runtime._event_to_source(event_index)
-                                except ValueError:
-                                    break
-                                if canonical_jianzi_text(text) == canonical_jianzi_text(
-                                    current.get(source_index)
-                                ):
-                                    unchanged_events.append(event_index)
-                            if len(unchanged_events) == len(submitted):
-                                repeated_submission = unchanged_events
                     result = runtime.invoke(call["name"], call.get("arguments") or {})
                     round_entry["tool_results"].append({
                         "name": call["name"],
@@ -810,24 +824,11 @@ def main() -> int:
                             warned_now = {
                                 source_to_event.get(int(warning["source_index"]), int(warning["source_index"]))
                                 for warning in report.get("warnings") or []
-                                if warning.get("code") == "jianzi_pitch_mismatch"
+                                if args.warning_feedback == 'on' and warning.get("code") == "jianzi_pitch_mismatch"
                                 and warning.get("source_index") is not None
                             }
                 if accepted is not None:
                     last_valid = accepted
-                    if repeated_submission:
-                        round_entry["repeated_submission"] = sorted(
-                            repeated_submission
-                        )
-                        return {
-                            "ok": True, "no_op": False,
-                            "plan": {"actions": accepted}, "trace": trace,
-                            "final_reply": (
-                                "检测到重复提交未改变的音序（"
-                                + "、".join(str(index) for index in sorted(repeated_submission))
-                                + "），采用当前有效预览并停止交互。"
-                            ),
-                        }
                     # Any edit after the first warning fulfills the required
                     # repair attempt.  Later warnings remain visible in the
                     # tool result, but do not force an endless loop.
@@ -892,7 +893,7 @@ def main() -> int:
                 return result, pass_count
             plan = result["plan"]
             item["baseline_plan"] = plan
-            if not public_plan_warning_messages(item, historical=historical):
+            if args.warning_feedback == 'off' or not public_plan_warning_messages(item, historical=historical):
                 return result, pass_count
         return result, args.max_guqinizer_passes
 
@@ -1072,7 +1073,7 @@ def main() -> int:
                         if stage_result.get("ok") and isinstance(stage_result.get("plan"), dict):
                             session["item"]["baseline_plan"] = stage_result["plan"]
                             if (session["guqinizer_passes"] < args.max_guqinizer_passes
-                                    and public_plan_warning_messages(
+                                    and args.warning_feedback == 'on' and public_plan_warning_messages(
                                         session["item"], historical=session["state"]["historical"]
                                     )):
                                 steps = run_stage_steps(

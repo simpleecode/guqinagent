@@ -7,6 +7,43 @@ parser.  No training pipeline is modified.
 
 ## Run
 
+### Current inference artifacts
+
+Current results are organized by method and score, not by run date:
+
+```text
+train/eval_outputs/two_stage/
+  index.html
+  S35eJqgV/                 # 梅花三弄
+    inputs.jsonl
+    predictions.jsonl
+    result_manifest.json
+    S35eJqgV.html
+    S35eJqgV.pdf            # optional export, always this fixed name
+  S1zt293d/                 # 凤求凰, same layout
+  .work/inference/          # shared queue scratch data, not another formal version
+```
+
+`single_stage`, `direct`, and named ablations use separate method roots.
+`train/scripts/publish_method_eval.py --method two_stage --inputs ...
+--predictions ... --render` verifies complete ID/hash/protocol coverage and
+publishes each score to its fixed directory. Updating a score replaces its
+current result; stale PDFs are not carried over to changed predictions.
+Replaced published directories go to recoverable trash, not version folders.
+Legacy dated experiment directories are provenance, not the current entry point.
+
+To refresh HTML and export a score PDF, use these fixed paths:
+
+```bash
+python ABC_J/scripts/visualize_running_eval_score.py \
+  --score S35eJqgV \
+  --input train/eval_outputs/two_stage/S35eJqgV/inputs.jsonl \
+  --pulled train/eval_outputs/two_stage/S35eJqgV/predictions.jsonl \
+  --skip-pull \
+  --output train/eval_outputs/two_stage/S35eJqgV/S35eJqgV.html \
+  --notation-pdf train/eval_outputs/two_stage/S35eJqgV/S35eJqgV.pdf
+```
+
 ```bash
 cd /Volumes/F/work/Gunqin-agent
 python -m evaluation.run_eval \
@@ -55,12 +92,23 @@ by Git. Prediction JSONL may be append-only: the last row for each
   effective vocabulary size (`exp(Shannon entropy)`), and event-level
   technique density. Ornament P/R/F1 above remains a separate event-level
   semantic-correctness metric, not a second distribution statistic.
-* **Rule violation rate**: unique events with a deterministic parser-backed
-  violation divided by pitch-evaluable events. Initial violations are pitch
-  mismatch and unequivocal unresolvable/unplayable parser states.
+* **Final replay warning count** (`rule_violations`): the number of warnings
+  emitted when the final authored plans are replayed, phrase by phrase, through
+  the same `validate_jianzi_only` rules used by `edit_plan`. This includes
+  pitch, fingering, repeat, resonance, and other runtime warnings; warnings
+  from intermediate tool turns are excluded. `rule_violation_rate` is the
+  fraction of audited phrases with at least one final warning, while
+  `rule_warnings_per_phrase` counts warning instances per audited phrase.
+  Only complete scores with a final plan for every phrase are scored; skipped
+  scores are listed in `warning_replay_incomplete_scores`, never reported as
+  warning-free. This makes warning-feedback ablations directly comparable
+  when they use the same test set and runtime version.
 
 `per_event.jsonl` retains structured prediction/reference fields, target MIDI,
-and audit evidence. `violations.jsonl` has the precise state evidence.
+and audit evidence. `violations.jsonl` contains one record per final replay
+warning with its runtime code, source index, and rule evidence. The separate
+`final_tool_receipt_warning` statistic is a diagnostic of the last recorded
+tool response, not the paper-facing final-state metric.
 
 ## Deliberately out of scope / TODO
 

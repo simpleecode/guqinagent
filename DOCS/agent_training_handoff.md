@@ -2,6 +2,15 @@
 
 更新：2026-10-16（北京时间）。仅维护当前状态；历史修复细节看报告、代码和测试，不再追加操作流水账。
 
+正式推理产物统一入口（2026-10-22整理）：`train/eval_outputs/<方法>/<曲谱ID>/`。
+主实验方法为 `two_stage`，每首固定保留 `inputs.jsonl`、`predictions.jsonl`、
+`result_manifest.json`、`<曲谱ID>.html` 和可选 `<曲谱ID>.pdf`；总览为方法目录的
+`index.html`。同方法更新时替换该曲当前结果，旧正式目录移入可恢复废纸篓；
+不得继续新建带日期/重试后缀的正式目录。共享队列工作文件使用
+`train/eval_outputs/two_stage/.work/inference/`，完成后由
+`train/scripts/publish_method_eval.py` 校验并分曲发布。J00327已改为此布局。
+旧 `train/eval_outputs_v3_two_stage/` 中的历史实验不再作为当前入口，不批量删除未核对的实验凭据。
+
 ## 1. 当前训练
 
 - 实验室：`20223393ljw@219.216.65.119`；仓库 `/home/20223393ljw/guqin-agent`。

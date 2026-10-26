@@ -54,6 +54,26 @@ class NumberedRepeatTests(unittest.TestCase):
         codes={w['code'] for w in repeat_content_warnings(now,actions,historical=history)}
         self.assertIn('repeat_omission_marker_missing',codes)
 
+    def test_invalid_repeat_does_not_request_omission_placeholders(self):
+        for command, current, expected in [
+            ('从999再作', ['1','2'], 'repeat_numbered_start_missing'),
+            ('从20再作', ['1','3'], 'repeat_numbered_pitch_mismatch'),
+            ('从ㄱ再作', ['1','2'], 'missing_repeat_anchor'),
+        ]:
+            now, actions, history = self.setup_repeat(['1','2'], current, command)
+            actions[3]['jianzi_text'] = ''
+            content = repeat_content_warnings(now, actions, historical=history)
+            codes = {w['code'] for w in content + repeat_anchor_warnings(now, actions, historical=history)}
+            self.assertIn(expected, codes)
+            self.assertNotIn('repeat_omission_marker_missing', codes)
+
+    def test_valid_anchor_still_requests_omission_placeholders(self):
+        now, actions, history = self.setup_repeat(['1','2'], ['1','2'], '从ㄱ再作')
+        history[('test','p0001')]['reference_plan']['actions'][0]['jianzi_text'] = '[再作标记ㄱ]散挑一弦'
+        actions[3]['jianzi_text'] = ''
+        self.assertIn('repeat_omission_marker_missing', {
+            w['code'] for w in repeat_content_warnings(now, actions, historical=history)})
+
     def test_nine_notes_retrieve_and_render_related_phrase(self):
         tones=['1','2','3','4','5','6','7','1̇','2̇']
         prior=item(tones,event_start=20)

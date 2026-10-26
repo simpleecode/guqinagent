@@ -6,6 +6,14 @@ from ABC_J.scripts.generate_teacher_tool_trajectories import public_system_for
 
 
 class RepeatAnchorLabelTests(unittest.TestCase):
+    def test_guqinizer_explains_anchor_instruction_and_coverage(self):
+        prompt=public_system_for('guqinization')
+        self.assertIn('只标记重复起点，不执行再作',prompt)
+        self.assertIn('实际重复处须填写“从ㄱ再作”',prompt)
+        self.assertIn('只有已被有效再作指令或前序复合技法覆盖',prompt)
+        self.assertNotIn('前一段或再作标记后',prompt)
+        self.assertNotIn('不会删除声音或演奏状态',prompt)
+
     def test_normalization_idempotent_and_preserves_normal_jianzi(self):
         for label in ('〔再作起点ㄱ〕', '〔再作起点〕', '[再作标记ㄱ]', '【再做起点ㄱ】'):
             text = label + '大指七徽挑三弦'

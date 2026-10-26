@@ -12,13 +12,14 @@ from .pitch import paired_cents
 TONE_TYPES = ("stopped", "open", "harmonic")
 
 
-def final_warning_stats(predictions: list[dict[str, Any]]) -> dict[str, Any]:
-    """Count phrases whose final edit_plan preview still contains warnings."""
+def tool_receipt_warning_stats(predictions: list[dict[str, Any]]) -> dict[str, Any]:
+    """Diagnostic only: count warnings in the last recorded edit_plan receipt."""
     total = 0
     warned = 0
     for prediction in predictions:
         total += 1
-        stage = prediction.get("guqinizer") or prediction.get("base") or {}
+        stage = (prediction.get("single_stage") or prediction.get("guqinizer")
+                 or prediction.get("base") or {})
         last_text = ""
         for trace_item in stage.get("trace") or []:
             for result in trace_item.get("tool_results") or []:
@@ -34,6 +35,22 @@ def final_warning_stats(predictions: list[dict[str, Any]]) -> dict[str, Any]:
         "warning_phrases": warned,
         "warning_rate": warned / total if total else None,
         "definition": "phrases whose final edit_plan preview contains at least one :warning:",
+    }
+
+
+def final_warning_stats(violations: list[dict[str, Any]],
+                        audited_phrases: int) -> dict[str, Any]:
+    """Final-state warning count from a fresh, stateful tool-runtime replay."""
+    warned = {(v['piece_id'], v['phrase_id']) for v in violations}
+    by_code = Counter(v['violation_type'] for v in violations)
+    return {
+        'phrases': audited_phrases,
+        'warning_count': len(violations),
+        'warning_phrases': len(warned),
+        'warning_rate': len(warned) / audited_phrases if audited_phrases else None,
+        'warnings_per_phrase': len(violations) / audited_phrases if audited_phrases else None,
+        'by_code': dict(by_code),
+        'definition': 'warnings from final-plan edit_plan runtime replay across complete scores',
     }
 
 
@@ -73,11 +90,14 @@ def tone_type_metrics(events: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def metrics(events: list[dict[str, Any]], violations: list[dict[str, Any]],
-            tolerance_cents: float) -> dict[str, Any]:
+            tolerance_cents: float, *, audited_phrases: int | None = None) -> dict[str, Any]:
     cents = [value for event in events for value in paired_cents(event.get("pitch_audit") or {})]
     pitch_events = [event for event in events
                     if (event.get("pitch_audit") or {}).get("status") in {"matched", "mismatched"}]
     matched = sum((event["pitch_audit"] or {}).get("status") == "matched" for event in pitch_events)
+    if audited_phrases is None:
+        audited_phrases = len({(e['piece_id'], e['phrase_id']) for e in events})
+    warned_phrases = {(v['piece_id'], v['phrase_id']) for v in violations}
     result = {
         "pitch_accuracy_at_50_cents": matched / len(pitch_events) if pitch_events else None,
         "pitch_mae_cents": sum(cents) / len(cents) if cents else None,
@@ -96,22 +116,30 @@ def metrics(events: list[dict[str, Any]], violations: list[dict[str, Any]],
         "performance_technique_usage": technique_usage(
             events, field="fingering_techniques"
         ),
-        "rule_violation_rate": len({(v["piece_id"], v["phrase_id"], v["event_id"]) for v in violations}) /
-                               len(pitch_events) if pitch_events else None,
+        "rule_violation_rate": len(warned_phrases) / audited_phrases if audited_phrases else None,
         "rule_violations": len(violations),
+        "rule_warning_audited_phrases": audited_phrases,
+        "rule_warning_phrases": len(warned_phrases),
+        "rule_warnings_per_phrase": len(violations) / audited_phrases if audited_phrases else None,
+        "rule_warning_codes": dict(Counter(v['violation_type'] for v in violations)),
+        "rule_violation_definition": "final-plan edit_plan warning count; rate is warning-bearing phrase fraction",
         "pitch_tolerance_cents": tolerance_cents,
     }
     return result
 
 
 def per_piece(events: list[dict[str, Any]], violations: list[dict[str, Any]],
-              tolerance_cents: float) -> list[dict[str, Any]]:
+              tolerance_cents: float,
+              audited_phrase_keys: set[tuple[str, str]] | None = None) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for event in events:
         grouped.setdefault((event["piece_id"], event["phrase_id"]), []).append(event)
     result = []
     for (piece_id, phrase_id), group in sorted(grouped.items()):
         own = [v for v in violations if v["piece_id"] == piece_id and v["phrase_id"] == phrase_id]
+        audited = int(audited_phrase_keys is None or
+                      (piece_id, phrase_id) in audited_phrase_keys)
         result.append({"piece_id": piece_id, "phrase_id": phrase_id,
-                       "metrics": metrics(group, own, tolerance_cents)})
+                       "metrics": metrics(group, own, tolerance_cents,
+                                          audited_phrases=audited)})
     return result

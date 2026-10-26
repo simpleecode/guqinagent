@@ -34,9 +34,46 @@ from agents.abc_to_jianzipu.trajectory_replay import (
     replay_patches,
 )
 from agents.abc_to_jianzipu.reference_parser import AUDIT
+from agents.ToolRuntime.runtime import illegal_blank_after_walk_warnings
 
 
 class EditableProtocolTests(unittest.TestCase):
+    def test_bare_tui_does_not_cover_return_note_without_fu(self) -> None:
+        item = {'input': {'metadata': {'tonic': '1=F'}, 'notes_without_jianzi': [
+            {'index': 179, 'abc': 'd', 'jianpu': '6'},
+            {'index': 180, 'abc': 'f', 'jianpu': '1̇'},
+        ]}}
+        for text in ('退', '退七徽', '进', '绰上十徽'):
+            actions = {179: {'jianzi_text': text}, 180: {'jianzi_text': ''}}
+            warnings = illegal_blank_after_walk_warnings(item, actions)
+            self.assertEqual([w['source_index'] for w in warnings], [180], text)
+        for text in ('退复', '退复七徽', '往来', '进复九徽'):
+            actions = {179: {'jianzi_text': text}, 180: {'jianzi_text': ''}}
+            self.assertEqual(illegal_blank_after_walk_warnings(item, actions), [], text)
+
+    def test_changed_pitch_blank_after_standalone_walk_is_illegal(self) -> None:
+        item = {"input": {
+            "metadata": {"tonic": "1=F"},
+            "notes_without_jianzi": [
+                {"index": 254, "abc": "D", "jianpu": "6̣"},
+                {"index": 255, "abc": "C", "jianpu": "5̣"},
+            ],
+        }}
+        actions = {
+            254: {"jianzi_text": "注下七徽九分"},
+            255: {"jianzi_text": ""},
+        }
+        self.assertEqual(illegal_blank_after_walk_warnings(item, actions), [{
+            "source_index": 255,
+            "previous_walk_source_index": 254,
+            "code": "illegal_blank_after_walk",
+        }])
+        item["input"]["notes_without_jianzi"][1]["jianpu"] = "6̣"
+        self.assertEqual(illegal_blank_after_walk_warnings(item, actions), [])
+        item["input"]["notes_without_jianzi"][1]["jianpu"] = "5̣"
+        actions[254]["jianzi_text"] = "注下七徽九分挑三弦"
+        self.assertEqual(illegal_blank_after_walk_warnings(item, actions), [])
+
     def test_symbolic_outside_hui_renders_without_numeric_coercion(self) -> None:
         self.assertEqual(hui_label("徽外"), "徽外")
         self.assertEqual(hui_label("徽外半"), "徽外半")
@@ -281,6 +318,28 @@ class EditableProtocolTests(unittest.TestCase):
             "1｜5｜已填写｜[注下七徽三分]:warning:音高不匹配",
             result["result"]["text"],
         )
+
+    def test_edit_plan_warns_on_downward_bare_zhuang_without_pitch_details(self) -> None:
+        item = {
+            "score_key": "test", "phrase_id": "p0001",
+            "input": {
+                "metadata": {"tonic": "1=F"},
+                "normalized_tuning": {"open_midi": [48, 50, 53, 55, 57, 60, 62]},
+                "notes_without_jianzi": [
+                    {"index": 74, "event_index": 55, "jianpu": "3̣"},
+                    {"index": 75, "event_index": 56, "jianpu": "2̣"},
+                ],
+            },
+            "baseline_plan": {"actions": [
+                {"source_index": 74, "jianzi_text": "大指九徽挑二弦"},
+                {"source_index": 75, "jianzi_text": ""},
+            ]},
+        }
+        runtime = RealToolRuntime(item, {}, basic_fingering=False)
+        result = runtime.invoke("edit_plan", {"jianzi_rows": [[56, "撞"]]})
+        self.assertTrue(result["result"]["valid"])
+        self.assertIn("56｜2̣｜已填写｜[撞]:warning:音高不匹配", result["result"]["text"])
+        self.assertNotIn("MIDI", result["result"]["text"].split("56｜2̣｜已填写｜[撞]")[1].split("\n")[0])
 
     def test_edit_plan_warns_on_an_octave_sized_standalone_walk(self) -> None:
         item = {
@@ -1037,13 +1096,15 @@ class EditableProtocolTests(unittest.TestCase):
         self.assertIn("沿用再作动作继承的减字", fingering)
         self.assertIn("不等于把该音置为空字符串", fingering)
         self.assertIn("大指七徽挑七弦”等同于“泛音大指七徽挑七弦", fingering)
-        self.assertIn('":warning:音高不匹配"', fingering)
-        self.assertIn("尽量核对该行的取音与减字并修正", fingering)
-        self.assertIn("[空]是确定的谱面空显示目标", guqinizer)
+        self.assertIn('回执中的":warning:"', fingering)
+        self.assertIn("音高不匹配时先用 get_pitch_candidates 核对", fingering)
+        self.assertIn("[空]只表示提取到的参考减字为空", fingering)
+        self.assertIn("可能是原标注漏填或抽取失败", guqinizer)
+        self.assertIn("不要把[空]当成必须置空的答案", guqinizer)
         self.assertIn("设为空字符串", guqinizer)
         self.assertIn("不删除声音或演奏状态", guqinizer)
         self.assertIn("显式“散”只覆盖当前音", guqinizer)
-        self.assertIn('":warning:音高不匹配"', guqinizer)
+        self.assertIn('回执中的":warning:"', guqinizer)
 
     def test_guqinizer_prompt_preserves_repeat_omission_marker(self) -> None:
         public = public_system_for("guqinization")

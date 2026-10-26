@@ -1,33 +1,53 @@
-"""Only deterministic, parser-backed final-plan violations."""
+"""Final-state rule warnings replayed by the live edit_plan runtime."""
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
+from agents.ToolRuntime.runtime import validate_jianzi_only
 
-PARSER_FAILURES = {
-    "string_out_of_range", "missing_hui", "harmonic_hui_missing",
-    "hui_outside_not_valid_for_harmonic", "fractional_hui_not_valid_for_harmonic",
-    "ambiguous_multiple_strings", "current_stopped_position_missing",
-}
+from .parser import final_actions
 
 
-def violations(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    result = []
-    for event in events:
-        audit = event.get("pitch_audit") or {}
-        reason = audit.get("reason")
-        if audit.get("status") == "mismatched":
-            result.append(_row(event, "pitch_mismatch", audit,
-                               "可解析减字的实得音高与该事件简谱目标相差超过容差。"))
-        elif reason in PARSER_FAILURES:
-            result.append(_row(event, "unplayable_or_unresolvable_jianzi", audit,
-                               "减字触发确定性的解析/演奏状态错误。"))
+def replay_final_warnings(
+    samples: list[tuple[dict[str, Any], dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Run final authored plans through edit_plan warning rules in score order."""
+    ordered = sorted(samples, key=lambda pair: min(
+        (int(note['index']) for note in pair[1]['runtime_item']['input']
+         .get('notes_without_jianzi') or [] if note.get('index') is not None),
+        default=-1,
+    ))
+    history: dict[tuple[str, str], dict[str, Any]] = {}
+    result: list[dict[str, Any]] = []
+    for prediction, reference in ordered:
+        item = deepcopy(reference['runtime_item'])
+        score_key = str(item['score_key'])
+        phrase_id = str(item['phrase_id'])
+        actions = deepcopy(final_actions(prediction))
+        if not actions:
+            raise ValueError(f'no final plan for {score_key}-{phrase_id}')
+        # Warning replay must depend only on public score input and the
+        # model's authored plan, never on sealed annotation actions.
+        item.pop('reference_plan', None)
+        item['baseline_plan'] = {'actions': actions}
+        _, report = validate_jianzi_only(
+            item, [], require_complete=False, historical=history,
+        )
+        if report.get('pitch_audit', {}).get('unavailable'):
+            raise RuntimeError(
+                f'pitch warning replay unavailable for {score_key}-{phrase_id}: '
+                f"{report['pitch_audit']['unavailable']}"
+            )
+        for warning in report['warnings']:
+            result.append({
+                'piece_id': score_key,
+                'phrase_id': phrase_id,
+                'event_id': warning.get('source_index'),
+                'violation_type': warning['code'],
+                'warning': deepcopy(warning),
+                'definition': 'warning from final-plan edit_plan runtime replay',
+            })
+        item['reference_plan'] = deepcopy(item['baseline_plan'])
+        history[(score_key, phrase_id)] = item
     return result
-
-
-def _row(event: dict[str, Any], kind: str, audit: dict[str, Any], explanation: str) -> dict[str, Any]:
-    return {"piece_id": event["piece_id"], "phrase_id": event["phrase_id"],
-            "event_id": event["event_id"], "violation_type": kind,
-            "relevant_state_event": {"prediction_text": event["prediction_text"],
-                                     "target_midi": event["target_midi"], "audit": audit},
-            "explanation": explanation}

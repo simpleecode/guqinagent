@@ -32,7 +32,7 @@ from agents.ToolRuntime.runtime import (  # noqa: E402
     public_pitch_warning_source_indices,
 )
 from agents.abc_to_jianzipu.score_structure import is_structural_note  # noqa: E402
-from agents.abc_to_jianzipu.teacher_trajectory import render_public_prompt  # noqa: E402
+from agents.abc_to_jianzipu.teacher_trajectory import render_public_prompt, chord_jianpu_label  # noqa: E402
 from scripts.audit_jianpu_jianzi_pitch import audit as audit_pitch, NOTE_NAMES  # noqa: E402
 
 
@@ -168,7 +168,7 @@ def prompt_block(stage: str, system_prompt: str, user_prompt: str, *, recorded: 
     )
 
 
-def stage_trace(stage: dict | None, title: str, prompt_html: str = "") -> str:
+def stage_trace(stage: dict | None, title: str, prompt_html: str = "", *, include_request_messages=False) -> str:
     if not stage:
         return f"<details><summary>{esc(title)}：未生成</summary><p>该阶段尚未有结果。</p></details>"
     trace = stage.get("trace") or []
@@ -179,7 +179,7 @@ def stage_trace(stage: dict | None, title: str, prompt_html: str = "") -> str:
         results = item.get("tool_results") or []
         raw = item.get("raw_output") or ""
         request_html = ''
-        if isinstance(item.get('request_messages'), list):
+        if include_request_messages and isinstance(item.get('request_messages'), list):
             request_html = (
                 "<details><summary>本轮实际请求 messages</summary>"
                 f"<pre>{esc(pretty(item['request_messages']))}</pre></details>"
@@ -334,7 +334,7 @@ def compare_table(
     rows = []
     for index in indices:
         note = next((n for n in notes if int(n.get("index", -1)) == index), {})
-        jianpu = note.get("jianpu") or ""
+        jianpu = chord_jianpu_label(note.get('abc'), note.get('jianpu') or '', note.get('jianpu_alt'))
         abc = note.get("abc") or ""
         duration = note.get("duration") or ""
         event = event_of.get(index)
@@ -389,14 +389,16 @@ def notation_overview(source_rows: list[dict], predictions: dict[str, dict]) -> 
             if note.get("index") is None:
                 continue
             index = int(note["index"])
-            jianpu = str(note.get("jianpu") or note.get("jianpu_alt") or "—")
+            jianpu = chord_jianpu_label(note.get('abc'), note.get('jianpu') or '—', note.get('jianpu_alt'))
             if is_structural_note(note):
                 jianpu = "｜"
             jianzi = actions.get(index)
             event = note.get("event_index")
             ordinal = str(int(event)) if event is not None else "—"
+            duration = "" if is_structural_note(note) else str(note.get("duration") or "")
             cells.append((
-                f"<div class='notation-cell' title='source index {index}'><small>{ordinal}</small>{esc(jianpu)}</div>",
+                f"<div class='notation-cell' title='source index {index}'><small>{ordinal}</small>{esc(jianpu)}"
+                f"<span class='notation-duration' style='font-size:11px;color:var(--muted);margin-left:6px'>{esc(duration)}</span></div>",
                 f"<div class='notation-cell jianzi'>{esc(jianzi if jianzi else '·')}</div>",
             ))
         phrase_id = runtime.get("phrase_id") or source.get("phrase_id") or sample_id
@@ -453,11 +455,11 @@ def render_notation_pdf(
     output: Path,
     include_pending: bool = False,
     notes_per_row: int = 12,
+    reference_by_id: dict[str, dict[int, str]] | None = None,
 ) -> None:
     """Write a compact, print-friendly final-notation view for an evaluation.
 
-    This deliberately contains no prompts, traces, reference answers, or audit
-    table: every strip has a jianpu row above its final model jianzi row.
+    Optional sealed annotations are display-only; never used for model replay.
     """
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.pdfbase import pdfmetrics
@@ -473,8 +475,9 @@ def render_notation_pdf(
     page_width, page_height = landscape(A4)
     margin = 28.0
     label_width = 38.0
+    jianpu_row_height = 38.0
     notes_per_strip = max(1, notes_per_row)
-    top_font = 10.0
+    top_font = 14.0
     bottom_font = 7.2
     leading = 9.0
     pdf = canvas.Canvas(str(output), pagesize=landscape(A4), pageCompression=1)
@@ -503,7 +506,8 @@ def render_notation_pdf(
         pdf.setFont(font_name, 7.5)
         pdf.drawString(margin, y, tuning_text)
         y -= 14
-        pdf.drawString(margin, y, "上行：简谱；下行：模型最终减字。仅含最终谱面，不含轨迹与标注。")
+        pdf.drawString(margin, y, "上行：简谱；中行：模型生成；下行：原标注（仅供对照）。" if reference_by_id is not None
+                       else "上行：简谱；下行：模型最终减字。仅含最终谱面，不含轨迹与标注。")
         y -= 14
 
     def footer() -> None:
@@ -525,33 +529,45 @@ def render_notation_pdf(
             final_stage = prediction.get("base") or {}
             stage_label = "Base" if sample_id in predictions else "待生成"
         actions = actions_by_index(final_stage)
-        cells: list[tuple[str, str, str]] = []
+        if reference_by_id is not None and sample_id not in reference_by_id:
+            raise ValueError(f'Missing PDF annotation: {sample_id}')
+        reference = (reference_by_id or {}).get(sample_id, {})
+        cells = []
+        bar_before = set()
         for note in notes:
             if note.get("index") is None:
                 continue
             index = int(note["index"])
-            jianpu = str(note.get("jianpu") or note.get("jianpu_alt") or "—")
+            jianpu = chord_jianpu_label(note.get('abc'), note.get('jianpu') or '—', note.get('jianpu_alt'))
             if is_structural_note(note):
-                jianpu = "｜"
+                bar_before.add(len(cells))
+                continue
             event = note.get("event_index")
             ordinal = str(int(event)) if event is not None else "—"
-            cells.append((ordinal, jianpu, actions.get(index) or "·"))
+            duration = "" if is_structural_note(note) else str(note.get("duration") or "")
+            cells.append((ordinal, jianpu, duration, actions.get(index) or "·", reference.get(index) or "·"))
 
         phrase_id = str(runtime.get("phrase_id") or source.get("phrase_id") or sample_id)
-        for start in range(0, len(cells), notes_per_strip):
-            chunk = cells[start:start + notes_per_strip]
+        import math
+        row_count = max(1, math.ceil(len(cells) / notes_per_strip))
+        starts = [round(i * len(cells) / row_count) for i in range(row_count + 1)]
+        for line_no, (start, stop) in enumerate(zip(starts, starts[1:]), 1):
+            chunk = cells[start:stop]
             cell_width = (page_width - 2 * margin - label_width) / max(1, len(chunk))
             wrapped = [
                 _pdf_wrap(jianzi, font_name, bottom_font, cell_width - 6)
-                for _, _, jianzi in chunk
+                for _, _, _, jianzi, _ in chunk
             ]
             jianzi_height = max(24.0, 7 + max(map(len, wrapped), default=1) * leading)
-            strip_height = 15 + 20 + jianzi_height
+            reference_wrapped = [_pdf_wrap(cell[4], font_name, bottom_font, cell_width - 6) for cell in chunk]
+            reference_height = (max(24.0, 7 + max(map(len, reference_wrapped), default=1) * leading)
+                                if reference_by_id is not None else 0)
+            body_height = jianpu_row_height + jianzi_height + reference_height
+            strip_height = 15 + body_height
             if y - strip_height < margin + 20:
                 footer()
                 begin_page()
 
-            line_no = start // notes_per_strip + 1
             pdf.setFillColorRGB(0.22, 0.22, 0.22)
             pdf.setFont(font_name, 8)
             pdf.drawString(margin, y - 10, f"{phrase_id}｜第 {line_no} 行｜{stage_label}")
@@ -560,30 +576,73 @@ def render_notation_pdf(
             total_width = label_width + cell_width * len(chunk)
             pdf.setStrokeColorRGB(0.65, 0.65, 0.65)
             pdf.setLineWidth(0.45)
-            pdf.rect(x0, y - 20 - jianzi_height, total_width, 20 + jianzi_height, stroke=1, fill=0)
-            pdf.line(x0, y - 20, x0 + total_width, y - 20)
-            pdf.line(x0 + label_width, y, x0 + label_width, y - 20 - jianzi_height)
+            pdf.rect(x0, y - body_height, total_width, body_height, stroke=1, fill=0)
+            pdf.line(x0, y - jianpu_row_height, x0 + total_width, y - jianpu_row_height)
+            pdf.line(x0 + label_width, y, x0 + label_width,
+                     y - body_height)
+            if reference_height:
+                pdf.line(x0, y - jianpu_row_height - jianzi_height,
+                         x0 + total_width, y - jianpu_row_height - jianzi_height)
             pdf.setFillColorRGB(0.18, 0.18, 0.18)
             pdf.setFont(font_name, 8)
             pdf.drawCentredString(x0 + label_width / 2, y - 12, "简谱")
-            pdf.drawCentredString(x0 + label_width / 2, y - 32, "减字")
-            for position, ((ordinal, jianpu, _), lines) in enumerate(zip(chunk, wrapped)):
+            pdf.drawCentredString(x0 + label_width / 2, y - jianpu_row_height - 12, "模型生成" if reference_height else "减字")
+            if reference_height:
+                pdf.drawCentredString(x0 + label_width / 2, y - jianpu_row_height - jianzi_height - 12, "原标注")
+            for position, ((ordinal, jianpu, duration, _, _), lines) in enumerate(zip(chunk, wrapped)):
                 left = x0 + label_width + position * cell_width
                 if position:
                     pdf.setStrokeColorRGB(0.75, 0.75, 0.75)
-                    pdf.line(left, y, left, y - 20 - jianzi_height)
+                    pdf.line(left, y, left, y - body_height)
+                if start + position in bar_before:
+                    pdf.setStrokeColorRGB(0.15, 0.15, 0.15)
+                    pdf.setLineWidth(1.5)
+                    pdf.line(left, y, left, y - body_height)
+                    pdf.setLineWidth(0.45)
                 pdf.setFillColorRGB(0.42, 0.42, 0.42)
                 pdf.setFont(font_name, 5.6)
                 pdf.drawString(left + 3, y - 7, ordinal)
                 pdf.setFillColorRGB(0.08, 0.08, 0.08)
+                # Draw octave marks separately: combining marks overlap digits
+                # in several CJK fonts used by ReportLab.
+                import unicodedata
+                groups = []
+                for char in jianpu:
+                    if unicodedata.combining(char) and groups:
+                        groups[-1][1].append(char)
+                    else:
+                        groups.append([char, []])
+                widths = [pdfmetrics.stringWidth(c, font_name, top_font) for c, _ in groups]
+                cursor = left + (cell_width - sum(widths)) / 2
                 pdf.setFont(font_name, top_font)
-                pdf.drawCentredString(left + cell_width / 2, y - 17, jianpu)
+                for (char, marks), width in zip(groups, widths):
+                    pdf.drawString(cursor, y - 20, char)
+                    above = below = 0
+                    for mark in marks:
+                        if mark in ('\u0307', '\u0308'):
+                            for _ in range(2 if mark == '\u0308' else 1):
+                                pdf.circle(cursor + width / 2, y - 6 + above * 3, .75, stroke=0, fill=1)
+                                above += 1
+                        elif mark in ('\u0323', '\u0324'):
+                            for _ in range(2 if mark == '\u0324' else 1):
+                                pdf.circle(cursor + width / 2, y - 23 - below * 3, .75, stroke=0, fill=1)
+                                below += 1
+                    cursor += width
+                if duration:
+                    pdf.setFont(font_name, 5.8)
+                    pdf.drawCentredString(left + cell_width / 2, y - 35, duration)
                 pdf.setFillColorRGB(0.08, 0.08, 0.08)
                 pdf.setFont(font_name, bottom_font)
-                text_y = y - 20 - 8
+                text_y = y - jianpu_row_height - 8
                 for line in lines:
                     pdf.drawCentredString(left + cell_width / 2, text_y, line)
                     text_y -= leading
+                if reference_height:
+                    pdf.setFillColorRGB(0.3, 0.3, 0.3)
+                    text_y = y - jianpu_row_height - jianzi_height - 8
+                    for line in reference_wrapped[position]:
+                        pdf.drawCentredString(left + cell_width / 2, text_y, line)
+                        text_y -= leading
             y -= strip_height + 7
     footer()
     pdf.save()
@@ -592,11 +651,13 @@ def render_notation_pdf(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--score", default="ScGgTmDm")
+    parser.add_argument('--include-request-messages',action='store_true',
+                        help='Include full per-round request messages (omitted from HTML by default)')
     parser.add_argument("--remote", default="/home/20223393ljw/guqin-agent/train/eval_outputs_v3_two_stage/ScGgTmDm.jsonl")
     # The local test.jsonl is the runtime-enriched input in this checkout;
     # older server snapshots call the same format test_runtime.jsonl.
     parser.add_argument("--input", type=Path, default=ROOT / "train/eval_inputs_v2_text_protocol/test.jsonl")
-    parser.add_argument("--references", type=Path, default=ROOT / "ABC_J/agent_training/reference_trajectories_test.jsonl")
+    parser.add_argument("--references", type=Path, default=ROOT / "ABC_J/agent_training/two_stage_audited/pitch_eligible_train_test/inferred_trajectories_test.jsonl")
     parser.add_argument("--output", type=Path, default=ROOT / "train/eval_outputs_v3_two_stage/ScGgTmDm_running_view.html")
     parser.add_argument("--pulled", type=Path, default=ROOT / "train/eval_outputs_v3_two_stage/ScGgTmDm.remote.jsonl")
     parser.add_argument(
@@ -661,6 +722,9 @@ def main() -> int:
                 )
         reference_by_id[str(row.get("score_key")) + "-" + str(row.get("phrase_id"))] = ref_map
     ordered_ids = [str(r.get("sample_id")) for r in source_rows]
+    missing_references = set(ordered_ids) - reference_by_id.keys()
+    if missing_references:
+        raise ValueError(f'Missing annotation rows in {args.references}: {sorted(missing_references)}')
     completed = sum(sample_id in predictions for sample_id in ordered_ids)
     title = ""
     blocks = []
@@ -702,9 +766,8 @@ def main() -> int:
             f"<summary><code>{esc(sample_id)}</code>｜{status}</summary>"
             f"<p>当前段：{esc(source.get('phrase_id'))}；这是评估运行时输入，不含私有标注。</p>"
             f"<h3>当前结果 vs 标注</h3>{compare_table(runtime, base, guqinizer, annotation, historical)}"
-            f"<h3>两阶段轨迹</h3>{stage_trace(base, 'Base/Fingering', base_prompt_html)}"
-            f"{stage_trace(guqinizer, 'Guqinizer', guqin_prompt_html)}"
-            f"<details><summary>原始评估记录</summary><pre>{esc(pretty(prediction))}</pre></details>"
+            f"<h3>两阶段轨迹</h3>{stage_trace(base, 'Base/Fingering', base_prompt_html, include_request_messages=args.include_request_messages)}"
+            f"{stage_trace(guqinizer, 'Guqinizer', guqin_prompt_html, include_request_messages=args.include_request_messages)}"
             "</details>"
         )
         if prediction and prediction.get("protocol_valid"):
@@ -729,6 +792,7 @@ def main() -> int:
             source_rows, predictions, args.score, title, pdf_tuning, args.notation_pdf,
             include_pending=args.notation_pdf_include_pending,
             notes_per_row=args.notation_pdf_notes_per_row,
+            reference_by_id=reference_by_id,
         )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     page = f"""<!doctype html><html lang='zh-CN'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>

@@ -73,8 +73,12 @@ def main() -> int:
             sample_id = str(row["sample_id"])
             if sample_id not in excluded:
                 private[sample_id] = row
-        audits.extend(row for row in read(worker / "reasoning_redaction_audit.jsonl")
-                      if str(row.get("sample_id")) not in excluded)
+        audit_path = worker / "reasoning_redaction_audit.jsonl"
+        if audit_path.exists():
+            audits.extend(row for row in read(audit_path)
+                          if str(row.get("sample_id")) not in excluded)
+        elif report.get("redacted") != 0:
+            raise SystemExit(f"missing audit for rewritten samples: {worker}")
     missing = set(source_ids) - set(public)
     extra = set(public) - set(source_ids)
     if missing or extra:

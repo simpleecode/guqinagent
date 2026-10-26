@@ -215,10 +215,15 @@ TOOLS = [
 # A warning is an actionable playability failure, rather than an invitation to
 # rationalize a known-bad result. Keep the remedies compact and concrete so
 # the same public rule is visible to every generation stage.
+OPEN_RESONANCE_REPAIR_GUIDE = (
+    "散音后紧接同弦按音时，可以直接寻找后音的其他按音候选，也可调整前音的配弦与取音方式，也可使用泛音甚至整段改为泛音区间（如果该段用泛音更方便演奏）"
+)
+
 WARNING_RESOLUTION_GUIDE = (
     "逐类修复：音高不匹配先查候选后换为命中取音；走手跨度过大、终点同起点或方向错误时改用合适弦徽/方向或不用走手；"
-    "同指跨位过大时换指或用手指组合；低徽过紧时换更高徽位的同音弦；散音余韵时后一个按音换弦；"
-    "撮、泼、剌等双弦问题时改为两根不同且符合相邻性规则的弦。"
+    "同指跨位过大时换指或用手指组合；低徽过紧时可在更高的弦上寻找同音高的徽位来代替；"
+    + OPEN_RESONANCE_REPAIR_GUIDE
+    + "撮、泼、剌等双弦问题时改为两根不同且符合相邻性规则的弦。"
 )
 
 # New trajectories use one source of truth: the reduced-notation text.  The
@@ -232,16 +237,17 @@ PUBLIC_SYSTEM = {
         "填写或编辑曲谱只能使用 edit_plan.jianzi_rows；尽量为当前段每个发音事件填写减字，"
         "暂不主动加入绰、注、吟、猱、走手或其他复杂技法。"
         "每次 edit_plan 后应逐项评估工具回执中的 warning，并优先修复；不能只用空泛 reasoning 回避。"
-        "尤其“散音后紧接同弦按音”应优先将后一个按音改到不同弦，音高不匹配应查询候选并改为匹配取音。"
+        "音高不匹配应查询候选并改为匹配取音。"
         + WARNING_RESOLUTION_GUIDE
     ),
     "guqinization": (
         "你是减字谱润色 Agent。基于初稿、上下文与专业判断，修订走手、复合技法和显示范围。"
+        '可用“从头再作”“再作”“从ㄱ再作”表示重复。“[再作标记ㄱ]”只标记重复起点，不执行再作；实际重复处须填写“从ㄱ再作”。'
         "通过 edit_plan.jianzi_rows 进行编辑；其中只列出相对当前初稿确实需要改写的音，不用重发无需改变的行；"
-        "空字符串表示将该行 jianzi_text 置空；不会删除声音或演奏状态。"
-        f'"{OMITTED_PLACEHOLDER}"表示该音采用再作动作继承的减字（前一段或再作标记后）、因此谱面省略其减字。若前一减字已覆盖多个动作，后续行可用空字符串避免重复显示。'
+        "空字符串表示该行不重复显示减字，并不自行继承演奏动作；只有已被有效再作指令或前序复合技法覆盖的后续音，才能省略减字。"
+        f'"{OMITTED_PLACEHOLDER}"表示该音已被有效再作指令覆盖而省略减字；只有再作标记不能作为省略依据。'
         "工具会给出高置信音高、走手跨度、同指跨位、低徽按音、散音余韵或双弦可演奏性辅助警告；每次 edit_plan 后应逐项评估并优先修复 warning，不能只作空泛解释。"
-        "例如散音余韵警告须将后一个按音改到不同弦；音高不匹配须查询候选并改为匹配取音；其余演奏性警告须改写相关弦、徽位、指法或走手。"
+        "音高不匹配须查询候选并改为匹配取音；其余演奏性警告须改写相关弦、徽位、指法或走手。"
         + WARNING_RESOLUTION_GUIDE
         + "当前段减字由只会基础指法的 Agent 初步填写；请在不破坏音高和可演奏性的前提下适当加入高级指法，使曲子更丰富、更有韵味。"
     ),
@@ -253,7 +259,7 @@ PUBLIC_SYSTEM = {
         "优先保证音高、左右手可演奏性与前后衔接，再按需要使用绰、注、吟、猱、历、撮等复杂技法，"
         "不要为了堆砌技法而改坏已经合理的取音。"
         "若工具在已填写的减字后标注音高、走手跨度、同指跨位、低徽按音、散音余韵或双弦可演奏性 warning，应逐项评估并优先修复，不要仅说明理由后结束。"
-        "其中“散音后紧接同弦按音”应优先将后一个按音改为不同弦；音高不匹配应查询候选并改为匹配取音。"
+        "音高不匹配应查询候选并改为匹配取音。"
         + WARNING_RESOLUTION_GUIDE
     ),
 }
@@ -352,9 +358,9 @@ def render_teacher_reference_gqs(item: dict) -> str:
         elif note.get("notation_omitted") and not jianzi:
             surface = f"[{OMITTED_PLACEHOLDER}]"
         elif reference:
-            # An ordinary blank annotation is an explicit display target.  It
-            # may ask Guqinizer to clear a redundant glyph after 吟/猱 or a
-            # multi-sound compound gesture, so never render it as "unknown".
+            # The source has a blank reference here.  It can be intentional
+            # display omission or missing extraction; the private prompt asks
+            # the teacher to decide from musical context instead of copying it.
             surface = f"[{jianzi}]" if jianzi else "[空]"
         else:
             # Structural rows such as barlines have no reference action.
@@ -513,17 +519,24 @@ def private_reference_semantics_rules(stage: str) -> list[str]:
         '应逐项审阅 edit_plan 回执中的":warning:"并优先修复；'
         '音高不匹配时先用 get_pitch_candidates 核对后改写，是否保留由完整音乐判断决定。'
     )
+    empty_reference_rule = (
+        "私有参考表中的[空]只表示提取到的参考减字为空：可能是前一走手、复合技法或余韵覆盖，"
+        "刻意不重复显示；也可能是原标注漏填或抽取失败。不要把[空]当成必须置空的答案，"
+        "也不要见空就补。请结合简谱音高与时值、前后减字的实际覆盖范围和工具审计，"
+        "逐处判断保留空显示还是补写可演奏的减字；判断理由仅依据公开谱面与上下文表达。"
+    )
     if stage == "fingering_agent":
         return [
             harmonic_scope_rule,
+            empty_reference_rule,
             f'私有参考表中的"{OMITTED_PLACEHOLDER}"表示再作谱面省略，不是空标注，也不是未知值；该音仍有演奏语义，不得仅因该标记删除声音；该标记本身也是允许提交的减字文字，可通过 edit_plan.jianzi_rows 直接填写"{OMITTED_PLACEHOLDER}"；这表示沿用再作动作继承的减字（前一段或标记处），不等于把该音置为空字符串。',
             warning_rule,
         ]
     return [
         harmonic_scope_rule,
-        "私有参考表中的[空]是确定的谱面空显示目标，不表示缺少资料。"
-        "若当前初稿在该行有减字，而前一吟、猱、走手或复合多声减字已覆盖该动作，"
-        "应在 edit_plan.jianzi_rows 中把该行减字设为空字符串；置空只隐藏本行减字，不删除声音或演奏状态。",
+        empty_reference_rule,
+        "若判断前一吟、猱、走手或复合多声减字确已覆盖本行，"
+        "可在 edit_plan.jianzi_rows 中把该行减字设为空字符串；置空只隐藏本行减字，不删除声音或演奏状态。",
         f'若当前初稿已有"{OMITTED_PLACEHOLDER}"且与私有参考一致，必须保留该文字，不得改为空字符串；若私有参考要求其他文字，再按逐音分析决定。',
         warning_rule,
     ]
@@ -923,6 +936,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
         "【减字字段次序】完整写出时通常为：前置技法/取音状态→左手按指→徽位→右手指法→弦序，"
         "如“名指九徽勾六弦”“绰名指十徽八分勾三弦”。不要写成如“名指三弦十徽八分勾”或“名指勾三弦十徽八分”等。相邻上下文已明确按指、徽位、弦位或技法时，可按谱法省略，"
         "不必为套模板而重复补全；撮、泼、剌等复合写法按其惯例。"
+        "撮的两个声部用“＋”连接，如“撮（大指九徽三弦按音＋六弦散音）”；不要写成“撮（大指九徽三弦按音、六弦散音）”。"
     )
     if basic and not direct_final:
         private_instruction["rules"] = [
@@ -935,7 +949,7 @@ def generate_one(client, model: str, item: dict, stage: str, targets: list[dict]
             "可以先提交一部分已经确定的音；未提交的音不会使这次预览失败。继续根据工具结果分批编辑，直到结束前当前段所有发音事件都有减字或明确空字符串。",
             "基础取音阶段只允许泛音、按音、散音，右手只用抹、挑、勾、剔、擘、托、打、摘、撮；不要主动填写绰上、注下、吟、猱、走手或其他复杂技法。",
             "只查询有明确音高的起音；小节线不要提交。休止和延音不查音高，但若谱面需要表达走猱、猱、吟、泛止等延续动作，可以提交减字。",
-            "针对工具给出的每个 warning 都要逐项分析并优先修复，不能仅作空泛解释；其中“散音后紧接同弦按音”应优先改写后一个按音为不同弦，音高不匹配应先查候选后改为匹配取音。"
+            "针对工具给出的每个 warning 都要逐项分析并优先修复，不能仅作空泛解释；音高不匹配应先查候选后改为匹配取音。" + OPEN_RESONANCE_REPAIR_GUIDE
         ] + private_reference_semantics_rules(stage) + private_instruction["rules"]
     elif not review_noop:
         private_instruction["rules"] = [

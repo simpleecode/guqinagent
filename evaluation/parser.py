@@ -12,7 +12,8 @@ from .techniques import extract_fingering_techniques
 
 def final_actions(prediction: dict[str, Any]) -> list[dict[str, Any]]:
     """Prefer the final Guqinizer plan; support one-stage ``jianzi_rows`` too."""
-    stage = prediction.get("guqinizer") or prediction.get("base") or {}
+    stage = (prediction.get("single_stage") or prediction.get("guqinizer")
+             or prediction.get("base") or {})
     actions = ((stage.get("plan") or {}).get("actions") or [])
     if actions:
         return actions

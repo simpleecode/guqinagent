@@ -1,9 +1,60 @@
 import unittest
-from agents.ToolRuntime.runtime import repeat_content_warnings, render_edit_preview
+from agents.ToolRuntime.runtime import (repeat_anchor_warnings,
+                                        repeat_content_warnings, render_edit_preview)
 from agents.abc_to_jianzipu.repeat_materializer import OMITTED_PLACEHOLDER
 
 
 class RepeatContentTests(unittest.TestCase):
+    def test_anchored_repeat_checks_entire_tail_and_locates_mismatch(self):
+        head = ['1', '1', '2', '1', '2', '1', '6', '5']
+        target = ['1', '1', '2', '1', '3', '1', '6', '6']
+        item, actions, history = self.setup_rows(head, target,
+            ['从ㄱ再作'] + [OMITTED_PLACEHOLDER] * 7)
+        prior = history[('test', 'p0001')]
+        prior['reference_plan']['actions'] = [
+            {'source_index': 0, 'jianzi_text': '[再作标记ㄱ]大指七徽挑三弦'}]
+        warnings = repeat_content_warnings(item, actions, historical=history)
+        mismatches = [w for w in warnings if w['code'] == 'repeat_anchor_pitch_mismatch']
+        self.assertEqual([w['source_index'] for w in mismatches], [12, 15])
+        self.assertEqual([w['history_event_index'] for w in mismatches], [4, 7])
+        self.assertTrue(all(w['command_event_index'] == 8 for w in mismatches))
+        preview = render_edit_preview(list(actions.values()), [], True, [], item, warnings)
+        self.assertIn('12｜', preview)
+        self.assertIn('再作音高序列不匹配（对应历史音序4', preview)
+        self.assertNotIn('repeat_anchor_pitch_mismatch', preview)
+
+    def test_matching_anchored_repeat_and_missing_anchor(self):
+        tones = ['1', '2', '3', '4', '5', '6']
+        item, actions, history = self.setup_rows(tones, tones,
+            ['从ㄱ再作'] + [OMITTED_PLACEHOLDER] * 5)
+        self.assertEqual(repeat_content_warnings(item, actions, historical=history), [])
+        history[('test', 'p0001')]['reference_plan']['actions'] = [
+            {'source_index': 0, 'jianzi_text': '[再作标记ㄱ]挑三弦'}]
+        self.assertEqual(repeat_content_warnings(item, actions, historical=history), [])
+
+    def test_qiacuo_covered_notes_are_blanks_not_repeat_omissions(self):
+        item = {'score_key': 'test', 'input': {'event_range': {'start': 0},
+                'notes_without_jianzi': [
+                    {'index': 18, 'event_index': 13, 'jianpu': '3̣'},
+                    {'index': 19, 'event_index': 14, 'jianpu': '2̣'},
+                    {'index': 20, 'event_index': 15, 'jianpu': '1̣'},
+                ]}}
+        actions = {
+            18: {'source_index': 18, 'jianzi_text': '掐撮三声[再作]'},
+            19: {'source_index': 19, 'jianzi_text': OMITTED_PLACEHOLDER},
+            20: {'source_index': 20, 'jianzi_text': OMITTED_PLACEHOLDER},
+        }
+        warnings = repeat_anchor_warnings(item, actions)
+        self.assertEqual([w['code'] for w in warnings],
+                         ['compound_repeat_instruction_overlap'])
+        preview = render_edit_preview(list(actions.values()), [], True, [], item, warnings)
+        self.assertIn('13｜3̣｜未修改｜[掐撮三声[再作]]:warning:掐撮三声不应与再作指令合写',
+                      preview)
+        actions[18]['jianzi_text'] = '掐撮三声'
+        actions[19]['jianzi_text'] = ''
+        actions[20]['jianzi_text'] = ''
+        self.assertEqual(repeat_anchor_warnings(item, actions), [])
+
     def setup_rows(self, head, target, texts=None):
         prefix_notes = [{'index': i, 'event_index': i, 'jianpu': tone, 'abc': '', 'duration': '四分'}
                         for i, tone in enumerate(head)]
@@ -81,7 +132,7 @@ class RepeatContentTests(unittest.TestCase):
         actions[7]['jianzi_text'] = ''
         warnings = repeat_content_warnings(item, actions, historical=history)
         self.assertEqual({w['code'] for w in warnings},
-                         {'repeat_from_head_pitch_mismatch','repeat_omission_marker_missing'})
+                         {'repeat_from_head_pitch_mismatch'})
         self.assertTrue(all(w['source_index']==7 for w in warnings))
 
     def test_real_attack_ends_omission_interval(self):
@@ -114,8 +165,7 @@ class RepeatContentTests(unittest.TestCase):
         warnings = repeat_content_warnings(item, actions, historical=history)
         preview = render_edit_preview(list(actions.values()), [], True, [], item, warnings)
         self.assertIn(':warning:从头再作序列与曲首或段首不匹配', preview)
-        self.assertIn(':warning:再作省略音缺少省略标记', preview)
-        self.assertIn('音序6', preview)
+        self.assertNotIn(':warning:再作省略音缺少省略标记', preview)
 
 
 if __name__ == '__main__':

@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .aggregate import final_warning_stats, metrics, per_piece
-from .parser import structured_events, structured_events_for_score
-from .rules import violations
+from .aggregate import final_warning_stats, metrics, per_piece, tool_receipt_warning_stats
+from .parser import final_actions, structured_events, structured_events_for_score
+from .rules import replay_final_warnings
 
 
 def load_jsonl(path: Path, key: str) -> dict[str, dict[str, Any]]:
@@ -41,6 +41,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     all_events: list[dict[str, Any]] = []
     unavailable: list[str] = []
     state_replay_incomplete_scores: list[str] = []
+    warning_replay_incomplete_scores: list[str] = []
+    all_violations: list[dict[str, Any]] = []
+    audited_phrase_keys: set[tuple[str, str]] = set()
     matched: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for sample_id, prediction in predictions.items():
         reference = references.get(sample_id)
@@ -61,8 +64,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         if matched_ids == reference_ids_by_score.get(score_key, set()):
             events, _ = structured_events_for_score(samples, args.pitch_tolerance)
             all_events.extend(events)
+            if all(prediction.get('protocol_valid') is not False and final_actions(prediction)
+                   for prediction, _ in samples):
+                all_violations.extend(replay_final_warnings(samples))
+                audited_phrase_keys.update(
+                    (score_key, str(reference['runtime_item']['phrase_id']))
+                    for _, reference in samples
+                )
+            else:
+                warning_replay_incomplete_scores.append(score_key)
             continue
         state_replay_incomplete_scores.append(score_key)
+        warning_replay_incomplete_scores.append(score_key)
         for prediction, reference in samples:
             events, _ = structured_events(prediction, reference, args.pitch_tolerance)
             # Mode accuracy requires a full-score replay.  Do not report
@@ -72,7 +85,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 event["reference"]["tone_type"] = None
                 event["tone_type_unavailable_reason"] = "incomplete_score_prediction"
             all_events.extend(events)
-    all_violations = violations(all_events)
     output = args.output_root / args.experiment
     output.mkdir(parents=True, exist_ok=True)
     config = {"experiment": args.experiment, "prediction_path": str(args.pred),
@@ -80,15 +92,24 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
               "pitch_tolerance_cents": args.pitch_tolerance,
               "arguments": vars(args), "git_commit": git_commit(),
               "created_at": datetime.now(timezone.utc).isoformat()}
-    summary = {"schema_version": "guqin-final-eval-1.0", "prediction_samples": len(predictions),
+    summary = {"schema_version": "guqin-final-eval-1.1", "prediction_samples": len(predictions),
                "matched_samples": len(predictions) - len(unavailable), "unmatched_prediction_ids": unavailable,
                "tone_type_replay_incomplete_scores": sorted(state_replay_incomplete_scores),
-               "events": len(all_events), "metrics": metrics(all_events, all_violations, args.pitch_tolerance),
-               "final_warning": final_warning_stats(list(predictions.values()))}
+               "warning_replay_incomplete_scores": sorted(warning_replay_incomplete_scores),
+               "rule_warning_audited_phrases_by_score": {
+                   score: sum(key[0] == score for key in audited_phrase_keys)
+                   for score in sorted({key[0] for key in audited_phrase_keys})
+               },
+               "events": len(all_events),
+               "metrics": metrics(all_events, all_violations, args.pitch_tolerance,
+                                  audited_phrases=len(audited_phrase_keys)),
+               "final_warning": final_warning_stats(all_violations, len(audited_phrase_keys)),
+               "final_tool_receipt_warning": tool_receipt_warning_stats(list(predictions.values()))}
     (output / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_jsonl(output / "per_event.jsonl", all_events)
-    write_jsonl(output / "per_piece.jsonl", per_piece(all_events, all_violations, args.pitch_tolerance))
+    write_jsonl(output / "per_piece.jsonl", per_piece(
+        all_events, all_violations, args.pitch_tolerance, audited_phrase_keys))
     write_jsonl(output / "violations.jsonl", all_violations)
     return {"output": str(output), **summary}
 

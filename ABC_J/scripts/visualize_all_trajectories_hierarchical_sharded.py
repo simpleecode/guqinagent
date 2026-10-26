@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import html
 import json
 import subprocess
@@ -42,6 +43,8 @@ def main() -> int:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--notice", default="", help="Visible dataset provenance/compatibility notice")
+    parser.add_argument("--token-lengths", type=Path,
+                        help="Optional over-threshold TSV for indexed token-length labels")
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -85,11 +88,14 @@ def main() -> int:
             if not audit_path.exists():
                 raise RuntimeError(f'Missing audit for score {score_key}')
             output_name = f"{score_key}.html"
-            subprocess.run([
+            command = [
                 sys.executable, str(viewer),
                 "--input", str(input_path), "--audit", str(audit_path),
                 "--source", str(source_path), "--output", str(args.output_dir / output_name),
-            ], check=True, stdout=subprocess.DEVNULL)
+            ]
+            if args.token_lengths:
+                command.extend(['--token-lengths', str(args.token_lengths)])
+            subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
             phrase_count = len({(row.get("provenance") or {}).get("source_trajectory_id") for row in messages})
             title = next((str(row.get("title") or (row.get('input') or {}).get('metadata', {}).get('score_title') or '') for row in score_sources), '')
             entries.append((score_key, title, phrase_count, output_name))
@@ -109,6 +115,21 @@ def main() -> int:
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>古琴 Agent 全量轨迹索引</title>
 <style>body{{margin:0;background:#101216;color:#e8ecf1;font:15px/1.55 system-ui,-apple-system,"PingFang SC",sans-serif}}main{{max-width:920px;margin:auto;padding:28px}}h1{{font-size:24px}}p{{color:#a6b0bd}}ul{{list-style:none;padding:0;background:#181c22;border:1px solid #303741;border-radius:10px;overflow:hidden}}li{{display:flex;justify-content:space-between;gap:16px;padding:10px 14px;border-bottom:1px solid #303741}}li:last-child{{border:0}}a{{color:#8bb7ff;text-decoration:none}}span{{color:#a6b0bd;white-space:nowrap}}</style></head><body><main><h1>古琴 Agent 全量轨迹</h1>
 <p>{len(entries)} 份曲谱；按曲目打开，避免一次加载全量轨迹。</p><p>{html.escape(args.notice)}</p><ul>{links}</ul></main></body></html>'''
+    if args.token_lengths:
+        with args.token_lengths.open(encoding='utf-8') as handle:
+            token_rows = [r for r in csv.DictReader(handle, delimiter='\t')
+                          if r['source_sample_id'] in sample_scores]
+        token_rows.sort(key=lambda r: int(r['tokens']), reverse=True)
+        ranked=[]
+        for row in token_rows:
+            sid=row['source_sample_id'];score=sample_scores[sid]
+            phrase=sid.removesuffix('-fingering_agent-teacher-tools').removesuffix('-guqinization-teacher-tools')
+            stage='Fingering' if row['agent_stage']=='fingering_agent' else 'Guqinizer'
+            ranked.append(f'<li><a href="{html.escape(score)}.html?phrase={html.escape(phrase)}">'
+                          f'{html.escape(phrase)} · {stage}</a><span>{int(row["tokens"]):,} tokens</span></li>')
+        index=index.replace('<ul>'+links+'</ul>',
+                            f'<h2>超长阶段（{len(ranked)}条，按token降序）</h2><ul>'+''.join(ranked)+
+                            '</ul><h2>按曲目查看</h2><ul>'+links+'</ul>')
     (args.output_dir / "index.html").write_text(index, encoding="utf-8")
     print(json.dumps({"output": str(args.output_dir / "index.html"), "scores": len(entries)}, ensure_ascii=False))
     return 0

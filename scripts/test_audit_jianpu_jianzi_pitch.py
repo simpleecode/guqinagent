@@ -10,8 +10,260 @@ SPEC.loader.exec_module(MODULE)
 
 
 class AuditPitchTests(unittest.TestCase):
+    def test_fu_requires_live_walk_origin(self):
+        def fu_warnings(texts):
+            return [(w['index'], w['code']) for w in MODULE.inherited_gesture_warnings({
+                'open_midi': self.opens,
+                'notes': [{'index': i, 'jianzi': text} for i, text in enumerate(texts)]
+            }) if w['code'] in {'fu_without_walk_origin', 'repeated_fu_without_walk'}]
+        self.assertEqual(fu_warnings(['大指七徽勾三弦', '名指七徽勾二弦', '复']),
+                         [(2, 'fu_without_walk_origin')])
+        self.assertEqual(fu_warnings(['大指九徽勾三弦', '退', '复']), [])
+        self.assertEqual(fu_warnings(['大指九徽勾三弦', '注下十徽', '猱', '复']), [])
+        self.assertEqual(fu_warnings(['大指九徽勾三弦', '退', '勾三弦', '复']),
+                         [(3, 'fu_without_walk_origin')])
+        self.assertEqual(fu_warnings(['大指九徽勾三弦', '退', '复', '复']),
+                         [(3, 'repeated_fu_without_walk')])
+        self.assertEqual(fu_warnings(['大指十徽勾二弦绰上九徽', '复']), [])
+
+    def test_slide_attack_requires_explicit_left_finger(self):
+        for text in ('绰上七徽勾五弦', '绰上七徽挑六弦', '注下九徽挑六弦',
+                     '泛止绰上七徽勾五弦'):
+            warnings = MODULE.inherited_gesture_warnings({
+                'open_midi': self.opens, 'notes': [{'index': 1, 'jianzi': text}]})
+            self.assertIn('slide_attack_missing_left_finger', [w['code'] for w in warnings], text)
+        for text in ('绰上七徽', '绰大指七徽勾5弦', '注名指九徽挑六弦',
+                     '大指十徽勾二弦绰上九徽'):
+            warnings = MODULE.inherited_gesture_warnings({
+                'open_midi': self.opens, 'notes': [{'index': 1, 'jianzi': text}]})
+            self.assertNotIn('slide_attack_missing_left_finger', [w['code'] for w in warnings], text)
+
+    def test_fake_open_ornament_is_warned_without_inherited_state(self):
+        for text in ('散猱', '散吟', '散撞', '散音猱', '散猱二弦'):
+            warnings = MODULE.inherited_gesture_warnings({
+                'open_midi': self.opens,
+                'notes': [{'index': 1, 'jianzi': text}],
+            })
+            self.assertEqual([w['code'] for w in warnings], ['open_attack_ornament'], text)
+
+    def test_positioned_pluck_inherits_stopped_string_and_updates_hui(self):
+        context = MODULE.new_context()
+        MODULE.parse_jianzi('大指五徽勾六弦', self.opens, context)
+        for text, hui in [('挑四徽六分', 4.6), ('挑四徽三分', 4.3)]:
+            actual, error = MODULE.parse_jianzi(text, self.opens, context)
+            expected, _ = MODULE.position_pitch(6, hui, self.opens, 'stopped')
+            self.assertIsNone(error)
+            self.assertAlmostEqual(actual[0], expected)
+            self.assertEqual(context['active_left_string'], 6)
+            self.assertEqual(context['active_left_hui'], hui)
+        warnings = MODULE.walk_motion_warnings({'open_midi': self.opens, 'notes': [
+            {'index': 1, 'jianzi': '大指五徽勾六弦'},
+            {'index': 2, 'jianzi': '挑四徽三分'},
+            {'index': 3, 'jianzi': '注下五徽'},
+        ]})
+        self.assertEqual(warnings, [])
+
+    def test_positioned_pluck_does_not_guess_string_after_open_or_rest(self):
+        for predecessor in ['散勾三弦', '泛起五徽挑六弦']:
+            context = MODULE.new_context()
+            MODULE.parse_jianzi(predecessor, self.opens, context)
+            actual, reason = MODULE.parse_jianzi('挑四徽六分', self.opens, context)
+            self.assertEqual(actual, [])
+            self.assertEqual(reason, 'no_explicit_string')
+        context = MODULE.new_context()
+        MODULE.parse_jianzi('大指五徽勾六弦', self.opens, context)
+        MODULE.advance_context_for_bare_rest(context, {'jianpu': '0（休止）'}, '')
+        self.assertEqual(MODULE.parse_jianzi('挑四徽六分', self.opens, context)[0], [])
+
     def setUp(self):
         self.opens = [48, 50, 53, 55, 57, 60, 62]
+
+    def test_bare_zhuang_cannot_write_a_lower_note_after_pressed_attack(self):
+        def warnings(previous_text, previous_pitch, current_text, current_pitch):
+            return MODULE.zhuang_direction_warnings({
+                'metadata': {'tonic': '1=F'}, 'open_midi': self.opens,
+                'notes': [
+                    {'index': 74, 'jianpu': previous_pitch, 'jianzi': previous_text},
+                    {'index': 75, 'jianpu': current_pitch, 'jianzi': current_text},
+                ],
+            })
+
+        self.assertEqual(warnings('大指九徽挑二弦', '3̣', '撞', '2̣'), [{
+            'index': 75, 'code': 'jianzi_pitch_mismatch',
+            'reason': 'zhuang_target_below_previous_attack',
+        }])
+        self.assertEqual(warnings('大指九徽挑二弦', '3̣', '撞', '4̣'), [])
+        self.assertEqual(warnings('大指九徽挑二弦', '3̣', '撞', '3̣'), [])
+        self.assertEqual(warnings('大指九徽挑二弦', '2̣', '撞', '1̣'), [])
+        self.assertEqual(warnings('大指九徽挑二弦', '3̣', '反撞', '2̣'), [])
+        self.assertEqual(warnings('散挑二弦', '3̣', '撞', '2̣'), [])
+        self.assertEqual(warnings('', '3̣', '撞', '2̣'), [])
+
+    def test_inherited_gesture_constraints(self):
+        def codes(*texts):
+            notes = [{'index': i, 'jianpu': '1', 'jianzi': text}
+                     for i, text in enumerate(texts)]
+            return [(w['index'], w['code']) for w in
+                    MODULE.inherited_gesture_warnings({'open_midi': self.opens,
+                                                       'notes': notes})]
+
+        open_code = 'open_string_unplayable_gesture'
+        self.assertIn((1, open_code), codes('散挑三弦', '注下徽外'))
+        self.assertIn((1, open_code), codes('散勾二弦', '猱'))
+        self.assertNotIn((1, open_code), codes('大指九徽勾二弦', '注下十徽'))
+        self.assertNotIn((2, open_code),
+                         codes('大指九徽勾六弦', '散勾五弦', '绰上七徽'))
+        self.assertIn((2, open_code),
+                      codes('大指九徽勾六弦', '散勾六弦', '绰上七徽'))
+
+        context = MODULE.new_context()
+        MODULE.parse_jianzi('大指五徽挑七弦', self.opens, context)
+        MODULE.parse_jianzi('散勾五弦', self.opens, context)
+        self.assertEqual((context['active_left_string'], context['active_left_hui']),
+                         (7, 5.0))
+        sounded, reason = MODULE.parse_jianzi('绰上四徽四分', self.opens, context)
+        expected, _ = MODULE.position_pitch(7, 4.4, self.opens)
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(sounded[0], expected)
+
+        context = MODULE.new_context()
+        MODULE.parse_jianzi('大指五徽挑七弦', self.opens, context)
+        MODULE.parse_jianzi('散勾七弦', self.opens, context)
+        self.assertIsNone(context['active_left_string'])
+        sounded, reason = MODULE.parse_jianzi('绰上四徽四分', self.opens, context)
+        self.assertEqual(sounded, [])
+        self.assertEqual(reason, 'context_dependent_slide')
+        self.assertIn((1, 'taoqi_without_thumb_origin'),
+                      codes('名指九徽勾二弦', '名指十徽滔起'))
+        self.assertIn((1, 'taoqi_without_thumb_origin'),
+                      codes('名指十徽勾五弦', '大指十徽五弦滔起'))
+        self.assertNotIn((1, 'taoqi_without_thumb_origin'),
+                         codes('大指九徽挑五弦', '大指十徽五弦滔起'))
+        mismatch = MODULE.inherited_gesture_warnings({
+            'open_midi': self.opens,
+            'notes': [{'index': 0, 'jianzi': '大指九徽挑二弦'},
+                      {'index': 1, 'jianzi': '名指十徽五弦滔起'}],
+        })
+        self.assertTrue(any(w.get('code') == 'taoqi_without_thumb_origin'
+                            and w.get('previous_string') == 2 and w.get('string') == 5
+                            for w in mismatch))
+        self.assertNotIn((2, 'taoqi_without_thumb_origin'),
+                         codes('大指九徽勾二弦', '绰大指十徽', '名指十一徽滔起'))
+        kneeling_code = 'kneeling_taoqi_below_seventh_hui'
+        self.assertNotIn((1, kneeling_code),
+                         codes('大指九徽挑七弦', '跪指七徽滔起'))
+        self.assertNotIn((1, kneeling_code),
+                         codes('大指九徽挑六弦', '跪指五徽六分滔起'))
+        self.assertIn((1, kneeling_code),
+                      codes('大指九徽挑六弦', '跪指七徽一分滔起'))
+        self.assertIn((1, kneeling_code),
+                      codes('大指九徽挑六弦', '跪指八徽滔起'))
+        self.assertIn((1, kneeling_code),
+                      codes('大指九徽挑六弦', '跪指滔起'))
+        self.assertNotIn((1, kneeling_code),
+                         codes('大指六徽挑六弦', '跪指滔起'))
+        self.assertIn((3, 'repeated_fu_without_walk'),
+                      codes('大指九徽挑三弦', '退', '复', '复'))
+        self.assertNotIn((3, 'repeated_fu_without_walk'),
+                         codes('大指九徽挑三弦', '退', '复', '绰上八徽'))
+
+        harmonic_code = 'harmonic_ornament_without_stopped'
+        self.assertIn((1, harmonic_code),
+                      codes('泛起名指十徽挑六弦', '名指十徽勾六弦吟'))
+        self.assertIn((1, harmonic_code),
+                      codes('泛起名指十徽挑六弦', '猱'))
+        self.assertIn((0, harmonic_code),
+                      codes('泛起名指十徽挑六弦吟'))
+        self.assertNotIn((1, harmonic_code),
+                         codes('泛起名指十徽挑六弦', '按音名指十徽勾六弦吟'))
+        self.assertNotIn((2, harmonic_code),
+                         codes('泛起名指十徽挑六弦', '按音名指十徽勾六弦', '吟'))
+
+    def test_comma_compound_replays_pitch_without_format_warning(self):
+        context = MODULE.new_context()
+        text = '撮（大指九徽三弦、六弦散音）'
+        actual, reason = MODULE.parse_jianzi(text, self.opens, context)
+        expected, _ = MODULE.position_pitch(3, 9.0, self.opens)
+        self.assertIsNone(reason)
+        self.assertEqual(actual, [expected, self.opens[5]])
+        self.assertEqual(context['left_positions']['大指'],
+                         {'string': 3, 'hui': 9.0})
+        notes = [{'index': 0, 'jianzi': text},
+                 {'index': 1, 'jianzi': '名指三弦十徽滔起'}]
+        warnings = MODULE.inherited_gesture_warnings(
+            {'open_midi': self.opens, 'notes': notes})
+        self.assertFalse(any(w['index'] == 0 for w in warnings))
+        self.assertNotIn((1, 'taoqi_without_thumb_origin'),
+                         [(w['index'], w['code']) for w in warnings])
+
+    def test_taoqi_uses_still_held_thumb_not_fixed_note_lookback(self):
+        def warning_codes(*texts):
+            return [(w['index'], w['code']) for w in
+                    MODULE.inherited_gesture_warnings({
+                        'open_midi': self.opens,
+                        'notes': [{'index': i, 'jianzi': text}
+                                  for i, text in enumerate(texts)],
+                    })]
+
+        self.assertNotIn((2, 'taoqi_without_thumb_origin'), warning_codes(
+            '大指五徽挑七弦猱', '中指五徽三分挑五弦',
+            '名指七徽七弦滔起'))
+        self.assertIn((2, 'taoqi_without_thumb_origin'), warning_codes(
+            '大指五徽挑七弦', '中指五徽三分挑七弦',
+            '名指七徽七弦滔起'))
+
+    def test_bare_rest_keeps_open_abbreviation_separate_from_held_position(self):
+        context = MODULE.new_context()
+        for text in ('中指七徽勾五弦', '散勾三弦'):
+            MODULE.parse_jianzi(text, self.opens, context)
+        rest = {'index': 2, 'jianpu': '0（休止）', 'abc': 'z'}
+        self.assertTrue(MODULE.advance_context_for_bare_rest(context, rest, ''))
+        self.assertIsNone(context['sound_mode'])
+        self.assertEqual((context['active_left_string'], context['active_left_hui']),
+                         (5, 7.0))
+        sounded, reason = MODULE.parse_jianzi('勾四弦', self.opens, context)
+        self.assertIsNone(reason)
+        self.assertEqual(sounded, [self.opens[3]])
+        self.assertEqual(context['current_note_attacks'][0]['mode'], 'open')
+
+        # Consecutive rests must carry the same default; an explicit pressed
+        # attack afterward switches subsequent shorthand back to stopped.
+        context = MODULE.new_context()
+        for text in ('中指七徽勾五弦', '散勾三弦'):
+            MODULE.parse_jianzi(text, self.opens, context)
+        for index in (2, 3):
+            self.assertTrue(MODULE.advance_context_for_bare_rest(
+                context, {'index': index, 'jianpu': '0（休止）', 'abc': 'z'}, ''))
+        sounded, reason = MODULE.parse_jianzi('绰上六徽', self.opens, context)
+        expected, _ = MODULE.position_pitch(5, 6.0, self.opens)
+        self.assertIsNone(reason)
+        self.assertAlmostEqual(sounded[0], expected)
+        MODULE.parse_jianzi('中指七徽勾五弦', self.opens, context)
+        sounded, reason = MODULE.parse_jianzi('勾五弦', self.opens, context)
+        self.assertIsNone(reason)
+        self.assertEqual(context['current_note_attacks'][0]['mode'], 'stopped')
+        self.assertEqual(sounded, [69.0])
+
+    def test_suffix_walk_is_held_through_other_string_open_yinghe(self):
+        context = MODULE.new_context()
+        attack, reason = MODULE.parse_jianzi(
+            '名指十徽勾2弦绰上九徽', self.opens, context)
+        ten_hui, _ = MODULE.position_pitch(2, 10.0, self.opens)
+        self.assertIsNone(reason)
+        self.assertEqual(attack, [ten_hui])
+        self.assertEqual((context['active_left_string'], context['active_left_hui']),
+                         (2, 9.0))
+        MODULE.parse_jianzi('散挑5弦应合', self.opens, context)
+        self.assertEqual((context['active_left_string'], context['active_left_hui']),
+                         (2, 9.0))
+        notes = [
+            {'index': 230, 'jianzi': '名指十徽勾2弦绰上九徽'},
+            {'index': 231, 'jianpu': '|', 'jianzi': ''},
+            {'index': 232, 'jianzi': '散挑5弦应合'},
+            {'index': 233, 'jianzi': '注下十徽'},
+        ]
+        self.assertFalse(MODULE.walk_motion_warnings(
+            {'open_midi': self.opens, 'notes': notes}))
 
     def test_single_stopped_note(self):
         pitches, reason = MODULE.parse_jianzi("名指九徽勾5弦", self.opens)
@@ -361,6 +613,81 @@ class AuditPitchTests(unittest.TestCase):
             "strings": [1],
         }])
 
+    def test_written_stop_clears_open_resonance_across_barline(self):
+        def warnings(first):
+            return MODULE.open_to_stopped_transition_warnings({
+                "open_midi": self.opens,
+                "notes": [
+                    {"index": 1, "jianpu": "2", "jianzi": first},
+                    {"index": 2, "jianpu": "|", "jianzi": ""},
+                    {"index": 3, "jianpu": "3", "jianzi": "名指十徽挑七弦"},
+                ],
+            })
+        self.assertEqual(warnings("散挑七弦停"), [])
+        self.assertEqual([w["index"] for w in warnings("散挑七弦")], [3])
+
+    def test_standalone_stop_clears_open_and_harmonic_resonance(self):
+        open_notes = [
+            {"index": 1, "jianpu": "2", "jianzi": "散挑七弦"},
+            {"index": 2, "jianpu": "－（延音）", "jianzi": "停"},
+            {"index": 3, "jianpu": "3", "jianzi": "名指十徽挑七弦"},
+        ]
+        self.assertEqual(MODULE.open_to_stopped_transition_warnings({
+            "open_midi": self.opens, "notes": open_notes,
+        }), [])
+        harmonic_notes = [
+            {"index": 1, "jianpu": "2", "jianzi": "泛起食指三徽勾四弦"},
+            {"index": 2, "jianpu": "－（延音）", "jianzi": "停泛止"},
+            {"index": 3, "jianpu": "3", "jianzi": "大指五徽挑四弦"},
+        ]
+        self.assertNotIn("harmonic_to_same_string_attack", [w["code"] for w in
+            MODULE.harmonic_continuity_warnings({
+                "open_midi": self.opens, "notes": harmonic_notes,
+            })])
+
+    def test_written_stop_clears_harmonic_resonance_across_barline(self):
+        def warnings(first):
+            return MODULE.harmonic_continuity_warnings({
+                "open_midi": self.opens,
+                "notes": [
+                    {"index": 1, "jianpu": "2", "jianzi": first},
+                    {"index": 2, "jianpu": "|", "jianzi": ""},
+                    {"index": 3, "jianpu": "3", "jianzi": "大指五徽挑四弦"},
+                ],
+            })
+        self.assertEqual(warnings("泛起食指三徽勾四弦停"), [])
+        self.assertIn("harmonic_to_same_string_attack",
+                      [w["code"] for w in warnings("泛起食指三徽勾四弦")])
+
+    def test_open_to_stopped_requires_stopped_attack_not_harmonic(self):
+        for first in ("散挑七弦", "散挑七弦停"):
+            data = {"open_midi": self.opens, "notes": [
+                {"index": 285, "jianpu": "3", "jianzi": first},
+                {"index": 286, "jianpu": "|", "jianzi": ""},
+                {"index": 287, "jianpu": "3̇̇", "jianzi": "泛起名指十徽历七弦"},
+            ]}
+            self.assertEqual(MODULE.open_to_stopped_transition_warnings(data), [])
+
+    def test_open_to_stopped_exempts_yan_but_keeps_its_stopped_pitch(self):
+        data = {"open_midi": self.opens, "notes": [
+            {"index": 1, "jianpu": "2", "jianzi": "散勾六弦"},
+            {"index": 2, "jianpu": "3", "jianzi": "名指徽外罨六弦"},
+        ]}
+        self.assertEqual(MODULE.open_to_stopped_transition_warnings(data), [])
+        context = MODULE.new_context()
+        MODULE.parse_jianzi("散勾六弦", self.opens, context)
+        actual, reason = MODULE.parse_jianzi("名指徽外罨六弦", self.opens, context)
+        expected, error = MODULE.position_pitch(6, "徽外", self.opens, "stopped")
+        self.assertIsNone(reason)
+        self.assertIsNone(error)
+        self.assertEqual(actual, [expected])
+        self.assertEqual(context["current_note_attacks"][0]["mode"], "stopped")
+
+        data["notes"][1]["jianzi"] = "名指十徽挑六弦"
+        self.assertEqual([w["code"] for w in
+                          MODULE.open_to_stopped_transition_warnings(data)],
+                         ["open_to_stopped_same_string"])
+
     def test_same_harmonic_position_alternating_right_hand_is_exempt(self):
         for second in ['食指七徽挑二弦', '挑二弦']:
             warnings = MODULE.harmonic_continuity_warnings({'open_midi': self.opens,
@@ -472,6 +799,35 @@ class AuditPitchTests(unittest.TestCase):
                       {'index': 1, 'jianpu': '2', 'jianzi': '食指七徽挑二弦按音'}]})
         self.assertEqual([w['code'] for w in warnings], ['harmonic_to_same_string_attack'])
 
+    def test_li_resonance_uses_first_and_last_attack_in_order(self):
+        cases = [
+            (['泛起五徽挑五弦', '大指九徽历六五弦'], []),
+            (['泛起五徽挑六弦', '大指九徽历六五弦'], [6]),
+            (['泛起五徽历六五弦', '九徽挑六弦'], []),
+            (['泛起五徽历六五弦', '九徽挑五弦'], [5]),
+        ]
+        for texts, expected in cases:
+            with self.subTest(texts=texts):
+                warnings = MODULE.harmonic_continuity_warnings({
+                    'open_midi': self.opens,
+                    'notes': [{'index': i, 'jianpu': '1', 'jianzi': t}
+                              for i, t in enumerate(texts)],
+                })
+                self.assertEqual([s for w in warnings
+                                  if w['code'] == 'harmonic_to_same_string_attack'
+                                  for s in w['strings']], expected)
+
+    def test_shaoxi_ends_resonance_but_preserves_harmonic_pitch_state(self):
+        notes = [{'index': 1, 'jianpu': '1', 'jianzi': '泛起五徽挑六弦少息'},
+                 {'index': 2, 'jianpu': '1', 'jianzi': '大指十三徽历六五弦'}]
+        self.assertEqual(MODULE.harmonic_continuity_warnings({
+            'open_midi': self.opens, 'notes': notes}), [])
+        context = MODULE.new_context()
+        MODULE.parse_jianzi(notes[0]['jianzi'], self.opens, context)
+        MODULE.parse_jianzi(notes[1]['jianzi'], self.opens, context)
+        self.assertTrue(context['harmonic_scope'])
+        self.assertTrue(all(a['mode'] == 'harmonic' for a in context['current_note_attacks']))
+
     def test_bare_rest_ends_harmonic_scope_for_continuity_warning(self):
         warnings = MODULE.harmonic_continuity_warnings({
             "open_midi": self.opens,
@@ -532,6 +888,37 @@ class AuditPitchTests(unittest.TestCase):
             "code": "consecutive_walks_without_attack",
             "count": 4,
         }])
+
+    def test_wanglai_allows_five_events_including_blanks_then_warns(self):
+        notes = [
+            {"index": 1, "jianpu": "1", "jianzi": "名指七徽勾三弦"},
+            {"index": 2, "jianpu": "2", "jianzi": "往来"},
+            {"index": 3, "jianpu": "1", "jianzi": ""},
+            {"index": 4, "jianpu": "2", "jianzi": ""},
+            {"index": 5, "jianpu": "1", "jianzi": ""},
+            {"index": 6, "jianpu": "6̣", "jianzi": "注下七徽九分"},
+        ]
+        self.assertEqual(MODULE.consecutive_walk_warnings({
+            "open_midi": self.opens, "notes": notes,
+        }), [])
+        notes.append({"index": 7, "jianpu": "5̣", "jianzi": ""})
+        self.assertEqual(MODULE.consecutive_walk_warnings({
+            "open_midi": self.opens, "notes": notes,
+        }), [{"index": 7, "code": "consecutive_walks_without_attack", "count": 6}])
+
+    def test_fu_and_blanks_count_but_new_attack_resets_walk_run(self):
+        notes = [
+            {"index": 1, "jianpu": "1", "jianzi": "名指七徽勾三弦"},
+            {"index": 2, "jianpu": "2", "jianzi": "绰上六徽"},
+            {"index": 3, "jianpu": "1", "jianzi": ""},
+            {"index": 4, "jianpu": "2", "jianzi": "复"},
+            {"index": 5, "jianpu": "1", "jianzi": "注下七徽"},
+            {"index": 6, "jianpu": "1", "jianzi": "滔起"},
+            {"index": 7, "jianpu": "2", "jianzi": "绰上六徽"},
+        ]
+        self.assertEqual(MODULE.consecutive_walk_warnings({
+            "open_midi": self.opens, "notes": notes,
+        }), [{"index": 5, "code": "consecutive_walks_without_attack", "count": 4}])
 
     def test_prefix_fanzhi_ends_harmonic_before_current_note_and_preserves_position(self):
         context = MODULE.new_context()
@@ -700,6 +1087,55 @@ class AuditPitchTests(unittest.TestCase):
         self.assertEqual(report["details"][0]["status"], "matched")
         self.assertEqual(report["details"][0]["covered_indices"], [38, 39])
 
+    def test_three_note_li_matches_three_consecutive_attacks(self):
+        report = MODULE.audit({
+            'metadata': {'tonic': '1=F', 'tonic_degree1_midi': 65},
+            'open_midi': self.opens,
+            'notes': [
+                {'index': 104, 'jianpu': '3̇', 'jianzi': '泛起食指四徽历五四三弦'},
+                {'index': 105, 'jianpu': '2̇', 'jianzi': ''},
+                {'index': 106, 'jianpu': '1̇', 'jianzi': ''},
+            ],
+        }, 50.0)
+        self.assertEqual(report['details'][0]['status'], 'matched')
+        self.assertEqual(report['details'][0]['covered_indices'], [104, 105, 106])
+
+    def test_li_crosses_barline_but_reports_only_wrong_first_pitch(self):
+        report = MODULE.audit({
+            'metadata': {'tonic': '1=F'},
+            'open_midi': self.opens,
+            'notes': [
+                {'index': 343, 'jianpu': '3', 'jianzi': '大指六徽四分历五四弦'},
+                {'index': 344, 'jianpu': '|', 'abc': '|', 'jianzi': ''},
+                {'index': 345, 'jianpu': '3', 'jianzi': ''},
+            ],
+        }, 50.0)
+        detail = report['details'][0]
+        self.assertEqual(detail['covered_indices'], [343, 345])
+        self.assertEqual(detail['status'], 'mismatched')
+        self.assertNotEqual(detail.get('reason'), 'li_pitch_count_mismatch')
+        self.assertAlmostEqual(detail['pairs'][0]['absolute_cents'], 221.309, places=2)
+        self.assertLess(detail['pairs'][1]['absolute_cents'], 50)
+
+    def test_li_extra_note_cannot_cross_extension_and_barline(self):
+        report = MODULE.audit({
+            'metadata': {'tonic': '1=F', 'tonic_degree1_midi': 65},
+            'open_midi': self.opens,
+            'notes': [
+                {'index': 137, 'jianpu': '3̇', 'jianzi': '泛起大指八徽历五四三弦'},
+                {'index': 138, 'jianpu': '3̇', 'jianzi': ''},
+                {'index': 139, 'jianpu': '－（延音）', 'jianzi': ''},
+                {'index': 140, 'jianpu': '|', 'jianzi': ''},
+                {'index': 141, 'jianpu': '5̇', 'jianzi': '挑六弦十徽'},
+            ],
+        }, 50.0)
+        detail = report['details'][0]
+        self.assertEqual(detail['status'], 'mismatched')
+        self.assertEqual(detail['reason'], 'li_pitch_count_mismatch')
+        self.assertEqual(detail['covered_indices'], [137, 138])
+        self.assertEqual(len(detail['actual_midis']), 3)
+        self.assertEqual(len(detail['expected_midis']), 2)
+
     def test_prefix_flat_tonic_is_accepted(self):
         self.assertEqual(
             MODULE.parse_tonic_midi({"tonic": "1=bE"}),
@@ -800,7 +1236,7 @@ class AuditPitchTests(unittest.TestCase):
                 self.assertAlmostEqual(pitches[0], expected)
                 self.assertEqual(context["active_left_hui"], hui)
 
-    def test_pre_attack_chuo_is_not_forced_through_scalar_pitch_audit(self):
+    def test_explicit_pre_attack_chuo_is_pitch_audited(self):
         data = {
             "metadata": {
                 "tonic": "1=C",
@@ -815,9 +1251,8 @@ class AuditPitchTests(unittest.TestCase):
             "notes": [{"index": 0, "jianpu": "1", "jianzi": "绰大指五徽六分挑6弦"}],
         }
         report = MODULE.audit(data, 50.0)
-        self.assertEqual(report["details"][0]["reason"],
-                         "context_dependent_pre_attack_technique")
-        self.assertEqual(report["details"][0]["status"], "skipped")
+        self.assertEqual(report["details"][0]["status"], "mismatched")
+        self.assertEqual(len(report["details"][0]["actual_midis"]), 1)
 
     def test_inherited_chuo_and_zhu_have_scalar_pitch_audits(self):
         data = {

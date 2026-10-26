@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import html
 import json
 import re
@@ -285,7 +286,14 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--sample-id", action="append",
                         help="Optional exact sample ID to include; may be repeated")
+    parser.add_argument("--token-lengths", type=Path,
+                        help="Optional over-threshold TSV with source_sample_id and tokens")
     args = parser.parse_args()
+    token_lengths = {}
+    if args.token_lengths:
+        with args.token_lengths.open(encoding='utf-8') as handle:
+            token_lengths = {row['source_sample_id']: int(row['tokens'])
+                             for row in csv.DictReader(handle, delimiter='\t')}
 
     public = read_jsonl(args.input)
     if args.sample_id:
@@ -319,6 +327,7 @@ def main() -> int:
         if not actions and stage == "fingering_agent":
             actions = (sample.get("plan") or {}).get("actions") or []
         group["stages"][stage] = {
+            "tokens": token_lengths.get(sample['sample_id']),
             # Accepted plans use internal source indexes. Keep all lookup keys
             # as integers; mixing string action keys with integer source rows
             # made every real action look missing and appended a duplicate
@@ -506,13 +515,14 @@ const data={data};
 const tree=document.getElementById('tree'), search=document.getElementById('search');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}}[c]));
 const stageLabel={{fingering_agent:'Fingering',guqinization:'Guqinizer',single_stage:'单阶段最终减字'}};
-function stageInfo(t,s){{const x=t.stages[s]||{{}};return `<span><b>${{stageLabel[s]}}</b> · ${{x.messages||0}} 消息 · ${{x.tool_calls||0}} 工具调用 · ${{esc(x.termination||'')}}</span>`}}
+function stageInfo(t,s){{const x=t.stages[s]||{{}};return `<span><b>${{stageLabel[s]}}</b>${{x.tokens?` · <b>${{x.tokens.toLocaleString()}} tokens（超长）</b>`:''}} · ${{x.messages||0}} 消息 · ${{x.tool_calls||0}} 工具调用 · ${{esc(x.termination||'')}}</span>`}}
 function trajectory(t,s){{const x=t.stages[s]||{{}};const turns=x.trajectory||[];if(!turns.length)return '<p class="empty">[无该阶段轨迹]</p>';return `<div class="trajectory">${{turns.map(m=>`<section class="turn"><div class="turn-head"><span>第 ${{m.turn}} 轮</span><span class="role">${{esc(m.role)}}</span>${{m.name?`<span>工具：${{esc(m.name)}}</span>`:''}}</div><pre class="turn-content">${{esc(m.content||'[空内容]')}}</pre>${{m.tool_calls?`<pre class="tool-call">工具调用\n${{esc(m.tool_calls)}}</pre>`:''}}</section>`).join('')}}</div>`}}
 function teacherTrace(t,s){{const x=t.stages[s]||{{}};const traces=x.teacher_io_trace||[];if(!traces.length)return '<p class="empty">[无私有教师调用审计]</p>';return `<div class="trajectory">${{traces.map((v,i)=>`<section class="turn"><div class="turn-head"><span>教师 API 第 ${{i+1}} 轮</span></div><pre class="turn-content">${{esc(JSON.stringify(v,null,2))}}</pre></section>`).join('')}}</div>`}}
 function pitchCell(value){{const cls=value==='✓'?'match':value==='✗'?'mismatch':value==='—'?'not-applicable':'unresolved';const title=value==='—'?'无新音高（休止或延音）':value==='？'?'有音高但当前无法可靠解析': '✓ 匹配｜✗ 不匹配';return `<td class="pitch ${{cls}}" title="${{title}}">${{esc(value||'？')}}</td>`}}
 function table(t){{const direct=!!t.single_stage;const cols=direct?5:7;const header=direct?'<th>序号</th><th>简谱</th><th>单阶段最终减字</th><th>标注版本</th><th>音高审计</th>':'<th>序号</th><th>简谱</th><th>Fingering 最终版</th><th>Guqinizer 最终版</th><th>标注版本</th><th>Fingering 音高</th><th>Guqinizer 音高</th>';return `<div class="table-wrap"><table><thead><tr>${{header}}</tr></thead><tbody>${{t.rows.map(r=>r.kind==='section'?`<tr class="structure section-row"><td colspan="${{cols}}">段落标记｜${{esc(r.marker)}}</td></tr>`:r.kind==='bar'?`<tr class="structure bar-row"><td colspan="${{cols}}">小节线</td></tr>`:direct?`<tr><td class="idx">${{r.index}}</td><td class="jp">${{esc(r.jianpu)}}</td><td class="jz ${{r.guqin_status}}">${{esc(r.guqin||'[空]')}}</td><td class="jz ${{r.annotation?'':'both_empty'}}">${{esc(r.annotation||'[空]')}}</td>${{pitchCell(r.guqin_pitch)}}</tr>`:`<tr><td class="idx">${{r.index}}</td><td class="jp">${{esc(r.jianpu)}}</td><td class="jz ${{r.finger_status}}">${{esc(r.finger||'[空]')}}</td><td class="jz ${{r.guqin_status}}">${{esc(r.guqin||'[空]')}}</td><td class="jz ${{r.annotation?'':'both_empty'}}">${{esc(r.annotation||'[空]')}}</td>${{pitchCell(r.finger_pitch)}}${{pitchCell(r.guqin_pitch)}}</tr>`).join('')}}</tbody></table></div>`}}
 function phrase(t,open){{const noop=t.no_op?'<span class="chip noop">no-op</span>':'';const direct=!!t.single_stage;const finalStage=direct?'single_stage':'guqinization';return `<details class="phrase" data-id="${{esc(t.id)}}" ${{open?'open':''}}><summary><span>${{esc(t.phrase_id)}}</span>${{noop}}<span class="count">${{t.rows.length}} 行 · ${{esc(t.id)}}</span></summary><div class="body"><p class="meta">曲谱：${{esc(t.score_key)}}${{t.title?'｜'+esc(t.title):''}} · 标注对比及${{direct?'单阶段':'两阶段'}}最终结果</p><div class="stage-summary">${{direct?stageInfo(t,finalStage):stageInfo(t,'fingering_agent')+stageInfo(t,finalStage)}}</div>${{direct?'':`<details><summary>Fingering 完整轨迹（逐轮）</summary>${{trajectory(t,'fingering_agent')}}</details>`}}<details><summary>${{direct?'单阶段完整轨迹（逐轮）':'Guqinizer 完整轨迹（逐轮）'}}</summary>${{trajectory(t,finalStage)}}</details><details><summary>${{direct?'单阶段':'Guqinizer'}} 教师原始输入输出（私有审计）</summary>${{teacherTrace(t,finalStage)}}</details>${{table(t)}}</div></details>`}}
 function draw(){{const q=search.value.trim().toLowerCase(); tree.innerHTML=''; const buckets=new Map(); for(const t of data){{const hit=!q||[t.id,t.score_key,t.phrase_id,t.title].join(' ').toLowerCase().includes(q);if(!hit)continue; if(!buckets.has(t.score_key))buckets.set(t.score_key,[]);buckets.get(t.score_key).push(t)}} if(!buckets.size){{tree.innerHTML='<p class="empty">没有匹配的曲谱或 phrase。</p>';return}} for(const [score,items] of buckets){{const title=items[0].title||'';const d=document.createElement('details');d.className='score';d.open=Boolean(q);d.innerHTML=`<summary>${{esc(score)}}${{title?'｜'+esc(title):''}} <span class="count">${{items.length}} 个 phrase</span></summary><div>${{items.map(t=>phrase(t,Boolean(q))).join('')}}</div>`;tree.appendChild(d)}}}}
+search.value=new URLSearchParams(location.search).get('phrase')||'';
 search.addEventListener('input',draw);document.getElementById('expand').addEventListener('click',()=>document.querySelectorAll('details.score,details.phrase').forEach(d=>d.open=true));document.getElementById('collapse').addEventListener('click',()=>document.querySelectorAll('details.score,details.phrase').forEach(d=>d.open=false));draw();
 </script></body></html>'''
     output.write_text(page, encoding="utf-8")
