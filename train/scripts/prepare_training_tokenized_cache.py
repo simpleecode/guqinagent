@@ -9,6 +9,7 @@ import yaml
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
+    parser.add_argument('--expected-rows', type=int, default=7952)
     args = parser.parse_args()
     config = yaml.safe_load(args.config.read_text())
     data = Path(config['dataset_dir'])
@@ -24,9 +25,9 @@ def main():
     module = load_tokenizer(model_args)
     template = get_template_and_fix_tokenizer(module['tokenizer'], data_args)
     datasets = get_dataset(template, model_args, data_args, training_args, stage='sft', **module)
-    assert len(datasets['train_dataset']) == 7952
+    assert len(datasets['train_dataset']) == args.expected_rows
     h = hashlib.sha256((data / 'guqin_agent_train.jsonl').read_bytes()).hexdigest()
-    manifest = {'dataset_sha256': h, 'rows': 7952, 'template': config['template'],
+    manifest = {'dataset_sha256': h, 'rows': args.expected_rows, 'template': config['template'],
                 'cutoff_len': config['cutoff_len'], 'tokenized_path': str(destination),
                 'train_on_prompt': config['train_on_prompt'], 'mask_history': config['mask_history']}
     (data / 'tokenized_manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')

@@ -115,3 +115,8 @@ baseline/gepa_guqin/data/
 
 # Local duplicate-title recapture payloads (148MB, keep on disk only)
 ABC_J/recapture_duplicate_titles/
+
+# Local model weights, inference/eval artifacts and test replacements
+/Mark1/
+/train/eval_outputs/
+/ABC_J/test_replacements/
