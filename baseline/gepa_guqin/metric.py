@@ -36,9 +36,42 @@ if str(ROOT) not in sys.path:
 
 from evaluation.aggregate import metrics  # noqa: E402
 from evaluation.parser import structured_events_for_score  # noqa: E402
-from evaluation.rules import violations  # noqa: E402
 
 from baseline.gepa_guqin.compat import action_text  # noqa: E402
+
+# Event-row violation extraction as used by GEPA optimization since the
+# pilot.  The refactored evaluation package computes equivalents by
+# replaying final plans through the runtime (evaluation.rules.
+# replay_final_warnings); keep this local copy so the GEPA metric keeps
+# its historical event-level semantics without touching the new package.
+PARSER_FAILURES = {
+    "string_out_of_range", "missing_hui", "harmonic_hui_missing",
+    "hui_outside_not_valid_for_harmonic", "fractional_hui_not_valid_for_harmonic",
+    "ambiguous_multiple_strings", "current_stopped_position_missing",
+}
+
+
+def _violation_row(event: dict[str, Any], kind: str, audit: dict[str, Any],
+                   explanation: str) -> dict[str, Any]:
+    return {"piece_id": event["piece_id"], "phrase_id": event["phrase_id"],
+            "event_id": event["event_id"], "violation_type": kind,
+            "relevant_state_event": {"prediction_text": event["prediction_text"],
+                                     "target_midi": event["target_midi"], "audit": audit},
+            "explanation": explanation}
+
+
+def violations(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result = []
+    for event in events:
+        audit = event.get("pitch_audit") or {}
+        reason = audit.get("reason")
+        if audit.get("status") == "mismatched":
+            result.append(_violation_row(event, "pitch_mismatch", audit,
+                                         "可解析减字的实得音高与该事件简谱目标相差超过容差。"))
+        elif reason in PARSER_FAILURES:
+            result.append(_violation_row(event, "unplayable_or_unresolvable_jianzi", audit,
+                                         "减字触发确定性的解析/演奏状态错误。"))
+    return result
 
 DEFAULT_WEIGHTS: dict[str, float] = {
     "pitch": 0.45,

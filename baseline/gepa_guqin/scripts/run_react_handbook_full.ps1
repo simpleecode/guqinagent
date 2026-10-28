@@ -9,16 +9,16 @@ param(
     [ValidateRange(0.0, 2.0)] [double]$SampleTemperature = 0.25,
     [ValidateRange(0.0, 60.0)] [double]$MinInterval = 0.5,
     [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_-]*$')]
-    [string]$RunName = 'react_handbook_full_test43',
+    [string]$RunName = 'react_handbook_full_test50',
     [switch]$SkipEvaluation
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
-$inputDir = Join-Path $repo 'train/eval_inputs_v2_text_protocol/renderfix_20261007'
+$inputDir = Join-Path $repo 'train/eval_inputs_v2_text_protocol/test50'
 $runtimeInput = Join-Path $inputDir 'test_runtime.jsonl'
 $referenceInput = Join-Path $inputDir 'evaluation_pairs_test.jsonl'
-$sourceInput = Join-Path $repo 'ABC_J/agent_training/renderfix_train_test_20261007/pitch_eligible_two_or_half/inferred_trajectories_test.jsonl'
+$sourceInput = Join-Path $repo 'ABC_J/agent_training/two_stage_audited/inferred_all/inferred_trajectories_test.jsonl'
 $envFile = Join-Path $repo '.env'
 $runDir = Join-Path $repo "baseline/gepa_guqin/runs/$RunName"
 $predictionPath = Join-Path $runDir 'predictions_test.jsonl'
@@ -67,8 +67,8 @@ $config = [ordered]@{
     model = $Model
     prompt = 'production_seed'
     handbook = $true
-    input = 'train/eval_inputs_v2_text_protocol/renderfix_20261007/test_runtime.jsonl'
-    reference = 'train/eval_inputs_v2_text_protocol/renderfix_20261007/evaluation_pairs_test.jsonl'
+    input = 'train/eval_inputs_v2_text_protocol/test50/test_runtime.jsonl'
+    reference = 'train/eval_inputs_v2_text_protocol/test50/evaluation_pairs_test.jsonl'
     max_rounds = $MaxRounds
     attempts = $Attempts
     sample_temperature = $SampleTemperature
