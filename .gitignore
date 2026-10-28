@@ -66,6 +66,8 @@ train/eval_score/
 train/eval_outputs_v3_two_stage/
 train/eval_inputs_v2_text_protocol/*
 !train/eval_inputs_v2_text_protocol/test.jsonl
+!train/eval_inputs_v2_text_protocol/test50/
+!train/eval_inputs_v2_text_protocol/test50/**
 
 # Reproducible evaluation code is tracked; batch evaluation artifacts are local.
 evaluation_results/
