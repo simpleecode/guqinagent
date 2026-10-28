@@ -12,14 +12,18 @@ def sha(path):
 
 def main():
     parser=argparse.ArgumentParser()
-    parser.add_argument('--scope',choices=('pilot','full'),default='pilot')
+    parser.add_argument('--scope',choices=('pilot','full','youlan'),default='pilot')
     args=parser.parse_args()
     out=ROOT/'train/eval_outputs/warning_ablation'/args.scope
     source=out/'inputs.jsonl';rows=[json.loads(s) for s in source.open() if s.strip()]
-    expected=33 if args.scope=='pilot' else 979
+    expected={'pilot':33,'full':979,'youlan':52}[args.scope]
     assert len(rows)==len({r['sample_id'] for r in rows})==expected
-    assert len({r['score_key'] for r in rows})==(4 if args.scope=='pilot' else 47)
-    assert not {'SCwngKTr','SeWok3pZ','SurzVQ02','ST4GAejh'} & {r['score_key'] for r in rows}
+    assert len({r['score_key'] for r in rows})=={'pilot':4,'full':47,'youlan':1}[args.scope]
+    assert not {'SCwngKTr','SeWok3pZ','SurzVQ02'} & {r['score_key'] for r in rows}
+    if args.scope=='youlan':
+        assert {r['score_key'] for r in rows}=={'ST4GAejh'}
+    else:
+        assert 'ST4GAejh' not in {r['score_key'] for r in rows}
     assert all(r.get('reference') is None and (r.get('runtime_item') or {}).get('reference_plan') is None for r in rows)
     adapter=Path('/home/20223393ljw/jianzi/outputs/qwen35_9b_lora_two_stage_final_2gpu_bs12')
     model=Path('/home/20223393ljw/models/Qwen3.5-9B')
@@ -40,7 +44,7 @@ def main():
                     'off':'no diagnostic warnings/hints or warning-driven followups; structural validation stays'},
             'offline_scoring':'same full runtime; never disable scoring; keep failures in denominator'}
     target=out/'experiment_manifest.json'
-    if args.scope=='full':
+    if args.scope in ('full','youlan'):
         pilot=json.loads((out.parent/'pilot/experiment_manifest.json').read_text())
         for key in ('adapter_sha256','base_config_sha256','runtime_sha256','sampling'):
             assert report[key]==pilot[key],f'Full experiment differs from verified pilot: {key}'
