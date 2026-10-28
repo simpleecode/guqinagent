@@ -1,0 +1,111 @@
+\section{Experiments}\label{sec:experiments}
+\subsection{Experimental Setup}
+
+\paragraph{Benchmark and Data Protocol.}
+The current evaluation contains 48 complete scores, partitioned into 1,031 work units, with 23,602 aligned event records. It includes a replacement edition of \emph{Youlan} containing 52 work units; three problematic source scores have been excluded. Scores are the units of dataset splitting, while phrases are internal work units used by the agent. Both currently evaluated conditions produce protocol-valid outputs for all 1,031 work units.
+\begin{table}[t]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Component & Contents \\
+\midrule
+Input & Complete-score metadata, tuning, jianpu events, and stable event indices. \\
+Output & One event-indexed jianzipu plan for the complete score. \\
+Runtime & Pitch candidates, editing, context retrieval, validation, and diagnostic feedback. \\
+Reference & Expert notation for offline supervision and structured action comparison. \\
+\bottomrule
+\end{tabularx}
+\caption{Benchmark representation. Reference notation is withheld from inference.}
+\label{tab:benchmark}
+\end{table}
+
+\begin{table*}[t]
+\centering\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\textwidth}{@{}Xrrrrrrrr@{}}
+\toprule
+Method & \shortstack{Valid\\coverage} & Pitch Acc. $\uparrow$ & MAE $\downarrow$ & String F1 & LH F1 & RH F1 & Tone F1 & Orn. F1 \\
+\midrule
+Original Qwen3.5-9B, direct & -- & -- & -- & -- & -- & -- & -- & -- \\
+Original Qwen3.5-9B, agent$^{\dagger}$ & 1.07 & N/A & N/A & N/A & N/A & N/A & N/A & N/A \\
+GLM API, agent + GEPA & -- & -- & -- & -- & -- & -- & -- & -- \\
+Project SFT, single-stage agent & -- & -- & -- & -- & -- & -- & -- & -- \\
+\midrule
+Project SFT, two-stage, feedback OFF & 100.00 & 86.237 & 64.993 & 38.554 & 56.599 & 45.659 & 61.670 & 22.285 \\
+Project SFT, two-stage, feedback ON & 100.00 & 99.981 & 2.308 & 39.761 & 57.119 & 46.009 & 62.543 & 20.184 \\
+\bottomrule
+\end{tabularx}
+\caption{Preliminary results on 48 scores. Coverage, accuracy, and F1 are percentages; MAE is in cents. Valid coverage is protocol-valid outputs divided by all 1,031 test work units. Pitch accuracy uses each condition's evaluable events (Table~\ref{tab:warning-ablation}); action F1 compares with expert notation. $^{\dagger}$The original-model agent produced valid outputs for 11/59 attempted units; 972 units were skipped after predecessor failures. N/A denotes unavailable full-test musical metrics; -- denotes pending experiments. ON and OFF use the same adapted backbone and scoring rules.}
+\label{tab:main-results}
+\end{table*}
+
+All outputs are evaluated using the same current rules after replaying each complete score in chronological order. This preserves harmonic regions, left-hand positions, and other state across work-unit boundaries. Runtime snapshots and evaluation code fingerprints are retained for auditability. The final reproducibility record will specify the split manifest, checkpoint, training configuration, and inference arguments.
+\todo{Add training-set size, adapter checkpoint hash, SFT hyperparameters, and inference budgets.}
+
+\paragraph{Evaluation Metrics.}
+Pitch correctness is measured against the input jianpu melody. The expert jianzipu annotation supplies reference actions for fingering and technique metrics. Let $\mathcal I$ contain events for which the auditor returns a determinate matched or mismatched prediction. Let $a_i=1$ if event $i$ matches the target within 50 cents under the supported matching rules, and $a_i=0$ otherwise. Let $\mathcal A_i$ contain the tone pairs aligned by the auditor, with absolute error $\delta_{ij}$ in cents for pair $j$. We report
+\begin{equation}
+\begin{aligned}
+\mathrm{PitchAcc}_{50}
+&=\frac{\sum_{i\in\mathcal I}a_i}{|\mathcal I|},\\
+\mathrm{PitchMAE}
+&=\frac{\sum_{i\in\mathcal I}\sum_{j\in\mathcal A_i}\delta_{ij}}
+{\sum_{i\in\mathcal I}|\mathcal A_i|}.
+\end{aligned}
+\label{eq:pitch-metrics}
+\end{equation}
+Accuracy uses events as its denominator; MAE averages aligned tone pairs, and a compound event can contribute multiple pairs. Unresolved cases are excluded from pitch scoring and must be reported separately. We report each condition's evaluable event count and accuracy on their intersection, since generated notation affects which expressions the auditor resolves. The complete event inventory includes structural and continuation events and is not the pitch denominator.
+
+String, left-hand fingering, right-hand fingering, and tone type are compared as structured fields against available reference labels using micro precision, recall, and F1. Tone type distinguishes open, stopped, and harmonic notes. Ornament precision, recall, and F1 use event-level sets of parsed ornaments. These metrics measure agreement with one expert realization; alternative playable realizations can receive lower scores. Technique distributions provide a complementary view of underused and overused actions.
+
+Final warnings are counted by replaying completed plans through the runtime, including when warnings were hidden during inference. The rule-violation rate is the fraction of the 1,031 work units with at least one final warning; the total warning count is also reported. Unresolvable expressions do not automatically become violations, and a warning-free plan is not certified as playable.
+
+\paragraph{Models and Comparisons.}
+The current results use Qwen3.5-9B with the same project-trained two-stage LoRA weights in both conditions. The full system exposes warnings, diagnostic hints, and warning-triggered follow-up interactions. The diagnostic-feedback-off condition hides this feedback and disables its follow-up mechanism while retaining structural validation and pitch candidates. Its public user and tool messages were checked for diagnostic-feedback leakage.
+
+We also evaluated the original Qwen3.5-9B checkpoint without the project LoRA using the two-stage agent and the same tool definitions. All 59 attempted inputs matched the test-input hashes. The original-model run allowed 8,192 output tokens per request, eight rounds per stage attempt, up to three attempts, and up to three Guqinizer passes, with a context limit of 16,384 tokens. After a work unit failed, the evaluator skipped the remainder of that score, preserving the requirement that history contain model-generated predecessors. These settings match the current SFT evaluation entry point; archived SFT outputs span multiple runs, so this comparison does not establish that every historical execution setting was identical.
+
+The remaining comparisons examine interactive generation, stage decomposition, and a commercial-model baseline. Direct generation with the original checkpoint is an optional additional comparison. The GEPA baseline will use a commercial GLM model through its API as the agent backend, with public prompts optimized on development data without updating model weights \cite{agrawal2026gepa}. Differences from the Qwen student reflect both the model backend and the training or prompt-optimization approach. The GLM model version, GEPA reflection model, API settings, optimization budget, and inference costs will be reported. A student trained on single-stage trajectories will generate final jianzipu through the same tools; training and inference token budgets will be reported.
+
+\subsection{Results and Discussion}
+
+\paragraph{Original-model completion and protocol failures.}
+The original-model agent attempted 59 of 1,031 work units across the 48 scores. Eleven attempts produced protocol-valid outputs (18.64\% of attempted units), while 48 failed. The remaining 972 units were skipped because a predecessor failed. Valid-output coverage was therefore 11/1,031 (1.07\%); skipped units are excluded from the attempted-unit protocol-failure denominator. Both adapted conditions produced valid outputs for all 1,031 units. We do not report full-test musical metrics for the original model or compare its 11 successful units directly with the adapted model's complete-test scores.
+
+Of the 48 failed units, 13 failed during Fingering and 35 during Guqinizer. Logs record output truncation in 45 failed units, at least one attempt reaching round eight in 26, and three consecutive pitch-candidate-query rounds in 31. These observations overlap and are not a mutually exclusive attribution of failures. They suggest that sustained tool interaction and termination behavior are substantial obstacles for the original model under the current protocol, alongside the musical decisions required by the task.
+
+
+\paragraph{Pitch correctness and diagnostic feedback.}
+The full system attains 99.981\% pitch accuracy on 15,758 evaluable events, compared with 86.237\% on 15,360 events when diagnostic feedback is disabled (Table~\ref{tab:main-results}). MAE is 2.308 versus 64.993 cents. Since the evaluable sets differ, Table~\ref{tab:warning-ablation} additionally reports accuracy on 14,289 events resolved in both conditions: 99.979\% versus 86.941\%, a gap of 13.038 percentage points. The observed accuracy gap therefore persists on the same input events. The result concerns auditor-supported realizations and does not establish accuracy on unresolved notation.
+
+\begin{table}[t]
+\centering\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabularx}{\linewidth}{@{}Xrr@{}}
+\toprule
+Diagnostic & ON & OFF \\
+\midrule
+Evaluable pitch events & 15,758 & 15,360 \\
+Aligned tone pairs for MAE & 16,335 & 15,958 \\
+Common evaluable events & 14,289 & 14,289 \\
+Pitch Acc. on common events (\%) & 99.979 & 86.941 \\
+Final runtime warnings & 2 & 3,436 \\
+Work units with warnings & 2 & 809 \\
+Rule-violation rate (\%) & 0.194 & 78.468 \\
+\bottomrule
+\end{tabularx}
+\caption{Diagnostic-feedback comparison. Counts refer to final plans, rescored under the same runtime with complete histories. Each condition covers 1,031 work units. OFF warnings are measured during evaluation despite being hidden during inference.}
+\label{tab:warning-ablation}
+\end{table}
+
+\paragraph{Residual warnings and error analysis.}
+The full system leaves two final runtime warnings in two work units, compared with 3,436 warnings across 809 work units for OFF. The affected-work-unit rate is 0.194\% versus 78.468\%. One remaining ON warning in \emph{Youlan} is an octave error, realizing E6 for a target E7. These cases warrant inspection of inherited state, compound notation, and ordinary pitch choices. Final-warning counts and pitch-error counts use different eligibility and matching rules and should not be treated as interchangeable metrics.
+
+\paragraph{Fingering agreement and idiomatic realization.}
+The full system's string, left-hand, right-hand, and tone-type F1 scores are 39.761, 57.119, 46.009, and 62.543, respectively. Their modest differences from OFF accompany a much larger pitch-accuracy gap. The full system also has lower ornament F1: 20.184 versus 22.285. The current comparison provides evidence of improved pitch consistency without establishing an advantage in ornament selection.
+
+Tone distributions indicate that pitch accuracy leaves room for different realization strategies. Among recognized tone types on reference-labeled events, harmonics account for 7.51\% of ON predictions, compared with 29.34\% of reference tone types. A system can realize the correct pitch through different strings, positions, or tone types, and can also underuse stylistically appropriate techniques. Both possibilities motivate examining action distributions and consulting performers when assessing idiomatic quality.
+
+
+\paragraph{Planned expert assessment.}
+A blinded performer study will complement automatic metrics. Proposed dimensions are execution feasibility, continuity of left- and right-hand choices, and idiomatic guqin expression. Examples will be anonymized and presented in randomized order, with input scores available to raters. The study will report rater experience, sampling, agreement between raters, and uncertainty of the estimates. Expert scores and claims of superior playability await this assessment.
