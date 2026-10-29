@@ -25,34 +25,42 @@ cache/断点续跑、API/token 计数。
 另注意:242 次指标调用消耗 2480 次 actor 调用 —— 自身 handoff 语义下
 minibatch 抽到长曲靠后短语会拖完整条前缀(前缀不占指标预算但占 API 成本)。
 
-## ReAct + Handbook 正式测试（2026-10-28）
+## ReAct + Handbook 正式测试（2026-10-30，test50 划分）
 
-生产种子提示词与固定技法手册在完整密封 test（43 曲、1379 段、30902
-事件）上的 rollout 已完成。1379 条预测全部通过协议校验，无重复 ID，且全部
-与参考样本匹配。完整预测和精简评估汇总保存在
-`runs/react_handbook_full_test43/`。
+生产种子提示词与固定技法手册在当前密封 test（`train/eval_inputs_v2_text_protocol/test50/`，
+48 曲、1031 段、23602 事件）上的 rollout 已完成。1031 条预测全部通过协议
+校验，无重复 ID，且全部与参考样本匹配（首晚 `S35eJqgV` 一段协议失败中断
+该曲，续跑已补齐）。完整预测和评估摘要快照保存在
+`runs/react_handbook_full_test50/`；事件级明细在本地
+`evaluation_results/react_handbook_full_test50/`（不入库）。
 
 | 指标 | 结果 |
 |---|---:|
-| PitchAcc@50c | 0.9920 |
-| Pitch MAE（cents） | 10.67 |
-| String F1 | 0.3628 |
-| Left-hand F1 | 0.4541 |
-| Right-hand F1 | 0.4090 |
-| Tone-type F1 | 0.5575 |
-| Ornament F1 | 0.1030 |
-| Rule violation rate | 0.0705 |
+| PitchAcc@50c | 0.9976 |
+| Pitch MAE（cents） | 2.54 |
+| String F1 | 0.3651 |
+| Left-hand F1 | 0.4361 |
+| Right-hand F1 | 0.4084 |
+| Tone-type F1 | 0.5456 |
+| Ornament F1 | 0.0949 |
+| Rule violation rate | 0.0504 |
 
-Windows 下可用同一配置复跑；脚本支持断点续跑，并在 rollout 完成后自动执行
-事件级评估：
+macOS/Linux 与 Windows 均可用同一配置复跑；脚本支持断点续跑，并在 rollout
+完成后自动执行事件级评估：
+
+```bash
+bash baseline/gepa_guqin/scripts/run_react_handbook_full.sh
+```
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File baseline/gepa_guqin/scripts/run_react_handbook_full.ps1
 ```
 
-默认 Python 位于仓库根目录 `.venv-gepa/Scripts/python.exe`；其他环境可通过
-`-PythonPath` 指定。运行前需准备 README 下文所述的本地数据与 `.env`，这些
-私有输入和凭据不包含在 Git 中。
+macOS 默认使用 conda 环境 `guqin-agent` 的 Python（可用 `PYTHON=` 覆盖）并
+自动把 vendored `baseline/gepa/src` 加入 `PYTHONPATH`；Windows 默认 Python
+位于仓库根目录 `.venv-gepa/Scripts/python.exe`（可用 `-PythonPath` 指定）。
+运行前需准备本地数据与 `.env`（`GLM_API_KEY/GLM_BASE_URL/GLM_MODEL`），
+这些私有输入和凭据不包含在 Git 中。
 
 **建议的下一步(交接给学弟)**:
 1. 先做 minibatch 采样优化(优先抽前缀已缓存/位置靠前的短语),把每次

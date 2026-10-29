@@ -1,0 +1,13 @@
+{
+  "schema_version": "react-handbook-launch-1.0",
+  "run_name": "react_handbook_full_test50",
+  "model": "glm-5.3",
+  "prompt": "production_seed",
+  "handbook": true,
+  "input": "/test_runtime.jsonl",
+  "reference": "/evaluation_pairs_test.jsonl",
+  "max_rounds": 8,
+  "attempts": 2,
+  "sample_temperature": 0.25,
+  "min_interval": 0.5
+}
