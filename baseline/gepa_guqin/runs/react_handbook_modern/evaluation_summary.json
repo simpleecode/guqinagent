@@ -1,0 +1,466 @@
+{
+  "schema_version": "guqin-final-eval-1.1",
+  "prediction_samples": 91,
+  "matched_samples": 91,
+  "unmatched_prediction_ids": [],
+  "tone_type_replay_incomplete_scores": [],
+  "warning_replay_incomplete_scores": [],
+  "rule_warning_audited_phrases_by_score": {
+    "S0suvdRF": 23,
+    "S32Pc5wN": 6,
+    "S9fJhhpN": 9,
+    "SCf7VJzZ": 21,
+    "SHuMJvcc": 8,
+    "SVNxk3qy": 8,
+    "SasUvRxx": 4,
+    "SfZhCDKK": 5,
+    "SgmtevwE": 4,
+    "ShtFSBhW": 3
+  },
+  "events": 2079,
+  "metrics": {
+    "pitch_accuracy_at_50_cents": 0.9769858945805494,
+    "pitch_mae_cents": 16.03505652759085,
+    "pitch_evaluable_events": 1347,
+    "pitch_evaluable_pairs": 1486,
+    "string": {
+      "n": 1379,
+      "precision": 0.3675675675675676,
+      "recall": 0.34517766497461927,
+      "f1": 0.35602094240837695,
+      "accuracy": 0.34517766497461927
+    },
+    "left_hand_fingering": {
+      "n": 1104,
+      "precision": 0.5950782997762863,
+      "recall": 0.48188405797101447,
+      "f1": 0.5325325325325325,
+      "accuracy": 0.48188405797101447
+    },
+    "right_hand_fingering": {
+      "n": 1112,
+      "precision": 0.5103189493433395,
+      "recall": 0.4892086330935252,
+      "f1": 0.4995408631772268,
+      "accuracy": 0.4892086330935252
+    },
+    "tone_type": {
+      "n": 1525,
+      "precision": 0.6438162544169611,
+      "recall": 0.5973770491803279,
+      "f1": 0.6197278911564625,
+      "accuracy": 0.5973770491803279,
+      "reference_counts": {
+        "harmonic": 400,
+        "stopped": 1035,
+        "open": 90
+      },
+      "prediction_counts": {
+        "stopped": 965,
+        "open": 285,
+        "harmonic": 165
+      },
+      "reference_distribution": {
+        "stopped": 0.6786885245901639,
+        "open": 0.05901639344262295,
+        "harmonic": 0.26229508196721313
+      },
+      "prediction_distribution": {
+        "stopped": 0.6819787985865724,
+        "open": 0.20141342756183744,
+        "harmonic": 0.1166077738515901
+      },
+      "distribution_similarity": 0.854312691884377,
+      "distribution_similarity_definition": "1 - total_variation_distance"
+    },
+    "ornament": {
+      "n": 673,
+      "precision": 0.5295566502463054,
+      "recall": 0.31946508172362553,
+      "f1": 0.3985171455050973
+    },
+    "performance_technique_usage": {
+      "events": 2079,
+      "distribution_similarity": 0.7118295113291717,
+      "distribution_similarity_definition": "1 - total_variation_distance",
+      "prediction_distribution": {
+        "上": 0.0036101083032490976,
+        "剌": 0.0,
+        "剔": 0.0,
+        "勾": 0.34416365824308065,
+        "勾剔": 0.0024067388688327317,
+        "历": 0.0,
+        "吟": 0.03910950661853189,
+        "大撮": 0.0018050541516245488,
+        "如一": 0.0018050541516245488,
+        "带起": 0.0,
+        "打": 0.0012033694344163659,
+        "托": 0.028279181708784597,
+        "抓起": 0.0012033694344163659,
+        "抹": 0.05174488567990373,
+        "抹勾": 0.0,
+        "抹挑": 0.0,
+        "拂": 0.0,
+        "拨": 0.0,
+        "挑": 0.35379061371841153,
+        "掐起": 0.0,
+        "撞": 0.0,
+        "撞猱": 0.0006016847172081829,
+        "撮": 0.14681107099879662,
+        "擘": 0.0,
+        "注": 0.011432009626955475,
+        "注下": 0.0024067388688327317,
+        "浒": 0.0,
+        "涓": 0.0012033694344163659,
+        "猱": 0.0036101083032490976,
+        "绰": 0.0036101083032490976,
+        "绰上": 0.0,
+        "罨": 0.0006016847172081829,
+        "进复": 0.0,
+        "退": 0.0,
+        "退复": 0.0,
+        "长猱": 0.0006016847172081829
+      },
+      "reference_distribution": {
+        "上": 0.0006891798759476223,
+        "剌": 0.0013783597518952446,
+        "剔": 0.010337698139214336,
+        "勾": 0.2136457615437629,
+        "勾剔": 0.008270158511371467,
+        "历": 0.0013783597518952446,
+        "吟": 0.028256374913852515,
+        "大撮": 0.0,
+        "如一": 0.008270158511371467,
+        "带起": 0.002067539627842867,
+        "打": 0.0,
+        "托": 0.004824259131633356,
+        "抓起": 0.0,
+        "抹": 0.05099931082012405,
+        "抹勾": 0.0006891798759476223,
+        "抹挑": 0.013783597518952447,
+        "拂": 0.008270158511371467,
+        "拨": 0.0034458993797381117,
+        "挑": 0.2563749138525155,
+        "掐起": 0.00895933838731909,
+        "撞": 0.007580978635423846,
+        "撞猱": 0.0,
+        "撮": 0.15230875258442453,
+        "擘": 0.0027567195037904893,
+        "注": 0.0,
+        "注下": 0.06685044796691937,
+        "浒": 0.0006891798759476223,
+        "涓": 0.0,
+        "猱": 0.0,
+        "绰": 0.05651274982770503,
+        "绰上": 0.08201240523776705,
+        "罨": 0.0,
+        "进复": 0.0006891798759476223,
+        "退": 0.0034458993797381117,
+        "退复": 0.005513439007580979,
+        "长猱": 0.0
+      },
+      "technique_diversity": {
+        "prediction": {
+          "unique_techniques": 20,
+          "entropy_nats": 1.5987283018527199,
+          "effective_techniques": 4.946737665602472
+        },
+        "reference": {
+          "unique_techniques": 27,
+          "entropy_nats": 2.2314838513624844,
+          "effective_techniques": 9.313675941794155
+        }
+      },
+      "by_technique": {
+        "上": {
+          "prediction_events": 6,
+          "prediction_rate": 0.002886002886002886,
+          "reference_events": 1,
+          "reference_rate": 0.000481000481000481,
+          "rate_delta": 0.002405002405002405
+        },
+        "剌": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 2,
+          "reference_rate": 0.000962000962000962,
+          "rate_delta": -0.000962000962000962
+        },
+        "剔": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 15,
+          "reference_rate": 0.007215007215007215,
+          "rate_delta": -0.007215007215007215
+        },
+        "勾": {
+          "prediction_events": 572,
+          "prediction_rate": 0.2751322751322751,
+          "reference_events": 310,
+          "reference_rate": 0.1491101491101491,
+          "rate_delta": 0.12602212602212604
+        },
+        "勾剔": {
+          "prediction_events": 4,
+          "prediction_rate": 0.001924001924001924,
+          "reference_events": 12,
+          "reference_rate": 0.005772005772005772,
+          "rate_delta": -0.003848003848003848
+        },
+        "历": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 2,
+          "reference_rate": 0.000962000962000962,
+          "rate_delta": -0.000962000962000962
+        },
+        "吟": {
+          "prediction_events": 65,
+          "prediction_rate": 0.031265031265031266,
+          "reference_events": 41,
+          "reference_rate": 0.019721019721019722,
+          "rate_delta": 0.011544011544011544
+        },
+        "大撮": {
+          "prediction_events": 3,
+          "prediction_rate": 0.001443001443001443,
+          "reference_events": 0,
+          "reference_rate": 0.0,
+          "rate_delta": 0.001443001443001443
+        },
+        "如一": {
+          "prediction_events": 3,
+          "prediction_rate": 0.001443001443001443,
+          "reference_events": 12,
+          "reference_rate": 0.005772005772005772,
+          "rate_delta": -0.004329004329004329
+        },
+        "带起": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 3,
+          "reference_rate": 0.001443001443001443,
+          "rate_delta": -0.001443001443001443
+        },
+        "打": {
+          "prediction_events": 2,
+          "prediction_rate": 0.000962000962000962,
+          "reference_events": 0,
+          "reference_rate": 0.0,
+          "rate_delta": 0.000962000962000962
+        },
+        "托": {
+          "prediction_events": 47,
+          "prediction_rate": 0.022607022607022607,
+          "reference_events": 7,
+          "reference_rate": 0.003367003367003367,
+          "rate_delta": 0.01924001924001924
+        },
+        "抓起": {
+          "prediction_events": 2,
+          "prediction_rate": 0.000962000962000962,
+          "reference_events": 0,
+          "reference_rate": 0.0,
+          "rate_delta": 0.000962000962000962
+        },
+        "抹": {
+          "prediction_events": 86,
+          "prediction_rate": 0.04136604136604136,
+          "reference_events": 74,
+          "reference_rate": 0.035594035594035595,
+          "rate_delta": 0.005772005772005772
+        },
+        "抹勾": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 1,
+          "reference_rate": 0.000481000481000481,
+          "rate_delta": -0.000481000481000481
+        },
+        "抹挑": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 20,
+          "reference_rate": 0.00962000962000962,
+          "rate_delta": -0.00962000962000962
+        },
+        "拂": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 12,
+          "reference_rate": 0.005772005772005772,
+          "rate_delta": -0.005772005772005772
+        },
+        "拨": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 5,
+          "reference_rate": 0.002405002405002405,
+          "rate_delta": -0.002405002405002405
+        },
+        "挑": {
+          "prediction_events": 588,
+          "prediction_rate": 0.2828282828282828,
+          "reference_events": 372,
+          "reference_rate": 0.17893217893217894,
+          "rate_delta": 0.1038961038961039
+        },
+        "掐起": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 13,
+          "reference_rate": 0.006253006253006253,
+          "rate_delta": -0.006253006253006253
+        },
+        "撞": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 11,
+          "reference_rate": 0.005291005291005291,
+          "rate_delta": -0.005291005291005291
+        },
+        "撞猱": {
+          "prediction_events": 1,
+          "prediction_rate": 0.000481000481000481,
+          "reference_events": 0,
+          "reference_rate": 0.0,
+          "rate_delta": 0.000481000481000481
+        },
+        "撮": {
+          "prediction_events": 244,
+          "prediction_rate": 0.11736411736411737,
+          "reference_events": 221,
+          "reference_rate": 0.1063011063011063,
+          "rate_delta": 0.011063011063011063
+        },
+        "擘": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 4,
+          "reference_rate": 0.001924001924001924,
+          "rate_delta": -0.001924001924001924
+        },
+        "注": {
+          "prediction_events": 19,
+          "prediction_rate": 0.00913900913900914,
+          "reference_events": 0,
+          "reference_rate": 0.0,
+          "rate_delta": 0.00913900913900914
+        },
+        "注下": {
+          "prediction_events": 4,
+          "prediction_rate": 0.001924001924001924,
+          "reference_events": 97,
+          "reference_rate": 0.046657046657046654,
+          "rate_delta": -0.044733044733044736
+        },
+        "浒": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 1,
+          "reference_rate": 0.000481000481000481,
+          "rate_delta": -0.000481000481000481
+        },
+        "涓": {
+          "prediction_events": 2,
+          "prediction_rate": 0.000962000962000962,
+          "reference_events": 0,
+          "reference_rate": 0.0,
+          "rate_delta": 0.000962000962000962
+        },
+        "猱": {
+          "prediction_events": 6,
+          "prediction_rate": 0.002886002886002886,
+          "reference_events": 0,
+          "reference_rate": 0.0,
+          "rate_delta": 0.002886002886002886
+        },
+        "绰": {
+          "prediction_events": 6,
+          "prediction_rate": 0.002886002886002886,
+          "reference_events": 82,
+          "reference_rate": 0.039442039442039445,
+          "rate_delta": -0.03655603655603656
+        },
+        "绰上": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 119,
+          "reference_rate": 0.05723905723905724,
+          "rate_delta": -0.05723905723905724
+        },
+        "罨": {
+          "prediction_events": 1,
+          "prediction_rate": 0.000481000481000481,
+          "reference_events": 0,
+          "reference_rate": 0.0,
+          "rate_delta": 0.000481000481000481
+        },
+        "进复": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 1,
+          "reference_rate": 0.000481000481000481,
+          "rate_delta": -0.000481000481000481
+        },
+        "退": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 5,
+          "reference_rate": 0.002405002405002405,
+          "rate_delta": -0.002405002405002405
+        },
+        "退复": {
+          "prediction_events": 0,
+          "prediction_rate": 0.0,
+          "reference_events": 8,
+          "reference_rate": 0.003848003848003848,
+          "rate_delta": -0.003848003848003848
+        },
+        "长猱": {
+          "prediction_events": 1,
+          "prediction_rate": 0.000481000481000481,
+          "reference_events": 0,
+          "reference_rate": 0.0,
+          "rate_delta": 0.000481000481000481
+        }
+      },
+      "technique_density": {
+        "prediction_events": 1475,
+        "reference_events": 1320,
+        "prediction_rate": 0.7094757094757095,
+        "reference_rate": 0.6349206349206349,
+        "rate_delta": 0.07455507455507455
+      }
+    },
+    "rule_violation_rate": 0.054945054945054944,
+    "rule_violations": 33,
+    "rule_warning_audited_phrases": 91,
+    "rule_warning_phrases": 5,
+    "rule_warnings_per_phrase": 0.3626373626373626,
+    "rule_warning_codes": {
+      "jianzi_pitch_mismatch": 31,
+      "open_to_stopped_same_string": 2
+    },
+    "rule_violation_definition": "final-plan edit_plan warning count; rate is warning-bearing phrase fraction",
+    "pitch_tolerance_cents": 50.0
+  },
+  "final_warning": {
+    "phrases": 91,
+    "warning_count": 33,
+    "warning_phrases": 5,
+    "warning_rate": 0.054945054945054944,
+    "warnings_per_phrase": 0.3626373626373626,
+    "by_code": {
+      "jianzi_pitch_mismatch": 31,
+      "open_to_stopped_same_string": 2
+    },
+    "definition": "warnings from final-plan edit_plan runtime replay across complete scores"
+  },
+  "final_tool_receipt_warning": {
+    "phrases": 91,
+    "warning_phrases": 5,
+    "warning_rate": 0.054945054945054944,
+    "definition": "phrases whose final edit_plan preview contains at least one :warning:"
+  }
+}

@@ -76,6 +76,27 @@ macOS 默认使用 conda 环境 `guqin-agent` 的 Python（可用 `PYTHON=` 覆�
 的密封协议文件可由 `export_eval_inputs.py` 从上述数据一键重导。`.env` 需要
 `GLM_API_KEY/GLM_BASE_URL/GLM_MODEL`。
 
+## ReAct + Handbook 现代曲测试（2026-11-01）
+
+同一配置（GLM-5.3 + 生产种子提示词 + 固定手册）在 10 首现代曲（91 段、2079
+事件，`train/eval_inputs/modern_sealed/`）上的泛化测试。91 段全部协议有效、
+无重复 ID。参考对由 `train/scripts/build_modern_evaluation_pairs.py` 用教师
+同款解析器从 `ABC_J/modern` 标注源构建（未走参考自审计，F1 口径与传统 test50
+不完全等价，仅作现代曲泛化诊断与后续 SFT 对照）。
+
+| 指标 | 结果 |
+|---|---:|
+| PitchAcc@50c | 0.9770 |
+| Pitch MAE（cents） | 16.04 |
+| String F1 | 0.3560 |
+| Left-hand F1 | 0.5325 |
+| Right-hand F1 | 0.4995 |
+| Tone-type F1 | 0.6197 |
+| Ornament F1 | 0.3985 |
+| Rule violation rate | 0.0549（33 处 / 5 段） |
+
+复跑：`INPUT_DIR=$PWD/train/eval_inputs/modern_sealed RUN_NAME=react_handbook_modern bash baseline/gepa_guqin/scripts/run_react_handbook_full.sh`。
+
 
 ## 结构
 

@@ -1,0 +1,7 @@
+{
+  "audited": "train/eval_inputs/modern_audited.jsonl",
+  "scores": 10,
+  "phrases": 91,
+  "phrases_without_reference_actions": [],
+  "source": "ABC_J/modern/<score_key>/mapped/jianpu_jianzi_readable.json"
+}

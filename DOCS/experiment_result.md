@@ -128,3 +128,26 @@ warning 构成：音高失配 37、泛音同弦余韵 29、低徽过紧 19、散
 
 证据：`baseline/gepa_guqin/runs/react_handbook_full_test50/`（预测含逐轮轨迹、启动配置、评估摘要快照，已入库）；事件级明细在本地 `evaluation_results/react_handbook_full_test50/`。
 
+## 5. ReAct + Handbook 现代曲泛化测试（GLM-5.3）
+
+第 4 节同一配置（GLM-5.3 + 生产种子提示词 + 固定手册，单阶段循环、8 轮上限）在 10 首现代曲（91 段、2079 事件）上的测试。91 段全部协议有效、无重复 ID。参考对由 `train/scripts/build_modern_evaluation_pairs.py` 用教师管线同款 `parse_reference_actions` 从 `ABC_J/modern` 标注源构建并按段对齐，但未经过传统 test50 的参考自审计，F1 与第 1–4 节不完全等价。
+
+| 指标 | 现代曲 | 传统 test50（第 4 节） |
+|---|---:|---:|
+| PitchAcc@50c | 97.6986% | 99.7604% |
+| 可评估音高事件 | 1,347 | 15,862 |
+| 音高 MAE | 16.0351 cents | 2.5422 cents |
+| 弦号 F1 | 35.602% | 36.514% |
+| 左手指法 F1 | 53.253% | 43.609% |
+| 右手指法 F1 | 49.954% | 40.835% |
+| 音色 F1 | 61.973% | 54.555% |
+| 装饰音 F1 | 39.852% | 9.492% |
+| 最终 warning | 33（5/91 段） | 102（52/1031 段） |
+
+音高准确率与 MAE 在现代曲上走弱（97.70% / 16.04 cents；warning 31 处为音高失配），提示现代曲目调性/和声对候选映射的压力更大。指法与装饰音 F1 高于传统集，主要反映现代曲标注更完整显式（上下文省略与继承写法更少）而非模型更强，两列不可作纯泛化增益解读。该组作为论文现代曲泛化测试的 ReAct 基线行，等待服务端两阶段/单阶段 SFT 的现代曲结果（`train/scripts/run_modern_two_methods.sh`）作同口径对照。
+
+复跑：`INPUT_DIR=$PWD/train/eval_inputs/modern_sealed RUN_NAME=react_handbook_modern bash baseline/gepa_guqin/scripts/run_react_handbook_full.sh`。
+
+证据：`baseline/gepa_guqin/runs/react_handbook_modern/`（已入库）；事件级明细在本地 `evaluation_results/react_handbook_modern/`；密封输入与参考对在 `train/eval_inputs/modern_sealed/`。
+
+
