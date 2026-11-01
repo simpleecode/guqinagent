@@ -1,0 +1,24 @@
+\clearpage
+\appendix
+\section{Additional Action and Tone-Type Results}
+\label{sec:detailed-results}
+
+Table~\ref{tab:detailed-actions} reports event-level left- and right-hand fingering and tone-type F1, alongside tone-type distribution similarity. These complement the pitch, string-assignment, technique-distribution, ornament, and warning metrics in the main comparison. Tone similarity compares aggregate proportions of open, stopped, and harmonic notes and does not require these tone types to occur at the same events.
+
+\begin{table}[htbp]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{@{}Xrrrr@{}}
+\toprule
+Method & LH F1 & RH F1 & Tone F1 & Tone Sim. \\
+\midrule
+GLM + Handbook & 43.609 & 40.835 & 54.555 & 0.8439 \\
+Single-stage SFT & 57.917 & 47.697 & 65.629 & 0.8113 \\
+Fixed-workflow SFT & 54.965 & 43.505 & 59.102 & 0.8320 \\
+Two-stage OFF & 56.599 & 45.659 & 61.670 & 0.7810 \\
+Two-stage ON & 57.119 & 46.009 & 62.543 & 0.7743 \\
+\bottomrule
+\end{tabularx}
+\caption{Additional structured action metrics on the same 48-score test set. F1 is a percentage; tone similarity is $1-\mathrm{TVD}$ on $[0,1]$. Higher values indicate closer agreement with reference annotations. All five conditions produce protocol-valid outputs for all 1,031 work units.}
+\label{tab:detailed-actions}
+\end{table}
