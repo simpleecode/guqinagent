@@ -45,7 +45,7 @@ python ABC_J/scripts/visualize_running_eval_score.py \
 ```
 
 ```bash
-cd /Volumes/F/work/Gunqin-agent
+cd /path/to/Gunqin-agent
 python -m evaluation.run_eval \
   --pred train/eval_outputs_v3_two_stage/remote_a100_qwen35_9b_final_20260917/SCf7VJzZ.jsonl \
   --reference ABC_J/agent_training/evaluation_text_protocol_v2/evaluation_pairs_test.jsonl \
@@ -75,11 +75,27 @@ by Git. Prediction JSONL may be append-only: the last row for each
   `TVD = 0.5 * Σ|p(mode) - q(mode)|`. `1.0` means identical distributions;
   `0.0` means no overlap.
 * **String accuracy**: exact primary-string match, only where the sealed
-  reference explicitly supplies that field.
+  reference explicitly supplies that field; retained as a legacy diagnostic.
+* **String--Hui F1** (`metrics.string_hui`, `guqin-string-hui-1`): micro set
+  F1 of exact (string, hui) pairs within events with fully auditor-resolved
+  reference positions. Includes every resolved compound position, order-free.
+  Open strings use OPEN, not a missing hui; numeric positions are rounded to
+  six decimals. Unresolved references are excluded with explicit coverage;
+  unresolved predictions at scorable reference events count as missing pairs.
+  This measures conditional agreement with one realization, not all-event accuracy.
 * **Left/right hand**: micro accuracy plus label F1 for explicitly annotated
   primary fingering fields. Missing reference values are excluded rather than
   treated as negatives.
-* **Ornament P/R/F1**: micro set comparison of parsed `techniques` per event.
+* **Ornament P/R/F1** (`guqin-techniques-2`): micro set comparison of explicit
+  named embellishment/compound actions per event. It uses the same canonical
+  longest-match lexicon as Tech. Sim., excluding the eight basic plucks
+  抹/挑/勾/剔/打/摘/托/擘. Thus compound attacks (勾剔、掐撮三声), walks,
+  and ornaments remain atomic labels; synonyms such as 爪起/抓起 are unified.
+  泛起/泛止 are state controls, never scoring labels, and are retained separately
+  as `notation_state_markers`. A nonempty disjoint set has F1=0; only two empty
+  corpus sets have undefined F1. This is lexical action agreement, not proof of
+  correct execution, timing, or musical expression. Unknown spellings can be
+  missed; no claim of exhaustive complex-gesture coverage is made.
 * **Performance-technique usage and diversity**: one unified, paper-facing
   statistic extracted from final notation using the curated
   `complex_fingering_explanations.jsonl` name list plus basic strokes
@@ -116,3 +132,10 @@ The first version does not infer subjective musical quality, phrase-level
 ornament style, ergonomics of arbitrary multi-stop hand spans, or correctness
 of context-dependent compound gestures. Those need a verified rule corpus or
 expert labels; they must not be guessed from strings.
+
+To refresh only the revised technique metrics from existing complete-score
+`per_event.jsonl` evidence, run `python -m evaluation.refresh_technique_scores
+<experiment> ...`. It checks source hashes, preserves pitch/field/rule metrics
+and violation evidence exactly, and records the metric revision in the existing
+summary/config rather than creating another result version. It does not rerun
+inference or the pitch parser. Future full evaluations use the same extractor.

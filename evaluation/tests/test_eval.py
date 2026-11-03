@@ -1,8 +1,9 @@
 import unittest
 
-from evaluation.fingering import field_counts, rates
+from evaluation.fingering import field_counts, rates, resolved_positions, string_hui_metrics
 from evaluation.ornament import ornament_metrics, technique_usage
-from evaluation.techniques import extract_fingering_techniques
+from evaluation.techniques import extract_fingering_techniques, scoring_technique_fields
+from evaluation.parser import _event_view
 from evaluation.rules import replay_final_warnings
 from evaluation.aggregate import final_warning_stats, metrics
 from evaluation.parser import final_actions
@@ -10,6 +11,60 @@ from agents.abc_to_jianzipu.reference_parser import parse_reference_actions
 
 
 class MetricsTests(unittest.TestCase):
+    def test_joint_string_hui_wrong_hui_and_second_string(self):
+        def score(ref, pred):
+            return string_hui_metrics([{'target_midi': [60],
+                'reference': {'string_hui_positions': ref},
+                'prediction': {'string_hui_positions': pred}}])
+        self.assertEqual(score([[2, 7]], [[2, 9]])['f1'], 0)
+        self.assertEqual(score([[2, 7], [5, 'OPEN']], [[2, 7]])['f1'], 2/3)
+        self.assertEqual(score([[2, 7], [5, 'OPEN']], [[5, 'OPEN'], [2, 7]])['f1'], 1)
+        self.assertEqual(score([[2, 7]], [])['f1'], 0)
+        self.assertIsNone(score([], [[2, 7]])['f1'])
+        self.assertEqual(score([], [[2, 7]])['reference_unresolved_events'], 1)
+
+    def test_position_resolution_open_and_unknown_are_distinct(self):
+        detail = {'status': 'mismatched', 'actual_midis': [60],
+                  'resolved_pitches': [{'string': 2, 'hui': None, 'mode': 'open'}]}
+        self.assertEqual(resolved_positions(detail), [[2, 'OPEN']])
+        detail['resolved_pitches'][0]['mode'] = 'stopped'
+        self.assertEqual(resolved_positions(detail), [])
+        detail['resolved_pitches'][0]['hui'] = 7.00000001
+        self.assertEqual(resolved_positions(detail), [[2, 7.0]])
+        detail['actual_midis'].append(64)
+        self.assertEqual(resolved_positions(detail), [])
+
+    def test_disjoint_and_missing_predictions_have_zero_f1(self):
+        for pred in (["撞"], []):
+            score = ornament_metrics([{"reference": {"ornaments": ["吟"]},
+                                       "prediction": {"ornaments": pred}}])
+            self.assertEqual(score["f1"], 0.0)
+        self.assertIsNone(ornament_metrics([{"reference": {}, "prediction": {}}])["f1"])
+
+    def test_state_controls_are_not_scored_even_from_legacy_semantics(self):
+        view = _event_view({"techniques": ["泛起", "泛止"],
+                            "pre_attack_techniques": ["泛起"]}, "泛起大指七徽勾一弦泛止")
+        self.assertEqual(view["ornaments"], [])
+        self.assertEqual(view["fingering_techniques"], ["勾"])
+        self.assertEqual(view["notation_state_markers"], ["泛起", "泛止"])
+        self.assertEqual(view["pre_attack_ornaments"], [])
+
+    def test_compounds_are_retained_atomically_in_both_metrics(self):
+        for text, expected in (("掐撮三声", "掐撮三声"), ("绰上七徽", "绰上"),
+                               ("注下七徽三分", "注下"), ("勾剔一弦", "勾剔")):
+            view = scoring_technique_fields(text)
+            self.assertEqual(view["ornaments"], [expected])
+            self.assertEqual(view["fingering_techniques"], [expected])
+
+    def test_aliases_share_one_technique_authority(self):
+        for first, second in (("爪起", "抓起"), ("泼剌", "拨剌"), ("歷", "历")):
+            self.assertEqual(scoring_technique_fields(first), scoring_technique_fields(second))
+
+    def test_repetitions_and_positions_do_not_inflate_ornaments(self):
+        view = scoring_technique_fields("泛起大指七徽六分勾一弦吟吟泛止")
+        self.assertEqual(view["ornaments"], ["吟"])
+        self.assertEqual(view["fingering_techniques"], ["勾", "吟"])
+
     def test_single_stage_final_actions_are_evaluated(self):
         prediction = {'single_stage': {'plan': {'actions': [
             {'source_index': 7, 'jianzi_text': '散挑一弦'},
@@ -42,7 +97,8 @@ class MetricsTests(unittest.TestCase):
         stale_warning = [{'tool_results': [{'name': 'edit_plan', 'result': {
             'result': {'text': ':warning:音高不匹配'},
         }}]}]
-        rows = [sample(0, '散勾三弦'), sample(1, '散挑一弦', stale_warning)]
+        # Use a legal first-string stroke so only the intended pitch warning remains.
+        rows = [sample(0, '散勾三弦'), sample(1, '散勾一弦', stale_warning)]
         warnings = replay_final_warnings(rows)
         self.assertEqual([(row['phrase_id'], row['violation_type']) for row in warnings],
                          [('p0001', 'jianzi_pitch_mismatch')])

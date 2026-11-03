@@ -14,6 +14,11 @@ KNOWLEDGE_PATH = (ROOT / "agents/abc_to_jianzipu/knowledge"
                   / "complex_fingering_explanations_v3_with_effects.jsonl")
 FINGERING_CATEGORIES = {"右手指法", "左手指法", "特殊/左右手配合指法"}
 HAND_FINGER_MARKERS = ("大指", "食指", "中指", "名指", "跪指")
+STATE_MARKERS = ("泛起", "泛止")
+# Ornament/action embellishment set: exclude only the eight basic plucks.
+# Keep named compound attacks (e.g. 勾剔, 掐撮三声) atomic, not their substrings.
+PLAIN_PLUCKS = frozenset(("抹", "挑", "勾", "剔", "打", "摘", "托", "擘"))
+SCORING_VERSION = "guqin-techniques-2"
 # Basic strokes are usually written as single characters and are not all
 # represented by compound-name entries in the knowledge file.
 BASIC_STROKES = {
@@ -88,6 +93,8 @@ def extract_fingering_techniques(
     notation event count once; different techniques in the event are retained.
     """
     source = str(text or "").strip().strip("[]")
+    for marker in STATE_MARKERS:
+        source = source.replace(marker, " ")
     lexicon = _lexicon(str(knowledge_path.resolve()))
     found: list[dict[str, str]] = []
     seen: set[str] = set()
@@ -109,6 +116,21 @@ def extract_fingering_techniques(
         else:
             position += 1
     return found
+
+
+def scoring_technique_fields(text: Any) -> dict[str, Any]:
+    """One lexical authority for evaluation, independent of runtime policy.
+
+    Names describe explicit notation, not verified execution or inferred intent.
+    No filtering on pitch-match status: pitch-incorrect actions still count.
+    """
+    source = str(text or "")
+    tokens = extract_fingering_techniques(source)
+    return {
+        "fingering_techniques": [item["name"] for item in tokens],
+        "ornaments": [item["name"] for item in tokens if item["name"] not in PLAIN_PLUCKS],
+        "notation_state_markers": [marker for marker in STATE_MARKERS if marker in source],
+    }
 
 
 def count_fingering_techniques(texts: list[Any], *, knowledge_path: Path = KNOWLEDGE_PATH) -> dict[str, int]:

@@ -30,7 +30,7 @@ jobber running/分配卡号不等于锁住显存。耗时预检应提前做；�
 
 ## 2. 唯一有效数据位置
 
-本地根目录 `/Volumes/F/work/Gunqin-agent`。下表路径相对 `ABC_J/agent_training/two_stage_audited/`。
+下表路径相对项目根目录下的 `ABC_J/agent_training/two_stage_audited/`。
 
 | 产物 | 路径 | 数量/用途 |
 |---|---|---|
@@ -44,7 +44,7 @@ jobber running/分配卡号不等于锁住显存。耗时预检应提前做；�
 | 最终校验 | `teacher_train_final/messages_validation_report.json` | valid=true，两阶段各3976，错误0 |
 | 全量可视化 | `full_training_visualization/visualization_sharded/index.html` | 153曲谱分片；尚未刷新本次114phrase替换，暂属上一版 |
 
-[可视化索引](/Volumes/F/work/Gunqin-agent/ABC_J/agent_training/two_stage_audited/full_training_visualization/visualization_sharded/index.html)
+[可视化索引](../ABC_J/agent_training/two_stage_audited/full_training_visualization/visualization_sharded/index.html)
 
 实际SFT在仓库的 `train/data/guqin_agent_sft_two_stage_latest_runtime/guqin_agent_train.jsonl`，配套metadata、dataset_info、manifest和校验报告；不是直接训练inferred文件。
 

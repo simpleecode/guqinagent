@@ -1,0 +1,102 @@
+[
+  {
+    "panel": 0,
+    "method": "handbook",
+    "source": "evaluation_results/react_handbook_full_test50/summary.json",
+    "pitch_accuracy_percent": 99.76043374101626,
+    "ornament_f1_percent": 7.157588256702657,
+    "pitch_evaluable_events": 15862,
+    "estimated_api_usd_per_work_unit": 0.07045847487875848,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  },
+  {
+    "panel": 0,
+    "method": "fixed_workflow",
+    "source": "evaluation_results/fixed_reference_ablation_current48/summary.json",
+    "pitch_accuracy_percent": 26.777810563588076,
+    "ornament_f1_percent": 27.92778892146274,
+    "pitch_evaluable_events": 13556,
+    "estimated_api_usd_per_work_unit": 0.017034348564500486,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  },
+  {
+    "panel": 0,
+    "method": "single_stage",
+    "source": "evaluation_results/single_stage_current48/summary.json",
+    "pitch_accuracy_percent": 98.73235017257609,
+    "ornament_f1_percent": 20.929316794644613,
+    "pitch_evaluable_events": 15935,
+    "estimated_api_usd_per_work_unit": 0.01829084619786615,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  },
+  {
+    "panel": 0,
+    "method": "two_stage_off",
+    "source": "evaluation_results/warning_ablation_current48_off/summary.json",
+    "pitch_accuracy_percent": 86.23697916666667,
+    "ornament_f1_percent": 18.339390550740845,
+    "pitch_evaluable_events": 15360,
+    "estimated_api_usd_per_work_unit": 0.003740650300678953,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  },
+  {
+    "panel": 0,
+    "method": "two_stage",
+    "source": "evaluation_results/warning_ablation_current48_on/summary.json",
+    "pitch_accuracy_percent": 99.9809620510217,
+    "ornament_f1_percent": 17.012858555885263,
+    "pitch_evaluable_events": 15758,
+    "estimated_api_usd_per_work_unit": 0.007003800213385063,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  },
+  {
+    "panel": 1,
+    "method": "handbook",
+    "source": "evaluation_results/react_handbook_modern/summary.json",
+    "pitch_accuracy_percent": 97.69858945805494,
+    "ornament_f1_percent": 39.96138996138996,
+    "pitch_evaluable_events": 1347,
+    "estimated_api_usd_per_work_unit": 0.07012014065934066,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  },
+  {
+    "panel": 1,
+    "method": "fixed_workflow",
+    "source": "evaluation_results/modern_fixed_workflow/summary.json",
+    "pitch_accuracy_percent": 19.298245614035086,
+    "ornament_f1_percent": 39.083557951482476,
+    "pitch_evaluable_events": 1197,
+    "estimated_api_usd_per_work_unit": 0.015388620109890113,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  },
+  {
+    "panel": 1,
+    "method": "single_stage",
+    "source": "evaluation_results/modern_single_stage/summary.json",
+    "pitch_accuracy_percent": 97.93152639087019,
+    "ornament_f1_percent": 43.44453064391001,
+    "pitch_evaluable_events": 1402,
+    "estimated_api_usd_per_work_unit": 0.01770059208791209,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  },
+  {
+    "panel": 1,
+    "method": "two_stage_off",
+    "source": "evaluation_results/modern_two_stage_off/summary.json",
+    "pitch_accuracy_percent": 73.48538845331433,
+    "ornament_f1_percent": 42.22539229671897,
+    "pitch_evaluable_events": 1403,
+    "estimated_api_usd_per_work_unit": 0.003695325494505494,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  },
+  {
+    "panel": 1,
+    "method": "two_stage",
+    "source": "evaluation_results/modern_two_stage/summary.json",
+    "pitch_accuracy_percent": 98.95052473763118,
+    "ornament_f1_percent": 41.72901080631754,
+    "pitch_evaluable_events": 1334,
+    "estimated_api_usd_per_work_unit": 0.008240215494505496,
+    "cost_scope": "reconstructed token estimates, not provider billing usage"
+  }
+]

@@ -1,9 +1,63 @@
 \clearpage
 \appendix
+\section{Training and Inference Configuration}
+\label{sec:reproducibility}
+
+\paragraph{Training.}
+All four students use LLaMA-Factory with the \texttt{qwen3\_5} chat template, bitsandbytes 4-bit quantization, BF16 computation, and LoRA targeting all supported linear projections. The saved adapters have rank 8, $\alpha=16$, dropout 0, and no bias adaptation. Their target modules are \texttt{q/k/v/o\_proj}, \texttt{gate/up/down\_proj}, \texttt{in\_proj\_qkv}, \texttt{in\_proj\_z}, \texttt{in\_proj\_b}, \texttt{in\_proj\_a}, and \texttt{out\_proj}. All use a cosine learning-rate schedule, warmup ratio 0.03, learning rate $2\times10^{-4}$, three epochs, and gradient checkpointing. Prompt tokens are not supervised (\texttt{train\_on\_prompt=false}); assistant history is not masked (\texttt{mask\_history=false}). Direct targets contain only the final JSON and explicitly disable thinking. Its 3,976 cached targets are fully supervised without truncation; this is not a claim about the longer tool trajectories.
+
+\begin{table}[htbp]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{@{}Xrr@{}}
+\toprule
+Setting & Two-stage & Single-stage recipes \\
+\midrule
+Training scores & 153 & 153 \\
+Underlying work units & 3,976 & 3,976 \\
+Training conversations & 7,952 & 3,976 \\
+Training GPUs & 2 & 1 \\
+Batch per GPU & 1 & 1 \\
+Gradient accumulation & 6 & 12 \\
+Effective batch & 12 & 12 \\
+Training cutoff (tokens) & 8,192 & 8,192 \\
+Epochs & 3 & 3 \\
+Optimizer updates & 1,989 & 996 \\
+\bottomrule
+\end{tabularx}
+\caption{Verified training configurations. Single-stage recipes comprise trajectory-trained single-stage, fixed-workflow SFT, and Direct SFT. The two-stage adapter is trained jointly on both stage types; OFF reuses that adapter without retraining.}
+\label{tab:training-config}
+\end{table}
+
+\paragraph{Inference.}
+Local Qwen inference uses vLLM with bitsandbytes 4-bit weights, the corresponding LoRA adapter, a 16,384-token context, and an 8,192-token per-request output limit. Tool-based adapted conditions use attempt temperatures $[0.6,0.3,0.0]$, top-$p=0.95$, top-$k=20$, min-$p=0$, presence penalty 0, repetition penalty 1, and seed 20261024. A round is one model response, which may request tools; it is not necessarily one tool call. The limits apply per attempt, not to the aggregate trajectory. Two-stage ON permits up to three Guqinizer passes; OFF disables diagnostic follow-ups and uses one. Direct uses temperature 0, thinking disabled, no tool schema, and exactly one generation per attempted work unit. Within a score, all conditions preserve their own generated history rather than substituting reference plans. Failed predecessors cause subsequent work units to be skipped under the strict-history protocol.
+
+GLM-5.3 ReAct + Handbook uses the production single-stage prompt, a fixed 73-entry handbook, eight rounds, two attempts, and temperature 0.25. Its saved launch configurations do not record the effective output-token cap or API context limit. The client code defaults to 8,000 output tokens but permits an environment override; we therefore do not present that default as a verified historical cap. GEPA remains pending and has no reported final evaluation budget or score.
+
+\paragraph{Artifact fingerprints.}
+Table~\ref{tab:training-fingerprints} identifies the exact training JSONL files and final adapter weight files (\texttt{adapter\_model.safetensors}) by full SHA256. The same checkpoint is used for traditional and modern evaluation within each method. Training configuration files in \texttt{train/configs/} use the suffixes \texttt{two\_stage\_final\_2gpu\_bs12}, \texttt{single\_stage\_final\_1gpu\_bs12}, \texttt{fixed\_reference\_ablation\_1gpu\_bs12}, and \texttt{direct\_sft\_1gpu\_bs12}, each prefixed by \texttt{qwen35\_9b\_lora\_} and ending in \texttt{.yaml}. Their independent data directories and preprocessing manifests bind the tokenized caches to the source data, template, and cutoff. The fixed-workflow prompts partly differ from the trajectory-trained single-stage prompts; this comparison is not a strict single-variable ablation.
+
+\begin{table*}[t]
+\centering\scriptsize
+\setlength{\tabcolsep}{5pt}
+\begin{tabularx}{\textwidth}{@{}Xll@{}}
+\toprule
+Training recipe & Training JSONL SHA256 & Adapter weights SHA256 \\
+\midrule
+Two-stage (ON / OFF) & \shortstack[l]{\texttt{6ea8329df61ade844389611d76ba5e32}\\\texttt{15deba19f9a9aa6e7e0ae1d8c8d150b6}} & \shortstack[l]{\texttt{ecdee4141e31cabad373a7dba0fbcddc}\\\texttt{f0a03d15ff11f46bb41ca02ec510d0ad}} \\
+Single-stage & \shortstack[l]{\texttt{984779ea61a9c582328518bf8d4e0238}\\\texttt{26bf31b8c705f927c1dfbd9d97b00f4a}} & \shortstack[l]{\texttt{cdcc420e0b193cb1b6ad2520af13ae43}\\\texttt{b5549bac63cb8d4e3d7b0123daefb436}} \\
+Fixed workflow & \shortstack[l]{\texttt{72f664d51ca2aecb62e792d20043f8bf}\\\texttt{befe494c64d10c1a4b6f0e68c81ffc6a}} & \shortstack[l]{\texttt{8447be00f62ad6a81c605b5d1cb59e7b}\\\texttt{7149582b7caddec987e33ba9ee57ac29}} \\
+Direct SFT & \shortstack[l]{\texttt{edba4abf12f1d2834bd079ea30f7ed1e}\\\texttt{f50238b2a631db6948712b18d102f7e9}} & \shortstack[l]{\texttt{30c0e8fcd8fb7387d86f66677f8596c2}\\\texttt{4327a693eced4f5ac8131dfcb27d0913}} \\
+\bottomrule
+\end{tabularx}
+\caption{Exact artifact identities. Concatenate the two lines in each hash cell without whitespace. Direct training is complete, but its test metrics are not yet reported.}
+\label{tab:training-fingerprints}
+\end{table*}
+
 \section{Additional Action and Tone-Type Results}
 \label{sec:detailed-results}
 
-Table~\ref{tab:detailed-actions} reports event-level left- and right-hand fingering and tone-type F1, alongside tone-type distribution similarity. These complement the pitch, string-assignment, technique-distribution, ornament, and warning metrics in the main comparison. Tone similarity compares aggregate proportions of open, stopped, and harmonic notes and does not require these tone types to occur at the same events.
+Table~\ref{tab:detailed-actions} reports event-level left- and right-hand fingering and tone-type F1, alongside tone-type distribution similarity. These complement the pitch, string--hui position, technique-distribution, ornament, and warning metrics in the main comparison. Tone similarity compares aggregate proportions of open, stopped, and harmonic notes and does not require these tone types to occur at the same events.
 
 \begin{table}[htbp]
 \centering\footnotesize
@@ -12,13 +66,42 @@ Table~\ref{tab:detailed-actions} reports event-level left- and right-hand finger
 \toprule
 Method & LH F1 & RH F1 & Tone F1 & Tone Sim. \\
 \midrule
-GLM + Handbook & 43.609 & 40.835 & 54.555 & 0.8439 \\
-Single-stage SFT & 57.917 & 47.697 & 65.629 & 0.8113 \\
+GLM + Handbook & 43.609 & 40.835 & 54.555 & \textbf{0.8439} \\
 Fixed-workflow SFT & 54.965 & 43.505 & 59.102 & 0.8320 \\
-Two-stage OFF & 56.599 & 45.659 & 61.670 & 0.7810 \\
-Two-stage ON & 57.119 & 46.009 & 62.543 & 0.7743 \\
+\midrule
+\system{}, single-stage & \textbf{57.917} & \textbf{47.697} & \textbf{65.629} & 0.8113 \\
+\system{} w/o feedback & 56.599 & 45.659 & 61.670 & 0.7810 \\
+\system{} (Ours) & 57.119 & 46.009 & 62.543 & 0.7743 \\
 \bottomrule
 \end{tabularx}
 \caption{Additional structured action metrics on the same 48-score test set. F1 is a percentage; tone similarity is $1-\mathrm{TVD}$ on $[0,1]$. Higher values indicate closer agreement with reference annotations. All five conditions produce protocol-valid outputs for all 1,031 work units.}
 \label{tab:detailed-actions}
+\end{table}
+
+\begin{table}[htbp]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{@{}Xrrrr@{}}
+\toprule
+Method & LH F1 & RH F1 & Tone F1 & Tone Sim. \\
+\midrule
+GLM + Handbook & 53.253 & 49.954 & 61.973 & \textbf{0.8543} \\
+Fixed-workflow SFT & 52.970 & 46.019 & 65.576 & 0.7199 \\
+\midrule
+\system{}, single-stage & 58.171 & 55.347 & 69.681 & 0.7963 \\
+\system{} w/o feedback & \textbf{59.350} & 56.980 & \textbf{70.049} & 0.7643 \\
+\system{} (Ours) & 57.255 & \textbf{59.010} & 67.663 & 0.7774 \\
+\bottomrule
+\end{tabularx}
+\caption{Additional action metrics on ten modern melodies (91 work units), using source-score annotations as offline references. F1 is a percentage; tone similarity is on $[0,1]$. All five methods have 100\% protocol-valid coverage.}
+\label{tab:modern-detailed-actions}
+\end{table}
+
+\section{API-Equivalent Inference Cost}
+\begin{table}[htbp]
+\centering\footnotesize
+\setlength{\tabcolsep}{3pt}
+\input{figures/inference_cost_table}
+\caption{Estimated API-equivalent USD per 100 work units, using the same visible-trajectory scope and no-cache-discount scenario in both datasets. These are retokenized estimates at public service rates, not historical invoices or self-hosting expenses. See Section~\ref{sec:inference-cost} for the accounting definition.}
+\label{tab:api-equivalent-cost}
 \end{table}

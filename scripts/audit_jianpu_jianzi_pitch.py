@@ -737,7 +737,9 @@ def _parse_jianzi(
     if direction_only:
         if text == "复":
             origin = context.get("walk_return_position")
-            if origin and origin.get("string") == context.get("active_left_string"):
+            if (origin and origin.get("string") is not None
+                    and origin.get("hui") is not None
+                    and origin.get("string") == context.get("active_left_string")):
                 string, destination = int(origin["string"]), origin["hui"]
                 context["stopped_string"] = string
                 context["stopped_hui"] = destination

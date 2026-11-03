@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd /Volumes/F/work/Gunqin-agent
+cd "$(dirname "$0")/../.."
 ROOT='ABC_J/agent_training/renderfix_train_test_20261008'
 BASE="$ROOT/teacher_train_final_allblacklistclean_walk501_20261009"
 REDACTED="$ROOT/teacher_harmonic_rest_leakage_retry_redacted_20261009"

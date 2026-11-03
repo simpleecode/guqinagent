@@ -7,12 +7,13 @@ from typing import Any
 from agents.abc_to_jianzipu.reference_parser import AUDIT, parse_reference_actions
 
 from .pitch import audit_plan, target_midis
-from .techniques import extract_fingering_techniques
+from .techniques import STATE_MARKERS, scoring_technique_fields
+from .fingering import resolved_positions
 
 
 def final_actions(prediction: dict[str, Any]) -> list[dict[str, Any]]:
     """Prefer the final Guqinizer plan; support one-stage ``jianzi_rows`` too."""
-    stage = (prediction.get("single_stage") or prediction.get("guqinizer")
+    stage = (prediction.get("direct") or prediction.get("single_stage") or prediction.get("guqinizer")
              or prediction.get("base") or {})
     actions = ((stage.get("plan") or {}).get("actions") or [])
     if actions:
@@ -49,6 +50,8 @@ def structured_events(prediction: dict[str, Any], reference: dict[str, Any],
     pred_semantics = _semantic_action_map(pred_data, pred_audit)
     ref_semantics = {int(row["source_index"]): dict(row)
                      for row in reference.get("reference", {}).get("actions") or []}
+    ref_audit = audit_plan(_notes_for_plan(runtime, reference.get("reference", {}).get("actions") or []), tolerance_cents)
+    ref_details = {int(row["index"]): row for row in ref_audit["details"] if row.get("index") is not None}
     audit_by_index = {int(row["index"]): row for row in pred_audit["details"]
                       if row.get("index") is not None}
     events = []
@@ -67,8 +70,8 @@ def structured_events(prediction: dict[str, Any], reference: dict[str, Any],
             "phrase_id": prediction.get("phrase_id") or runtime.get("phrase_id"),
             "event_id": source_index,
             "target_midi": expected or None,
-            "prediction": _event_view(pred, note.get("jianzi")),
-            "reference": _event_view(ref, ref.get("jianzi_text") or ref.get("text")),
+            "prediction": {**_event_view(pred, note.get("jianzi")), "string_hui_positions": resolved_positions(detail)},
+            "reference": {**_event_view(ref, ref.get("jianzi_text") or ref.get("text")), "string_hui_positions": resolved_positions(ref_details.get(source_index, {}))},
             "prediction_text": str(note.get("jianzi") or ""),
             "reference_text": str(ref.get("jianzi_text") or ref.get("text") or ""),
             "pitch_audit": detail,
@@ -129,6 +132,7 @@ def structured_events_for_score(samples: list[tuple[dict[str, Any], dict[str, An
     ref_data = {"metadata": metadata, "open_midi": open_midi, "notes": ref_notes}
     pred_audit = audit_plan(pred_data, tolerance_cents)
     ref_audit = audit_plan(ref_data, tolerance_cents)
+    ref_details = {int(row["index"]): row for row in ref_audit["details"] if row.get("index") is not None}
     pred_semantics = _semantic_action_map(pred_data, pred_audit)
     ref_semantics = _semantic_action_map(ref_data, ref_audit)
     audit_by_index = {int(row["index"]): row for row in pred_audit["details"]
@@ -147,8 +151,8 @@ def structured_events_for_score(samples: list[tuple[dict[str, Any], dict[str, An
             "phrase_id": prediction.get("phrase_id") or reference["runtime_item"].get("phrase_id"),
             "event_id": source_index,
             "target_midi": expected or None,
-            "prediction": _event_view(pred, note.get("jianzi")),
-            "reference": _event_view(ref, reference_text_by_index.get(source_index, "")),
+            "prediction": {**_event_view(pred, note.get("jianzi")), "string_hui_positions": resolved_positions(audit_by_index.get(source_index, {}))},
+            "reference": {**_event_view(ref, reference_text_by_index.get(source_index, "")), "string_hui_positions": resolved_positions(ref_details.get(source_index, {}))},
             "prediction_text": str(note.get("jianzi") or ""),
             "reference_text": reference_text_by_index.get(source_index, ""),
             "pitch_audit": audit_by_index.get(source_index, {}),
@@ -160,10 +164,10 @@ def _event_view(row: dict[str, Any], notation_text: Any = "") -> dict[str, Any]:
     return {
         "string": row.get("string"), "hui": row.get("hui"),
         "left_finger": row.get("left_finger"), "right_finger": row.get("right_finger"),
-        "tone_type": row.get("mode"), "ornaments": list(row.get("techniques") or []),
-        "pre_attack_ornaments": list(row.get("pre_attack_techniques") or []),
-        "fingering_techniques": [item["name"] for item in
-                                 extract_fingering_techniques(notation_text)],
+        "tone_type": row.get("mode"),
+        "pre_attack_ornaments": [value for value in row.get("pre_attack_techniques") or []
+                                 if value not in STATE_MARKERS],
+        **scoring_technique_fields(notation_text),
         "compound_gesture": row.get("compound_gesture"), "attack": row.get("attack"),
         "inherited_fields": list(row.get("inherited_fields") or []),
     }

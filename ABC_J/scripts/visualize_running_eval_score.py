@@ -378,8 +378,8 @@ def notation_overview(source_rows: list[dict], predictions: dict[str, dict]) -> 
         runtime = source.get("runtime_item") or source
         notes = ((runtime.get("input") or {}).get("notes_without_jianzi") or [])
         prediction = predictions.get(sample_id) or {}
-        final_stage = prediction.get("guqinizer") or {}
-        label = "Guqinizer"
+        final_stage = prediction.get("single_stage") or prediction.get("guqinizer") or {}
+        label = "单阶段" if prediction.get("single_stage") else "Guqinizer"
         if not isinstance(final_stage.get("plan"), dict):
             final_stage = prediction.get("base") or {}
             label = "Base" if sample_id in predictions else "待生成"
@@ -523,8 +523,8 @@ def render_notation_pdf(
         prediction = predictions.get(sample_id) or {}
         if not prediction and not include_pending:
             continue
-        final_stage = prediction.get("guqinizer") or {}
-        stage_label = "Guqinizer"
+        final_stage = prediction.get("single_stage") or prediction.get("guqinizer") or {}
+        stage_label = "单阶段" if prediction.get("single_stage") else "Guqinizer"
         if not isinstance(final_stage.get("plan"), dict):
             final_stage = prediction.get("base") or {}
             stage_label = "Base" if sample_id in predictions else "待生成"

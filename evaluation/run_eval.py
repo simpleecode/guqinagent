@@ -11,6 +11,7 @@ from typing import Any
 from .aggregate import final_warning_stats, metrics, per_piece, tool_receipt_warning_stats
 from .parser import final_actions, structured_events, structured_events_for_score
 from .rules import replay_final_warnings
+from .techniques import SCORING_VERSION
 
 
 def load_jsonl(path: Path, key: str) -> dict[str, dict[str, Any]]:
@@ -83,6 +84,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             for event in events:
                 event["prediction"]["tone_type"] = None
                 event["reference"]["tone_type"] = None
+                event["prediction"]["string_hui_positions"] = []
+                event["reference"]["string_hui_positions"] = []
                 event["tone_type_unavailable_reason"] = "incomplete_score_prediction"
             all_events.extend(events)
     output = args.output_root / args.experiment
@@ -92,7 +95,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
               "pitch_tolerance_cents": args.pitch_tolerance,
               "arguments": vars(args), "git_commit": git_commit(),
               "created_at": datetime.now(timezone.utc).isoformat()}
-    summary = {"schema_version": "guqin-final-eval-1.1", "prediction_samples": len(predictions),
+    summary = {"schema_version": "guqin-final-eval-1.2", "technique_scoring_version": SCORING_VERSION,
+               "string_hui_scoring_version": "guqin-string-hui-1",
+               "prediction_samples": len(predictions),
                "matched_samples": len(predictions) - len(unavailable), "unmatched_prediction_ids": unavailable,
                "tone_type_replay_incomplete_scores": sorted(state_replay_incomplete_scores),
                "warning_replay_incomplete_scores": sorted(warning_replay_incomplete_scores),

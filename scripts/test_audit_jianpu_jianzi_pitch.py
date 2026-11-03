@@ -383,6 +383,13 @@ class AuditPitchTests(unittest.TestCase):
             self.assertEqual(pitches, [])
             self.assertEqual(reason, "context_dependent_slide")
 
+    def test_fu_with_missing_origin_string_is_not_comparable(self):
+        context = MODULE.new_context()
+        context["walk_return_position"] = {"string": None, "hui": 7.0}
+        pitches, reason = MODULE.parse_jianzi("复", self.opens, context)
+        self.assertEqual(pitches, [])
+        self.assertEqual(reason, "context_dependent_slide")
+
     def test_hui_outside_positions_have_project_defined_pitches(self):
         base, _ = MODULE.position_pitch(5, 12.3, self.opens)
         outer, reason = MODULE.position_pitch(5, "徽外", self.opens)

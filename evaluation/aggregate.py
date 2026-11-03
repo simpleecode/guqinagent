@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
-from .fingering import field_counts, rates
+from .fingering import field_counts, rates, string_hui_metrics
 from .ornament import ornament_metrics, technique_usage
 from .pitch import paired_cents
 
@@ -104,6 +104,7 @@ def metrics(events: list[dict[str, Any]], violations: list[dict[str, Any]],
         "pitch_evaluable_events": len(pitch_events),
         "pitch_evaluable_pairs": len(cents),
         "string": rates(field_counts(events, "string")),
+        "string_hui": string_hui_metrics(events),
         "left_hand_fingering": rates(field_counts(events, "left_finger")),
         "right_hand_fingering": rates(field_counts(events, "right_finger")),
         "tone_type": tone_type_metrics(events),
@@ -111,8 +112,8 @@ def metrics(events: list[dict[str, Any]], violations: list[dict[str, Any]],
         # One paper-facing technique statistic: count named, playable actions
         # from final notation.  This includes 撮 exactly once, whether it also
         # has an ornament-like semantic role, and excludes state markers such
-        # as 泛起/泛止.  Ornament P/R/F1 above remains an event-level semantic
-        # correctness metric, not a competing technique-distribution metric.
+        # as 泛起/泛止. Ornament P/R/F1 uses the same lexical authority with
+        # basic plucks excluded; neither metric certifies semantic execution.
         "performance_technique_usage": technique_usage(
             events, field="fingering_techniques"
         ),

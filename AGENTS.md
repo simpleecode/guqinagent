@@ -13,6 +13,7 @@
 - `ABC_J/scripts/generate_teacher_tool_trajectories.py` — 教师轨迹生产：GLM 教师在私有参考 GQS 引导下真实执行工具（两阶段 fingering→guqinization / single_stage），经解析恢复、防泄漏与质量审计后导出公开训练数据 `messages_train.jsonl` 与私有 audit。
 - `ABC_J/scripts/run_teacher_batch_parallel.py` — 教师轨迹并行协调器：不重叠分片、worker 目录隔离、按 ID 去重合并，支持 `--merge-only` / `--retry-failed`。
 - `train/` — 学生 LoRA SFT 管线（qwen3.5-9b），configs 命名含模型/硬件/数据变体/日期。
+- `DOCS/direct_sft.md` — Direct SFT 纯最终谱面对照：同批3976条教师最终目标，数据/缓存/权重隔离；构造与推理代码均在 `train/scripts/`，每段一次无工具生成。
 - `evaluation/` — 事件级评估：PitchAcc@50c、指法/装饰音 P/R/F1、规则违规率。
 - `paper/` — 论文草稿 `main.tex`（benchmark、warning-guided inference、两阶段 agent、逆向轨迹蒸馏）。
 
@@ -66,6 +67,6 @@ conda run -n guqin python C:\Users\30343\.codex\skills\.system\skill-creator\scr
 `ABC_J/scripts/run_teacher_batch_parallel.py` 的 coordinator 日志只记录 worker 的启动、退出和最终汇总；实时 tqdm 进度条写入各 worker 的 `worker.log`。
 每次运行这个代码时，记得给用户tail带实时进度条的命令，如
 ```
-cd /Volumes/F/work/Gunqin-agent
+cd /path/to/Gunqin-agent
 tail -f ABC_J/agent_training/pitch_eligible_two_or_half_tuningfix_affected_20260924_guqinizer_raw/.parallel_workers/fast7_1000ms_*/worker.log
 ```
