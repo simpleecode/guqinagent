@@ -5,7 +5,7 @@ from collections import Counter
 from typing import Any
 
 from .fingering import field_counts, rates, string_hui_metrics
-from .ornament import ornament_metrics, technique_usage
+from .ornament import nonbasic_technique_rate, ornament_metrics, technique_usage
 from .pitch import paired_cents
 
 
@@ -109,6 +109,7 @@ def metrics(events: list[dict[str, Any]], violations: list[dict[str, Any]],
         "right_hand_fingering": rates(field_counts(events, "right_finger")),
         "tone_type": tone_type_metrics(events),
         "ornament": ornament_metrics(events),
+        "nonbasic_technique_rate": nonbasic_technique_rate(events, violations),
         # One paper-facing technique statistic: count named, playable actions
         # from final notation.  This includes 撮 exactly once, whether it also
         # has an ornament-like semantic role, and excludes state markers such

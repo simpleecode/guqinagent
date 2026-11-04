@@ -36,6 +36,25 @@ def write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
             handle.write(json.dumps(row, ensure_ascii=False, default=str) + "\n")
 
 
+def valid_prefix(predictions: dict[str, dict[str, Any]],
+                 references: list[dict[str, Any]]) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """Select a causal prefix, never resetting history past a failure or gap."""
+    ordered = sorted(references, key=lambda ref: min(
+        (int(n['index']) for n in ref['runtime_item']['input'].get('notes_without_jianzi') or []
+         if n.get('index') is not None), default=-1))
+    prefix = []
+    stopped = False
+    for ref in ordered:
+        prediction = predictions.get(ref['sample_id'])
+        if stopped and prediction is not None:
+            raise ValueError(f"Prediction after failed/missing predecessor: {ref['sample_id']}")
+        if prediction is None or prediction.get('protocol_valid') is False or not final_actions(prediction):
+            stopped = True
+        else:
+            prefix.append((prediction, ref))
+    return prefix
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     predictions = load_jsonl(args.pred, "sample_id")
     references = load_jsonl(args.reference, "sample_id")
@@ -60,7 +79,25 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     for pair in matched:
         score_key = str(pair[1].get("score_key") or "")
         matched_by_score.setdefault(score_key, []).append(pair)
-    for score_key, samples in matched_by_score.items():
+    prefix_lengths = {}
+    if getattr(args, 'strict_prefix', False):
+        references_by_score = {}
+        for ref in references.values():
+            references_by_score.setdefault(str(ref.get('score_key') or ''), []).append(ref)
+        for score_key, own_refs in references_by_score.items():
+            samples = valid_prefix(predictions, own_refs)
+            prefix_lengths[score_key] = len(samples)
+            if len(samples) != len(own_refs):
+                state_replay_incomplete_scores.append(score_key)
+                warning_replay_incomplete_scores.append(score_key)
+            if not samples:
+                continue
+            events, _ = structured_events_for_score(samples, args.pitch_tolerance)
+            all_events.extend(events)
+            all_violations.extend(replay_final_warnings(samples))
+            audited_phrase_keys.update((score_key, str(ref['runtime_item']['phrase_id']))
+                                       for _, ref in samples)
+    for score_key, samples in ([] if getattr(args, 'strict_prefix', False) else matched_by_score.items()):
         matched_ids = {str(reference["sample_id"]) for _, reference in samples}
         if matched_ids == reference_ids_by_score.get(score_key, set()):
             events, _ = structured_events_for_score(samples, args.pitch_tolerance)
@@ -110,6 +147,24 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                                   audited_phrases=len(audited_phrase_keys)),
                "final_warning": final_warning_stats(all_violations, len(audited_phrase_keys)),
                "final_tool_receipt_warning": tool_receipt_warning_stats(list(predictions.values()))}
+    if getattr(args, 'strict_prefix', False):
+        summary['final_warning']['definition'] = (
+            'final-plan runtime replay over valid contiguous score prefixes; '
+            'failed and skipped work units are outside the rule-rate denominator')
+        valid = sum(p.get('protocol_valid') is not False and bool(final_actions(p))
+                    for sid, p in predictions.items() if sid in references)
+        summary['completion'] = {
+            'expected': len(references), 'attempted': len(matched), 'protocol_valid': valid,
+            'attempted_failures': len(matched) - valid,
+            'valid_output_coverage': valid / len(references) if references else None,
+            'missing_sample_ids': sorted(references.keys() - predictions.keys()),
+            'missing_or_skipped': len(references.keys() - predictions.keys()),
+            'scored_valid_prefix_units': sum(prefix_lengths.values()),
+            'prefix_units_by_score': prefix_lengths,
+            'history': 'complete generated history from first work unit; stop at failure or gap',
+            'musical_metric_scope': 'conditional on valid contiguous prefixes; not full-test metrics' if valid != len(references)
+                                    else 'complete test set',
+        }
     (output / "config.json").write_text(json.dumps(config, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
     (output / "summary.json").write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     write_jsonl(output / "per_event.jsonl", all_events)
@@ -127,6 +182,8 @@ def main() -> int:
     parser.add_argument("--output-root", type=Path, default=Path("evaluation_results"))
     parser.add_argument("--model", default=None)
     parser.add_argument("--pitch-tolerance", type=float, default=50.0)
+    parser.add_argument('--strict-prefix', action='store_true',
+                        help='Score only contiguous valid score prefixes with full causal history; retain failure/coverage counts')
     result = run(parser.parse_args())
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

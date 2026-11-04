@@ -50,9 +50,72 @@ Fixed workflow & \shortstack[l]{\texttt{72f664d51ca2aecb62e792d20043f8bf}\\\text
 Direct SFT & \shortstack[l]{\texttt{edba4abf12f1d2834bd079ea30f7ed1e}\\\texttt{f50238b2a631db6948712b18d102f7e9}} & \shortstack[l]{\texttt{30c0e8fcd8fb7387d86f66677f8596c2}\\\texttt{4327a693eced4f5ac8131dfcb27d0913}} \\
 \bottomrule
 \end{tabularx}
-\caption{Exact artifact identities. Concatenate the two lines in each hash cell without whitespace. Direct training is complete, but its test metrics are not yet reported.}
+\caption{Exact artifact identities. Concatenate the two lines in each hash cell without whitespace.}
 \label{tab:training-fingerprints}
 \end{table*}
+
+\section{Evaluation Protocol and Baseline Details}
+\label{sec:evaluation-details}
+
+\begin{table}[t]
+\centering\small
+\begin{tabularx}{\linewidth}{@{}lX@{}}
+\toprule
+Component & Contents \\
+\midrule
+Input & Complete-score metadata, tuning, jianpu events, and stable event indices. \\
+Output & One event-indexed jianzipu plan for the complete score. \\
+Runtime & Pitch candidates, editing, context retrieval, validation, and diagnostic feedback. \\
+Reference & Expert notation for offline supervision and structured action comparison. \\
+\bottomrule
+\end{tabularx}
+\caption{Benchmark representation. Reference notation is withheld from inference.}
+\label{tab:benchmark}
+\end{table}
+
+\paragraph{Training scale and rollout limits.}
+The training split contains 153 scores and 3,976 work units. Two-stage supervision yields 7,952 stage-specific conversations, jointly training one adapter used by both stages; single-stage trajectory supervision, fixed-workflow supervision, and Direct SFT each yield 3,976 examples. Candidate examples are screened for reference parsing and consistency, and generated traces are checked against the runtime before private expert content is removed from the student-facing sequences. All four students start from Qwen3.5-9B and use 4-bit LoRA fine-tuning for three epochs, with rank 8, scaling $\alpha=16$, learning rate $2\times10^{-4}$, effective batch size 12, and an 8,192-token training cutoff. Equal epochs do not imply equal numbers of conversations or supervised tokens. Standard preprocessing truncation applies at the cutoff; counting a conversation does not certify that every original token is supervised.
+
+At inference, local Qwen conditions use a 16,384-token context and at most 8,192 output tokens per request. Tool-based single-stage conditions allow up to 16 rounds per attempt; two-stage conditions allow eight rounds per stage attempt, with at most three attempts and, when feedback is enabled, three Guqinizer passes. These are ceilings, not required numbers of interactions. Feedback OFF performs one Guqinizer pass. Direct generates once per work unit, without tools or repair. Thus these are deployed-pipeline comparisons, not equal-total-token experiments. Full configurations and artifact fingerprints appear in Appendix~\ref{sec:reproducibility}.
+
+\paragraph{Evaluation Metrics.}
+Nonbasic Rate is the percentage of target-pitch events whose generated notation contains at least one nonbasic technique label and has no rule violation detected at that event. The implemented runtime rules identify violations through final-plan warnings. All target-pitch events remain in the denominator. It uses the ornament lexicon, excluding the eight isolated basic plucks and retaining recognized compound techniques; each event contributes at most once. The unfiltered reference usage rates are 31.65\% for the traditional test and 40.38\% for the modern test, or 31.88\% on the traditional Direct prefixes. Bold marks the highest rule-compliant usage rate; it does not establish idiomatic quality.
+
+Pitch correctness is measured against the input jianpu melody. The expert jianzipu annotation supplies reference actions for fingering and technique metrics. Let $\mathcal I$ contain events for which the auditor returns a determinate matched or mismatched prediction. Let $a_i=1$ if event $i$ matches the target within 50 cents under the supported matching rules, and $a_i=0$ otherwise. Let $\mathcal A_i$ contain the tone pairs aligned by the auditor, with absolute error $\delta_{ij}$ in cents for pair $j$. We report
+\begin{equation}
+\begin{aligned}
+\mathrm{PitchAcc}_{50}
+&=\frac{\sum_{i\in\mathcal I}a_i}{|\mathcal I|},\\
+\mathrm{PitchMAE}
+&=\frac{\sum_{i\in\mathcal I}\sum_{j\in\mathcal A_i}\delta_{ij}}
+{\sum_{i\in\mathcal I}|\mathcal A_i|}.
+\end{aligned}
+\label{eq:pitch-metrics}
+\end{equation}
+Accuracy uses events as its denominator; MAE averages aligned tone pairs, and a compound event can contribute multiple pairs. Unresolved cases are excluded from pitch scoring and must be reported separately. We report each condition's evaluable event count and accuracy on their intersection, since generated notation affects which expressions the auditor resolves. The complete event inventory includes structural and continuation events and is not the pitch denominator.
+
+String--Hui F1 is a micro set F1 over exact $(\text{string},\text{hui})$ pairs within each event, using the stateful auditor's resolved positions. All resolved positions of a compound event are included, without imposing a primary/secondary ordering. Open strings receive an explicit OPEN contact label; numeric hui positions are normalized to six decimal places. Events with unresolved reference positions are excluded, whereas unresolved predictions at scorable reference events contribute missing pairs. The common reference coverage is 12,327/18,128 target events (68.000\%) for traditional scores and 1,280/1,528 (83.770\%) for modern melodies; the reference contains 12,821 and 1,480 scorable position pairs, respectively. This is conditional reference-position agreement, not a complete transcription score. Left-hand fingering, right-hand fingering, and tone type are reported in Appendix~\ref{sec:detailed-results}. Tone type distinguishes open, stopped, and harmonic notes. Ornament precision, recall, and F1 compare event-level sets of named embellishment and compound actions. They share the technique-distribution lexicon and alias normalization below, but exclude the eight basic plucks (mo, tiao, gou, ti, da, zhai, tuo, and bo). Known compounds remain atomic labels. Harmonic-region start/end markers are retained only as state controls, never as techniques or ornaments. A nonempty disjoint label set scores zero F1; two empty corpus sets are undefined. These metrics measure agreement with one expert realization, not correctness of execution.
+
+Technique distribution similarity summarizes the relative use of named performance techniques. Each technique is counted at most once per event, then counts are normalized over all technique incidences in the corpus. For predicted and reference distributions $p$ and $q$ over their joint technique vocabulary $\mathcal V$, we use
+\begin{equation}
+\mathrm{TechSim}(p,q)=1-\frac{1}{2}\sum_{t\in\mathcal V}|p(t)-q(t)|.
+\label{eq:technique-similarity}
+\end{equation}
+The score lies in $[0,1]$, with higher values indicating closer distributions. This metric excludes notation-state markers such as harmonic-region boundaries. It does not evaluate event order, and identical distributions can assign techniques to different events; ornament F1 retains a local comparison. Tone-type distribution similarity uses the same formula over open, stopped, and harmonic notes and is reported in the appendix.
+
+Rule Violation Rate measures the fraction of evaluated work units whose final plans contain at least one runtime-detected rule violation. We replay complete scores through the same rule checker, including for conditions that hide diagnostic feedback during inference; a final runtime warning is the operational indicator of a detected violation. Each work unit contributes at most one to the numerator, regardless of how many rules it violates. The denominators are 1,031 work units for the traditional test and 91 for the modern test in the complete-coverage comparisons. We separately report the total number of detected violations. Thus this metric measures final-plan rule compliance, not the frequency of warning messages emitted during inference. It covers only the implemented checks: unresolved expressions are not automatically violations, and absence of detected violations does not certify playability or musical quality.
+
+\paragraph{Models and Comparisons.}
+The feedback comparison uses Qwen3.5-9B with the same project-trained two-stage LoRA weights in both conditions. The full system exposes warnings, diagnostic hints, and warning-triggered follow-up interactions. The diagnostic-feedback-off condition hides this feedback and disables its follow-up mechanism while retaining structural validation and pitch candidates. Its public user and tool messages were checked for diagnostic-feedback leakage.
+
+\system{}, single-stage is our trajectory-trained variant without the Fingering--Guqinizer decomposition. It uses a separately trained Qwen3.5-9B LoRA and generates final jianzipu through the same public tools and diagnostic feedback as the full system. It is allowed up to 16 rounds per attempt, while the full pipeline allows eight rounds per stage attempt and up to three Guqinizer passes. Retries and additional passes make their aggregate budgets different; this is a comparison of the two deployed pipelines. Both use complete model-generated histories and the same scoring rules. Table~\ref{tab:main-results} marks both the single-stage and two-stage systems as Ours, and lists the two-stage feedback-off ablation above them.
+
+\paragraph{Direct final-artifact supervision.}
+We train a Qwen3.5-9B Direct SFT comparison using the same 3,976 training examples and final committed plans as our single-stage trajectory supervision. Each example retains the initial public musical context and one assistant JSON target, without intermediate reasoning, tool calls, or tool observations. Inference generates one final plan per work unit without tools or diagnostic revision, using the model's own successful preceding outputs as history. This comparison evaluates the end-to-end artifact-only workflow against trajectory-trained tool interaction; it changes both supervision and inference access to tools. Direct completes all 91 modern work units, but its traditional-score output coverage is incomplete; conditional prefix diagnostics are reported separately in Appendix~\ref{sec:direct-results}.
+
+We also evaluated the original Qwen3.5-9B checkpoint without the project LoRA using the two-stage agent and the same tool definitions. All 59 attempted inputs matched the test-input hashes. The original-model run allowed 8,192 output tokens per request, eight rounds per stage attempt, up to three attempts, and up to three Guqinizer passes, with a context limit of 16,384 tokens. After a work unit failed, the evaluator skipped the remainder of that score, preserving the requirement that history contain model-generated predecessors. These limits match the current SFT evaluation entry point.
+
+The commercial-model ReAct + Handbook baseline uses GLM-5.3 through its API with the production single-stage prompt and a fixed 73-entry technique handbook. It allows eight rounds and two attempts at temperature 0.25, uses the same tools and scoring pipeline, and produces protocol-valid outputs for all 1,031 units. A planned GLM-5.3 ReAct + Handbook baseline with prompts optimized by GEPA on development data remains pending \cite{agrawal2026gepa}. These comparisons involve different model backends and do not isolate prompt optimization from model capability. GEPA's reflection model, API settings, optimization budget, and inference costs will be reported. Direct generation with the original Qwen checkpoint remains an optional additional comparison.
 
 \section{Additional Action and Tone-Type Results}
 \label{sec:detailed-results}
@@ -86,22 +149,34 @@ Fixed-workflow SFT & 54.965 & 43.505 & 59.102 & 0.8320 \\
 Method & LH F1 & RH F1 & Tone F1 & Tone Sim. \\
 \midrule
 GLM + Handbook & 53.253 & 49.954 & 61.973 & \textbf{0.8543} \\
+Direct SFT & 57.008 & \textbf{59.361} & 68.560 & 0.8240 \\
 Fixed-workflow SFT & 52.970 & 46.019 & 65.576 & 0.7199 \\
 \midrule
 \system{}, single-stage & 58.171 & 55.347 & 69.681 & 0.7963 \\
 \system{} w/o feedback & \textbf{59.350} & 56.980 & \textbf{70.049} & 0.7643 \\
-\system{} (Ours) & 57.255 & \textbf{59.010} & 67.663 & 0.7774 \\
+\system{} (Ours) & 57.255 & 59.010 & 67.663 & 0.7774 \\
 \bottomrule
 \end{tabularx}
-\caption{Additional action metrics on ten modern melodies (91 work units), using source-score annotations as offline references. F1 is a percentage; tone similarity is on $[0,1]$. All five methods have 100\% protocol-valid coverage.}
+\caption{Additional action metrics on ten modern melodies (91 work units), using source-score annotations as offline references. F1 is a percentage; tone similarity is on $[0,1]$. All six methods have 100\% protocol-valid coverage.}
 \label{tab:modern-detailed-actions}
 \end{table}
+
+\section{Direct SFT Completion and Conditional Diagnostics}
+\label{sec:direct-results}
+
+On traditional scores, Direct attempts 1,005/1,031 work units: 1,003 produce valid final JSON, two fail JSON parsing, and 26 are skipped after those failures. Valid-output coverage is 97.284\%; attempted-unit protocol success is 1,003/1,005 (99.801\%), a different denominator. Both invalid responses end normally rather than reaching the output-token ceiling. We retain these failures and skips in completion reporting and do not regenerate them with reference or blank histories. Table~\ref{tab:main-results} reports the available music metrics with an explicit conditional-prefix marker; they must not be interpreted as full-test estimates.
+
+For diagnostic purposes only, we replay each valid contiguous prefix from the first work unit, preserving its generated history; we do not reset state at phrase boundaries. On these 1,003 valid units, conditional pitch accuracy is 85.277\% on 14,909 resolvable events, with 57.291 cents MAE on 15,571 aligned tone pairs. String--Hui F1 is 37.369, ornament F1 is 27.604, and technique similarity is 0.7536. Runtime replay detects 2,703 violations in 628/1,003 units (62.612\%). These are prefix-conditional metrics, not full-test estimates. On 14,000 input events resolved by both Direct and the trajectory-trained single-stage student, pitch accuracy is 85.643\% versus 98.821\%; the latter is restricted to the same event intersection.
+
+Modern Direct inference completes 91/91 work units. It attains 79.092\% pitch accuracy on 1,387 resolvable events and 90.576 cents MAE, with 378 violations across 78 units (85.714\%). On 1,315 events resolved by both Direct and trajectory-trained single-stage inference, pitch accuracy is 80.760\% versus 98.023\%. Direct ornament F1 (43.437) is close to the single-stage student's 43.445, despite substantially lower pitch consistency. This contrast supports distinguishing final-artifact agreement from pitch-grounded interactive realization, without attributing the entire gap to supervision alone.
+
+The saved vLLM responses report 1,222,415 input and 218,369 output tokens for the 1,005 traditional attempts, and 114,109 input and 21,990 output tokens for the 91 modern attempts. Neither set contains an output-token truncation. There is one generation per attempted unit and no tool calls; traditional usage includes both invalid JSON responses. These reported usage counts are distinct from the retokenized API-equivalent estimates below and do not include skipped units as zero-cost model calls.
 
 \section{API-Equivalent Inference Cost}
 \begin{table}[htbp]
 \centering\footnotesize
 \setlength{\tabcolsep}{3pt}
 \input{figures/inference_cost_table}
-\caption{Estimated API-equivalent USD per 100 work units, using the same visible-trajectory scope and no-cache-discount scenario in both datasets. These are retokenized estimates at public service rates, not historical invoices or self-hosting expenses. See Section~\ref{sec:inference-cost} for the accounting definition.}
+\caption{Estimated API-equivalent USD per 100 attempted work units, using the same visible-trajectory scope and no-cache-discount scenario in both datasets. Direct's traditional cost includes its two invalid responses and excludes skipped suffixes from the attempt denominator. These are retokenized estimates at public service rates, not historical invoices or self-hosting expenses. See Section~\ref{sec:inference-cost} for the accounting definition.}
 \label{tab:api-equivalent-cost}
 \end{table}

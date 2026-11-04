@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).resolve().parent
 METHODS = [
     ("handbook", "GLM + Handbook", "#747C8C", "react_handbook_full_test50", "react_handbook_modern"),
+    ("direct_sft", "Direct SFT", "#8062B2", "direct_sft_current48", "modern_direct_sft"),
     ("fixed_workflow", "Fixed workflow", "#CB8F38", "fixed_reference_ablation_current48", "modern_fixed_workflow"),
     ("single_stage", "GuqinAgent: single-stage", "#427DB4", "single_stage_current48", "modern_single_stage"),
     ("two_stage_off", "GuqinAgent: feedback OFF", "#B65D76", "warning_ablation_current48_off", "modern_two_stage_off"),
@@ -37,21 +38,23 @@ def main():
         "xtick.color": "#586673", "ytick.color": "#586673",
     })
     costs = read_json(OUT / "inference_cost.json")
-    # One linear area scale shared by both datasets and all five methods.
+    # One linear area scale shared by both datasets and all six methods.
     maximum_cost = max(r["estimated_usd_per_work_unit"] for r in costs["arms"].values())
     area_per_dollar = 180 / maximum_cost
     fig, axes = plt.subplots(2, 1, figsize=(3.4, 4.05), sharex=True)
     fig.subplots_adjust(left=.16, right=.975, bottom=.11, top=.94, hspace=.39)
     offsets = [
-        {"handbook": (66, 6), "fixed_workflow": (6, 33),
-         "single_stage": (57, 31), "two_stage_off": (44, 15), "two_stage": (68, 19)},
-        {"handbook": (66, 23), "fixed_workflow": (3, 51),
-         "single_stage": (57, 53), "two_stage_off": (37, 39), "two_stage": (68, 35)},
+        {"handbook": (66, 6), "fixed_workflow": (3, 25),
+         "direct_sft": (52, 30),
+         "single_stage": (56, 36), "two_stage_off": (43, 13), "two_stage": (72, 27)},
+        {"handbook": (60, 16), "fixed_workflow": (3, 34),
+         "direct_sft": (47, 41),
+         "single_stage": (58, 47), "two_stage_off": (33, 29), "two_stage": (69, 36)},
     ]
     audit = []
     for panel, ax in enumerate(axes):
-        ax.set(xlim=(0, 106), ylim=(0, [40, 58][panel]), xticks=[0, 20, 40, 60, 80, 100],
-               yticks=[0, 20, 40], ylabel="Ornament F1 (%)")
+        ax.set(xlim=(0, 106), ylim=(0, [40, 52][panel]), xticks=[0, 20, 40, 60, 80, 100],
+               yticks=[0, 20, 40], ylabel="Rule-compliant nonbasic rate (%)")
         ax.grid(color="#E7EBEF", linewidth=.7, zorder=0)
         ax.set_axisbelow(True)
         ax.set_title(["(a) Traditional: 48 scores", "(b) Modern: 10 melodies"][panel], loc="left", fontweight="bold", pad=5)
@@ -59,9 +62,14 @@ def main():
             source = ROOT / "evaluation_results" / [traditional, modern][panel] / "summary.json"
             summary = read_json(source)
             metrics = summary["metrics"]
-            assert summary["prediction_samples"] == [1031, 91][panel]
+            if key == 'direct_sft':
+                completion = summary['completion']
+                assert completion['expected'] == [1031, 91][panel]
+                assert completion['protocol_valid'] == [1003, 91][panel]
+            else:
+                assert summary["prediction_samples"] == [1031, 91][panel]
             x = 100 * metrics["pitch_accuracy_at_50_cents"]
-            y = 100 * metrics["ornament"]["f1"]
+            y = 100 * metrics["nonbasic_technique_rate"]["prediction_rate"]
             dataset = ["traditional", "modern"][panel]
             cost = costs["arms"][dataset + "/" + key]
             assert cost["experiment"] == [traditional, modern][panel]
@@ -69,9 +77,11 @@ def main():
             assert hashlib.sha256((ROOT / cost["prediction_path"]).read_bytes()).hexdigest() == cost["prediction_sha256"]
             dollars_per_unit = cost["estimated_usd_per_work_unit"]
             ax.scatter(x, y, s=dollars_per_unit * area_per_dollar,
-                       facecolor=color, edgecolor="white", linewidth=.6,
+                       facecolor=color, edgecolor=color if key == 'direct_sft' else "white",
+                       linewidth=.25 if key == 'direct_sft' else .6,
                        alpha=.80, zorder=4)
             caption = {"handbook": "GLM + Handbook", "fixed_workflow": "Fixed workflow",
+                       "direct_sft": "Direct SFT" + ("‡" if panel == 0 else ""),
                        "single_stage": "Single-stage", "two_stage_off": "Feedback OFF",
                        "two_stage": "Ours"}[key]
             ax.annotate(caption, xy=(x, y), xytext=offsets[panel][key],
@@ -79,12 +89,14 @@ def main():
                         fontweight="bold" if key == "two_stage" else "normal",
                         ha="left", va="center", zorder=5,
                         arrowprops={"arrowstyle": "-", "color": color, "lw": .75,
-                                    "shrinkA": 2, "shrinkB": 4},
+                                    "shrinkA": 2, "shrinkB": 1 if key == 'direct_sft' else 4},
                         bbox={"facecolor": "white", "alpha": .9, "edgecolor": "none", "pad": 1})
             audit.append({"panel": panel, "method": key, "source": str(source.relative_to(ROOT)),
-                          "pitch_accuracy_percent": x, "ornament_f1_percent": y,
+                          "pitch_accuracy_percent": x, "warning_free_nonbasic_rate_percent": y,
                           "pitch_evaluable_events": metrics["pitch_evaluable_events"],
                           "estimated_api_usd_per_work_unit": dollars_per_unit,
+                          "quality_scope": cost.get('quality_scope', 'complete test set'),
+                          "cost_normalization": cost.get('normalization', 'per attempted work unit'),
                           "cost_scope": costs["usage_kind"]})
     axes[1].set_xlabel("Conditional pitch accuracy (%)")
     # Legend values are reference sizes, never per-point numeric annotations.

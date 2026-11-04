@@ -8,6 +8,7 @@ scenario is applied. Failed/discarded runs outside retained traces are excluded.
 """
 import hashlib
 import json
+import argparse
 from pathlib import Path
 
 from jinja2.sandbox import ImmutableSandboxedEnvironment
@@ -136,7 +137,70 @@ def audit_error_coverage(report):
         "not assigned a measured zero cost. Preflight context rejections made no model-generation request.")
 
 
+def add_direct_costs(report, counter):
+    """Apply the identical visible-turn estimator to saved, tool-free requests.
+
+    Include invalid responses in workload; normalize by actual attempts, never
+    treating skipped phrases as zero-cost calls or as scorable musical output.
+    """
+    for dataset, scope, experiment in [
+        ('traditional', 'test48', 'direct_sft_current48'),
+        ('modern', 'modern', 'modern_direct_sft'),
+    ]:
+        path = ROOT / 'train/eval_outputs/direct_sft' / scope / 'predictions.jsonl'
+        original_sha = sha(path)
+        config = json.loads((path.parent / 'direct_config.json').read_text())
+        summary = json.loads((ROOT / 'evaluation_results' / experiment / 'summary.json').read_text())
+        predictions = [json.loads(line) for line in path.read_text().splitlines()]
+        assert len(predictions) == len({r['sample_id'] for r in predictions}) == summary['prediction_samples']
+        assert config['tools'] is False and config['thinking'] is False
+        inp = out = 0
+        for row in predictions:
+            direct = row['direct']
+            assert direct['model_generations'] == 1 and direct['tool_calls'] == 0
+            messages = direct['request_messages']
+            prompt = counter.render(messages, None)
+            response = {'role': 'assistant', 'content': direct['generation']['text']}
+            completed = counter.render(messages + [response], None, generation=False)
+            prefix = 0
+            for left, right in zip(prompt, completed):
+                if left != right:
+                    break
+                prefix += 1
+            inp += counter.count(prompt)
+            out += counter.count(completed[prefix:])
+        prices = PRICES['qwen']
+        cost = (inp * prices['input_per_million_usd'] + out * prices['output_per_million_usd']) / 1e6
+        completion = summary['completion']
+        report['arms'][dataset + '/direct_sft'] = {
+            'experiment': experiment, 'samples': len(predictions),
+            'expected_work_units': completion['expected'],
+            'protocol_valid_work_units': completion['protocol_valid'],
+            'retained_generation_rounds': len(predictions), 'generation_errors_without_usage': 0,
+            'input_tokens_estimated': inp, 'output_tokens_estimated': out,
+            'observed_cache_hit_tokens': None, 'scenario_cache_hit_tokens': 0,
+            'estimated_api_equivalent_usd': cost, 'estimated_usd_per_work_unit': cost / len(predictions),
+            'normalization': 'per attempted work unit, including invalid JSON; skipped suffixes are not model calls',
+            'quality_scope': completion['musical_metric_scope'],
+            'prediction_path': str(path.relative_to(ROOT)), 'prediction_sha256': original_sha,
+        }
+        assert sha(path) == original_sha
+        print(json.dumps({'arm': dataset + '/direct_sft', 'usd_est': cost, 'attempts': len(predictions)}), flush=True)
+
+
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--direct-only', action='store_true', help='Extend the existing audit without recomputing other methods')
+    args = parser.parse_args()
+    if args.direct_only:
+        report = json.loads((OUT / 'inference_cost.json').read_text())
+        counter = Counter('qwen')
+        assert report['prices'] == PRICES
+        assert report['tokenizer_assets']['qwen'] == counter.assets
+        add_direct_costs(report, counter)
+        audit_error_coverage(report)
+        (OUT / 'inference_cost.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+        return
     counters = {family: Counter(family) for family in PRICES}
     glm_system, glm_tools = tools_for_glm()
     report = {"schema_version": "final-trace-api-cost-1", "pricing_checked_date": "2026-11-02",
@@ -214,6 +278,7 @@ def main():
         assert sha(path) == original_sha
         report["arms"][dataset + "/" + method] = entry
         print(json.dumps({"arm": dataset + "/" + method, "usd_est": cost, "rounds": rounds}), flush=True)
+    add_direct_costs(report, counters['qwen'])
     audit_error_coverage(report)
     (OUT / "inference_cost.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
 

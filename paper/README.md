@@ -44,11 +44,15 @@ auditor-resolved string/contact pairs, including compound positions and OPEN
 for open strings. Report reference coverage; unresolved references are excluded
 and unresolved predictions on scorable events count as missing pairs.
 
-Dashes in the main table mark pending direct-generation and GEPA experiments.
+Dashes in the main table mark pending GEPA experiments.
 The original-checkpoint agent has 1.07% valid-output coverage and N/A full-test
 musical metrics. The single-stage student has complete coverage and measured
-scores. Expert assessment and remaining training/inference configuration details
-are still to be filled in. No pending row should be read as a measured zero.
+scores. Direct SFT has complete modern evaluation, but only 97.28% valid-output
+coverage on traditional scores; its main-table music scores are explicitly
+marked as conditional on 1,003 valid contiguous-prefix outputs, not full-test
+estimates. Their denominators and paired diagnostics are in the appendix.
+Training/inference configurations and artifact hashes are in the appendix.
+Expert assessment remains pending. No pending row should be read as a measured zero.
 
 The GEPA baseline uses a commercial GLM API as the agent backend. Record its
 exact model version and reflection model separately; it is a comparison across

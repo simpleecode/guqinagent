@@ -39,6 +39,9 @@ def main():
         raise ValueError('Existing results require explicit --resume')
     probe = socket.socket()
     try:
+        # The previous scope's server can leave TIME_WAIT sockets after a
+        # clean shutdown. Reuse those, while still rejecting active listeners.
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         probe.bind(('127.0.0.1', args.port))
     finally:
         probe.close()

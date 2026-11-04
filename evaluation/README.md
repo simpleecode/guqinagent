@@ -120,6 +120,15 @@ by Git. Prediction JSONL may be append-only: the last row for each
   warning-free. This makes warning-feedback ablations directly comparable
   when they use the same test set and runtime version.
 
+For Direct SFT's strict-history completion diagnostics, `run_eval --strict-prefix`
+instead replays only each score's contiguous, protocol-valid prefix, starting
+at its first work unit. It rejects predictions appearing after a missing or
+failed predecessor. It does not reset state for each phrase. Failed and skipped
+units remain explicit in `summary.completion`; musical scores and the rule-rate
+denominator include only valid prefix units. Partial-prefix metrics are
+conditional diagnostics, not full-test scores or zero-violation imputation.
+Existing complete-test comparisons use their original evaluation mode.
+
 `per_event.jsonl` retains structured prediction/reference fields, target MIDI,
 and audit evidence. `violations.jsonl` contains one record per final replay
 warning with its runtime code, source index, and rule evidence. The separate

@@ -9,6 +9,29 @@ def ornament_metrics(events):
     return rates(set_counts(events, "ornaments"), include_accuracy=False)
 
 
+def nonbasic_technique_rate(events, violations):
+    """Target-pitch events with a nonbasic label and no event-level warning."""
+    if any(v.get("event_id") is None for v in violations):
+        raise ValueError("Cannot assign a final-plan warning to an event")
+    warned = {(str(v["piece_id"]), str(v["phrase_id"]), str(v["event_id"]))
+              for v in violations}
+    eligible = [event for event in events if event.get("target_midi")]
+    return {
+        "target_events": len(eligible),
+        **{
+            side + "_rate": (
+                sum(bool(event[side].get("ornaments")) and
+                    (side == "reference" or
+                     (str(event["piece_id"]), str(event["phrase_id"]),
+                      str(event["event_id"])) not in warned)
+                    for event in eligible) / len(eligible)
+                if eligible else None
+            )
+            for side in ("prediction", "reference")
+        },
+    }
+
+
 def technique_usage(events, *, field="ornaments"):
     """Per-technique event incidence for prediction and reference.
 
