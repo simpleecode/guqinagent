@@ -11,7 +11,7 @@ We compare with the original Qwen checkpoint in the two-stage agent, GLM-5.3 ReA
 Tool-based Qwen runs permit up to three attempts, with 16 rounds per single-stage attempt or eight rounds per stage attempt in the two-stage system. Feedback ON allows up to three Guqinizer passes, while OFF uses one. GLM ReAct allows eight rounds per attempt and two attempts. These ceilings define the deployed pipelines and can yield different total interaction budgets.
 
 \paragraph{Metrics.}
-PitchAcc@50c measures pitch fidelity on auditor-resolvable events. We also compare methods on shared resolvable events. String--Hui and ornament F1 measure agreement with reference actions, while Tech. Sim. and Tone Sim. compare distributions. Nonbasic Rate counts target-pitch events using nonbasic techniques with no detected rule violation. Rule Violation Rate counts audited units with at least one final violation. Valid-output coverage uses all test units as its denominator. Musical metrics for incomplete runs apply to valid contiguous prefixes. Appendix~\ref{sec:evaluation-details} specifies the scoring rules.
+PitchAcc@50c measures pitch fidelity on auditor-resolvable events. We also compare methods on shared resolvable events. Position F1 compares exact string--hui pairs, and ornament F1 compares ornament labels, while Tech. Sim. and Tone Sim. compare distributions. Diversity-adjusted Nonbasic Rate discounts the rate of rule-compliant nonbasic technique use by within-score technique repetition (Appendix~\ref{sec:technique-breadth}). Rule Violation Rate counts audited units with at least one final violation. Valid-output coverage uses all test units as its denominator. Musical metrics for incomplete runs apply to valid contiguous prefixes. Appendix~\ref{sec:evaluation-details} specifies the scoring rules.
 
 \subsection{Main Results}
 
@@ -20,42 +20,42 @@ PitchAcc@50c measures pitch fidelity on auditor-resolvable events. We also compa
 \setlength{\tabcolsep}{3pt}
 \begin{tabularx}{\textwidth}{@{}Xrrrrrrr@{}}
 \toprule
-Method & Pitch Acc. $\uparrow$ & \shortstack{String--Hui\\F1 $\uparrow$} & Tech. Sim. $\uparrow$ & Orn. F1 $\uparrow$ & \shortstack{Nonbasic\\Rate $\uparrow$} & \shortstack{Tone\\Sim. $\uparrow$} & \shortstack{Rule Violation\\Rate $\downarrow$} \\
+Method & Pitch Acc. $\uparrow$ & \shortstack{Position\\F1 $\uparrow$} & Tech. Sim. $\uparrow$ & Orn. F1 $\uparrow$ & \shortstack{Adj. Nonbasic\\Rate $\uparrow$} & \shortstack{Tone\\Sim. $\uparrow$} & \shortstack{Rule Violation\\Rate $\downarrow$} \\
 \midrule
 \multicolumn{8}{@{}l}{\textbf{(a) Traditional scores: 48 scores, 1,031 work units}} \\
 \addlinespace[3pt]
 \multicolumn{8}{@{}l}{\textit{Agent baselines}} \\
 Original Qwen3.5-9B, two-stage agent$^{\dagger}$ & N/A & N/A & N/A & N/A & N/A & N/A & N/A \\
-GLM-5.3 ReAct & 99.760 & 30.927 & 0.6323 & 7.158 & 11.65 & \textbf{0.8439} & 5.044 \\
+GLM-5.3 ReAct & 99.760 & 30.927 & 0.6323 & 7.158 & 8.97 & \textbf{0.8439} & 5.044 \\
 GLM-5.3 + GEPA & -- & -- & -- & -- & -- & -- & -- \\
 \specialrule{0.25pt}{2pt}{2pt}
 \multicolumn{8}{@{}l}{\textit{Direct supervision baseline}} \\
-Direct SFT$^{\ddagger}$ & 85.277 & 37.369 & 0.7536 & 27.604 & 17.33 & 0.8647 & 62.612 \\
+Direct SFT$^{\ddagger}$ & 85.277 & 37.369 & 0.7536 & 27.604 & 14.79 & 0.8647 & 62.612 \\
 \specialrule{0.25pt}{2pt}{2pt}
 \multicolumn{8}{@{}l}{\textit{Ablations}} \\
-Fixed-workflow SFT, single-stage & 26.778 & 11.002 & \textbf{0.8401} & \textbf{27.928} & 12.52 & 0.8320 & 95.829 \\
-\system{} two-stage, w/o feedback & 86.237 & 31.678 & 0.7616 & 18.339 & 17.65 & 0.7810 & 78.468 \\
+Fixed-workflow SFT, single-stage & 26.778 & 11.002 & \textbf{0.8401} & \textbf{27.928} & 10.53 & 0.8320 & 95.829 \\
+\system{} two-stage, w/o feedback & 86.237 & 31.678 & 0.7616 & 18.339 & 14.99 & 0.7810 & 78.468 \\
 \specialrule{0.25pt}{2pt}{2pt}
 \multicolumn{8}{@{}l}{\textit{Our methods}} \\
-\system{} single-stage & 98.732 & \textbf{37.511} & 0.7618 & 20.929 & 21.72 & 0.8113 & 14.258 \\
-\system{} two-stage & \textbf{99.981} & 35.444 & 0.7301 & 17.013 & \textbf{21.83} & 0.7743 & \textbf{0.194} \\
+\system{} single-stage & 98.732 & \textbf{37.511} & 0.7618 & 20.929 & 18.21 & 0.8113 & 14.258 \\
+\system{} two-stage & \textbf{99.981} & 35.444 & 0.7301 & 17.013 & \textbf{18.56} & 0.7743 & \textbf{0.194} \\
 \midrule
 \multicolumn{8}{@{}l}{\textbf{(b) Modern melodies: 10 scores, 91 work units}} \\
 \addlinespace[3pt]
 \multicolumn{8}{@{}l}{\textit{Agent baselines}} \\
-GLM-5.3 ReAct & 97.699 & 36.627 & 0.7118 & 39.961 & 22.84 & \textbf{0.8543} & 5.495 \\
+GLM-5.3 ReAct & 97.699 & 36.627 & 0.7118 & 39.961 & 9.73 & \textbf{0.8543} & 5.495 \\
 GLM-5.3 + GEPA & -- & -- & -- & -- & -- & -- & -- \\
 \specialrule{0.25pt}{2pt}{2pt}
 \multicolumn{8}{@{}l}{\textit{Direct supervision baseline}} \\
-Direct SFT & 79.092 & 40.737 & 0.8364 & 43.437 & 25.33 & 0.8240 & 85.714 \\
+Direct SFT & 79.092 & 40.737 & 0.8364 & 43.437 & 19.12 & 0.8240 & 85.714 \\
 \specialrule{0.25pt}{2pt}{2pt}
 \multicolumn{8}{@{}l}{\textit{Ablations}} \\
-Fixed-workflow SFT, single-stage & 19.298 & 9.409 & 0.7171 & 39.084 & 17.87 & 0.7199 & 96.703 \\
-\system{} two-stage, w/o feedback & 73.485 & 38.099 & \textbf{0.8623} & 42.225 & 28.27 & 0.7643 & 85.714 \\
+Fixed-workflow SFT, single-stage & 19.298 & 9.409 & 0.7171 & 39.084 & 12.55 & 0.7199 & 96.703 \\
+\system{} two-stage, w/o feedback & 73.485 & 38.099 & \textbf{0.8623} & 42.225 & 20.92 & 0.7643 & 85.714 \\
 \specialrule{0.25pt}{2pt}{2pt}
 \multicolumn{8}{@{}l}{\textit{Our methods}} \\
-\system{} single-stage & 97.932 & 43.490 & 0.8358 & \textbf{43.445} & \textbf{38.29} & 0.7963 & 18.681 \\
-\system{} two-stage & \textbf{98.951} & \textbf{45.261} & 0.8154 & 41.729 & 32.66 & 0.7774 & \textbf{3.297} \\
+\system{} single-stage & 97.932 & 43.490 & 0.8358 & \textbf{43.445} & \textbf{24.87} & 0.7963 & 18.681 \\
+\system{} two-stage & \textbf{98.951} & \textbf{45.261} & 0.8154 & 41.729 & 22.51 & 0.7774 & \textbf{3.297} \\
 \bottomrule
 \end{tabularx}
 \caption{Main results on traditional scores (a) and modern melodies (b). Tech. Sim. and Tone Sim. range from 0 to 1. Other values are percentages.}
@@ -68,7 +68,7 @@ N/A: unavailable; --: pending. Bold marks the best full-coverage result for metr
 \end{minipage}
 \end{table*}
 
-On traditional scores, both \system variants complete all 1,031 work units. The two-stage system achieves 99.981\% conditional pitch accuracy and a 0.194\% rule violation rate, compared with 99.760\% and 5.044\% for GLM-5.3 ReAct with the handbook (Table~\ref{tab:main-results}). Both variants also achieve higher string--hui and ornament F1 than ReAct on these scores, while ReAct more closely matches the reference tone distribution. Rule violations matter because a pitch-correct plan can still disrupt how a phrase is played or sounds. For example, stopping an open string too soon can cut off its resonance, a slide with the wrong direction can change the intended contour, and a difficult same-finger shift can interrupt continuity. The violation rate therefore captures departures from encoded guqin playing practices that pitch accuracy and reference-action agreement alone can miss.
+On traditional scores, both \system variants complete all 1,031 work units. The two-stage system achieves 99.981\% conditional pitch accuracy and a 0.194\% rule violation rate, compared with 99.760\% and 5.044\% for GLM-5.3 ReAct with the handbook (Table~\ref{tab:main-results}). Both variants also achieve higher Position F1 and ornament F1 than ReAct on these scores, while ReAct more closely matches the reference tone distribution. Rule violations matter because a pitch-correct plan can still disrupt how a phrase is played or sounds. For example, stopping an open string too soon can cut off its resonance, a slide with the wrong direction can change the intended contour, and a difficult same-finger shift can interrupt continuity. The violation rate therefore captures departures from encoded guqin playing practices that pitch accuracy and reference-action agreement alone can miss.
 
 Direct SFT yields 85.277\% pitch accuracy on its valid traditional prefixes, with stronger ornament agreement than either \system variant. On modern melodies, where Direct has full protocol coverage, its pitch accuracy and rule consistency still trail both variants. The comparison spans both supervision and tool access. The original Qwen agent produces valid outputs for 11 of 1,031 traditional units. Appendix~\ref{sec:supplementary-experiments} reports its failure diagnostics, and Appendix~\ref{sec:direct-results} details Direct's coverage and shared-event comparisons.
 
@@ -114,13 +114,13 @@ Holding the two-stage adapter fixed, enabling diagnostics and their follow-up pa
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/quality_tradeoff.pdf}
-\caption{Pitch accuracy, rule-compliant nonbasic technique usage, and inference cost on traditional scores (top) and modern melodies (bottom). Compliance is measured by the implemented rules. Bubble areas share a linear API-equivalent cost scale (USD per 100 attempted units; no cache discount). $^{\ddagger}$Direct's traditional scores use 1,003 valid prefix units. Pitch accuracy is conditional on resolvability.}
+\caption{Pitch accuracy, diversity-adjusted nonbasic rate, and inference cost on traditional scores (top) and modern melodies (bottom). The vertical axis discounts nonbasic technique use by the probability of repeating a technique within the score (Appendix~\ref{sec:technique-breadth}). Bubble areas share a linear API-equivalent cost scale (USD per 100 attempted units; no cache discount). $^{\ddagger}$Direct's traditional scores use 1,003 valid prefix units. Pitch accuracy is conditional on resolvability.}
 \label{fig:quality-tradeoff}
 \end{figure}
 
 All six completed methods cover all 91 modern work units. The two-stage pipeline is more accurate on its resolvable events (98.951\% vs. 97.932\%) and on the 1,248 events both variants resolve (99.920\% vs. 98.157\%). Single-stage resolves 1,402 of the 1,528 target events, compared with 1,334 for two-stage. Consequently, the share of all targets that the auditor can verify as correct favors single-stage (89.856\% vs. 86.387\%). Reporting both measures distinguishes errors on resolved notes from differences in what the auditor can verify. The independence of these melodies from all development procedures remains to be verified.
 
-Figure~\ref{fig:quality-tradeoff} places these results alongside estimated inference cost. On the modern set, the full system costs an estimated \$0.824 per 100 attempted work units, compared with \$1.770 for single-stage and \$7.012 for GLM ReAct with the handbook. The two-stage feedback-off variant costs \$0.370, showing the added workload associated with feedback and follow-up revision alongside the gains in shared-event accuracy. Direct SFT has the lowest estimated cost (\$0.027) and lower pitch accuracy than either trajectory-trained variant. These estimates price retained visible requests and responses at public API rates without cache discounts. Appendix~\ref{sec:inference-cost} specifies the accounting scope, and Appendix~\ref{sec:supplementary-experiments} reports the remaining modern-melody diagnostics.
+Figure~\ref{fig:quality-tradeoff} compares pitch accuracy with diversity-adjusted nonbasic technique use and with estimated inference cost. On the modern set, the full system costs an estimated \$0.824 per 100 attempted work units, compared with \$1.770 for single-stage and \$7.012 for GLM ReAct with the handbook. The two-stage feedback-off variant costs \$0.370, showing the added workload associated with feedback and follow-up revision alongside the gains in shared-event accuracy. Direct SFT has the lowest estimated cost (\$0.027) and lower pitch accuracy than either trajectory-trained variant. These estimates price retained visible requests and responses at public API rates without cache discounts. Appendix~\ref{sec:inference-cost} specifies the accounting scope, and Appendix~\ref{sec:supplementary-experiments} reports the remaining modern-melody diagnostics.
 
 \subsection{Expert Evaluation}\label{sec:expert-evaluation}
 We plan a blinded playing study on matched excerpts. Guqin performers will play anonymized outputs and rate two dimensions on a four-point scale: \emph{performance feasibility} (practical string and fingering choices and continuity) and \emph{idiomatic and overall musical expression} (appropriateness of techniques, phrasing, and audible \emph{yunwei}). Appendix~\ref{sec:expert-protocol} describes the protocol.

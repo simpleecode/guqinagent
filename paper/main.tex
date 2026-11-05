@@ -29,12 +29,12 @@ The guqin is a traditional Chinese seven-string zither whose jianzipu notation r
 
 Realizing a jianpu melody on the guqin requires choosing among alternative string--hui positions and techniques for the same pitch. These choices affect hand configuration, transitions, and timbre; individually correct actions need not form a natural, connected phrase. We therefore frame jianpu-to-jianzipu generation as stateful, constrained performance-action planning rather than direct symbolic transcription. Pitch fidelity and consistency with implemented runtime rules provide checkable evidence, but neither certifies physical playability or idiomatic quality. Slides, vibrato, and compound gestures contribute to \emph{yunwei}, yet more ornaments alone do not imply more expressive playing.
 
-Figure~\ref{fig:one-pitch} shows five consecutive notes from \emph{Hao Han Ge}. The second note's realization combines a stopped position and an outward pluck with a subsequent left-hand gesture. This single entry specifies both how to sound the note and how to shape it after the attack.
+Figure~\ref{fig:one-pitch} aligns five input notes from \emph{Ban Hu Sha} with their generated actions. For the second note, the runtime flags the proposed 702-cent slide from hui 7 to hui 5. The agent revises it to an outward pluck at hui 5 on the same string. The destination stays the same while the transition changes.
 
 \begin{figure}[t]
 \centering
-\includegraphics[width=\columnwidth]{figures/guqin_hao_han_ge.png}
-\caption{Five consecutive notes from \emph{Hao Han Ge} (\texttt{SHuMJvcc}, work unit 7, events 181--185). The left panel pairs input pitch symbols with the generated jianzipu actions in expanded notation. The right panel decomposes the second action into its stopping finger, hui, pluck, string, and subsequent gesture. The illustration was generated from the recorded example.}
+\includegraphics[width=\columnwidth]{figures/guqin_ban_hu_sha.png}
+\caption{Five notes from \emph{Ban Hu Sha} (\texttt{S0suvdRF}, first work unit, local events 15--19). The two score rows align the input pitches and durations with the final jianzipu actions in expanded notation. The lower panel decomposes the revised action and traces the agent's proposed slide, the runtime warning, and the resulting revision. The plate is AI-generated.}
 \label{fig:one-pitch}
 \end{figure}
 

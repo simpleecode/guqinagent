@@ -122,3 +122,6 @@ ABC_J/recapture_duplicate_titles/
 /Mark1/
 /train/eval_outputs/
 /ABC_J/test_replacements/
+
+# Office lock files
+~$*

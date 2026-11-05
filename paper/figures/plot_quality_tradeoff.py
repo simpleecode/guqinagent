@@ -3,6 +3,8 @@
 Run from any directory: python /path/to/paper/figures/plot_quality_tradeoff.py
 PDF is vector artwork; PNG is a review preview. No model/API calls are made.
 """
+from collections import Counter, defaultdict
+import math
 import json
 import hashlib
 from pathlib import Path
@@ -28,6 +30,39 @@ def read_json(path):
     return json.loads(path.read_text())
 
 
+def diversity_adjusted_nonbasic_rate(directory):
+    """Nonbasic usage discounted by within-score label repetition."""
+    def event_key(event):
+        return (event["piece_id"], event["phrase_id"], str(event["event_id"]))
+
+    with (directory / "violations.jsonl").open() as stream:
+        warned = {event_key(json.loads(line)) for line in stream}
+    target_events = Counter()
+    qualifying = Counter()
+    techniques = defaultdict(Counter)
+    with (directory / "per_event.jsonl").open() as stream:
+        for line in stream:
+            event = json.loads(line)
+            if not event.get("target_midi"):
+                continue
+            score = event["piece_id"]
+            target_events[score] += 1
+            labels = set(event["prediction"].get("ornaments") or ())
+            if labels and event_key(event) not in warned:
+                qualifying[score] += 1
+                for label in sorted(labels):
+                    techniques[score][label] += 1 / len(labels)
+    weighted_sum = 0.0
+    for score, count in qualifying.items():
+        total = target_events[score]
+        rate = count / total
+        label_proportions = [mass / count for mass in techniques[score].values()]
+        distinct = max(0.0, 1.0 - math.fsum(p * p for p in label_proportions))
+        weighted_sum += total * rate * distinct
+    all_targets = target_events.total()
+    return weighted_sum / all_targets, qualifying.total() / all_targets
+
+
 def main():
     plt.rcParams.update({
         "font.family": "DejaVu Sans", "font.size": 7,
@@ -44,17 +79,18 @@ def main():
     fig, axes = plt.subplots(2, 1, figsize=(3.4, 4.05), sharex=True)
     fig.subplots_adjust(left=.16, right=.975, bottom=.11, top=.94, hspace=.39)
     offsets = [
-        {"handbook": (66, 6), "fixed_workflow": (3, 25),
-         "direct_sft": (52, 30),
-         "single_stage": (56, 36), "two_stage_off": (43, 13), "two_stage": (72, 27)},
-        {"handbook": (60, 16), "fixed_workflow": (3, 34),
-         "direct_sft": (47, 41),
-         "single_stage": (58, 47), "two_stage_off": (33, 29), "two_stage": (69, 36)},
+        {"handbook": (65, 6), "fixed_workflow": (4, 15),
+         "direct_sft": (45, 11), "single_stage": (53, 22),
+         "two_stage_off": (39, 17), "two_stage": (74, 26)},
+        {"handbook": (64, 7), "fixed_workflow": (4, 17),
+         "direct_sft": (43, 14), "single_stage": (54, 28),
+         "two_stage_off": (39, 23), "two_stage": (76, 18)},
     ]
     audit = []
     for panel, ax in enumerate(axes):
-        ax.set(xlim=(0, 106), ylim=(0, [40, 52][panel]), xticks=[0, 20, 40, 60, 80, 100],
-               yticks=[0, 20, 40], ylabel="Rule-compliant nonbasic rate (%)")
+        ax.set(xlim=(0, 106), ylim=(0, 30), xticks=[0, 20, 40, 60, 80, 100],
+               yticks=[0, 10, 20, 30],
+               ylabel="Diversity-adjusted nonbasic rate (%)")
         ax.grid(color="#E7EBEF", linewidth=.7, zorder=0)
         ax.set_axisbelow(True)
         ax.set_title(["(a) Traditional: 48 scores", "(b) Modern: 10 melodies"][panel], loc="left", fontweight="bold", pad=5)
@@ -69,7 +105,9 @@ def main():
             else:
                 assert summary["prediction_samples"] == [1031, 91][panel]
             x = 100 * metrics["pitch_accuracy_at_50_cents"]
-            y = 100 * metrics["nonbasic_technique_rate"]["prediction_rate"]
+            adjusted_rate, nonbasic_rate = diversity_adjusted_nonbasic_rate(source.parent)
+            y = 100 * adjusted_rate
+            assert math.isclose(nonbasic_rate, metrics["nonbasic_technique_rate"]["prediction_rate"])
             dataset = ["traditional", "modern"][panel]
             cost = costs["arms"][dataset + "/" + key]
             assert cost["experiment"] == [traditional, modern][panel]
@@ -92,7 +130,8 @@ def main():
                                     "shrinkA": 2, "shrinkB": 1 if key == 'direct_sft' else 4},
                         bbox={"facecolor": "white", "alpha": .9, "edgecolor": "none", "pad": 1})
             audit.append({"panel": panel, "method": key, "source": str(source.relative_to(ROOT)),
-                          "pitch_accuracy_percent": x, "warning_free_nonbasic_rate_percent": y,
+                          "pitch_accuracy_percent": x, "diversity_adjusted_nonbasic_rate_percent": y,
+                          "warning_free_nonbasic_rate_percent": 100 * nonbasic_rate,
                           "pitch_evaluable_events": metrics["pitch_evaluable_events"],
                           "estimated_api_usd_per_work_unit": dollars_per_unit,
                           "quality_scope": cost.get('quality_scope', 'complete test set'),
@@ -104,8 +143,8 @@ def main():
     handles = [Line2D([], [], marker="o", color="none", markerfacecolor="#8D9BA7",
                       markersize=(value * area_per_dollar)**.5, label=f"${100*value:.2f}")
                for value in legend_values]
-    axes[1].legend(handles=handles, loc="lower left", bbox_to_anchor=(.02, .02),
-                   title="API-equivalent USD / 100 units\n(no cache discount)",
+    axes[0].legend(handles=handles, loc="lower left", bbox_to_anchor=(.02, .02),
+                   title="API-equivalent USD / 100 units",
                    title_fontsize=5, ncol=3, frameon=True, framealpha=.95,
                    edgecolor="none", fontsize=5.5, handletextpad=.4, columnspacing=.8)
     OUT.mkdir(exist_ok=True)
