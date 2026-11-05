@@ -1,17 +1,17 @@
 \section{Experiments}\label{sec:experiments}
 \subsection{Experimental Setup}
 
-\paragraph{Data.}
-We train on 153 scores (3,976 work units) and evaluate on 48 traditional scores (1,031 units, 23,602 aligned event records) and 10 modern melodies (91 units). Splits are defined at score level. Inference carries model-generated history across work units, with reference jianzipu reserved for offline scoring. All students fine-tune Qwen3.5-9B with 4-bit LoRA for three epochs, using an effective batch size of 12, a learning rate of $2\times10^{-4}$, and an 8,192-token training cutoff. The two-stage model trains one shared adapter on 7,952 stage conversations, while each single-stage recipe uses 3,976 examples.
+\paragraph{Data and models.}
+We train on 153 scores (3,976 work units) and evaluate on 48 traditional scores (1,031 units) and 10 modern melodies (91 units). Splits are defined at score level. Each method carries its own generated history across work units, and reference jianzipu is reserved for offline scoring. All students use Qwen3.5-9B with 4-bit LoRA. The two-stage adapter learns jointly from 7,952 stage-specific conversations. Each single-stage recipe uses 3,976 examples. Appendix~\ref{sec:reproducibility} specifies training and inference budgets.
 
 \paragraph{Comparisons.}
-The two-stage variant without feedback reuses the full system's adapter and retains pitch queries and structural checks while suppressing diagnostic feedback and its follow-up passes. Our trajectory-trained single-stage variant uses the same public tools without stage decomposition. Fixed-workflow SFT learns scripted query-and-edit trajectories. Direct SFT learns the same final teacher plans as trajectory-trained single-stage SFT and generates once per unit without tools or repair. Both GLM baselines use the same fixed technique handbook. GLM-5.3 ReAct uses the production prompt, and GLM-5.3 + GEPA applies prompt optimization. The original Qwen checkpoint is an additional baseline. GEPA results are pending \cite{agrawal2026gepa}.
+We compare with the original Qwen checkpoint in the two-stage agent, GLM-5.3 ReAct and GEPA with the same technique handbook, and Direct SFT. GEPA results are pending \cite{agrawal2026gepa}. Direct SFT learns the same final teacher plans as our single-stage student and generates once per unit without tools or repair. We also compare fixed-workflow supervision and disable diagnostic feedback in the two-stage system.
 
-\paragraph{Inference budgets.}
-Local Qwen runs use a 16,384-token context and an 8,192-token output cap per request. Tool-based runs allow three attempts, with 16 rounds per single-stage attempt or eight per two-stage attempt within each stage. Feedback ON permits three Guqinizer passes, while OFF permits one. GLM allows eight rounds per attempt and two attempts. These limits compare deployed pipelines with different interaction budgets. Appendix~\ref{sec:reproducibility} records sampling and checkpoint details.
+\paragraph{Inference protocol.}
+Tool-based Qwen runs permit up to three attempts, with 16 rounds per single-stage attempt or eight rounds per stage attempt in the two-stage system. Feedback ON allows up to three Guqinizer passes, while OFF uses one. GLM ReAct allows eight rounds per attempt and two attempts. These ceilings define the deployed pipelines and can yield different total interaction budgets.
 
 \paragraph{Metrics.}
-Valid coverage divides protocol-valid outputs by all test units. PitchAcc@50c measures agreement with the input melody on auditor-resolvable events, and pitch MAE averages aligned tone pairs. We report evaluable counts and comparisons on shared events. String--Hui and ornament F1 measure event-level agreement with reference actions. Nonbasic Rate is the percentage of target-pitch events with a nonbasic technique and no detected rule violation at that event; a higher rate does not necessarily imply better playing. Tech. Sim. compares technique distributions, and Tone Sim. compares open, stopped, and harmonic tone distributions. Rule violation rate is the share of audited units with at least one final violation. When Direct fails on a unit, music scoring uses the preceding valid units of that score. Coverage includes the failed unit and the skipped remainder in its denominator. Appendix~\ref{sec:evaluation-details} gives scoring details.
+PitchAcc@50c measures pitch fidelity on auditor-resolvable events. We also compare methods on shared resolvable events. String--Hui and ornament F1 measure agreement with reference actions, while Tech. Sim. and Tone Sim. compare distributions. Nonbasic Rate counts target-pitch events using nonbasic techniques with no detected rule violation. Rule Violation Rate counts audited units with at least one final violation. Valid-output coverage uses all test units as its denominator. Musical metrics for incomplete runs apply to valid contiguous prefixes. Appendix~\ref{sec:evaluation-details} specifies the scoring rules.
 
 \subsection{Main Results}
 
@@ -24,26 +24,38 @@ Method & Pitch Acc. $\uparrow$ & \shortstack{String--Hui\\F1 $\uparrow$} & Tech.
 \midrule
 \multicolumn{8}{@{}l}{\textbf{(a) Traditional scores: 48 scores, 1,031 work units}} \\
 \addlinespace[3pt]
+\multicolumn{8}{@{}l}{\textit{Agent baselines}} \\
 Original Qwen3.5-9B, two-stage agent$^{\dagger}$ & N/A & N/A & N/A & N/A & N/A & N/A & N/A \\
 GLM-5.3 ReAct & 99.760 & 30.927 & 0.6323 & 7.158 & 11.65 & \textbf{0.8439} & 5.044 \\
 GLM-5.3 + GEPA & -- & -- & -- & -- & -- & -- & -- \\
+\specialrule{0.25pt}{2pt}{2pt}
+\multicolumn{8}{@{}l}{\textit{Direct supervision baseline}} \\
 Direct SFT$^{\ddagger}$ & 85.277 & 37.369 & 0.7536 & 27.604 & 17.33 & 0.8647 & 62.612 \\
+\specialrule{0.25pt}{2pt}{2pt}
+\multicolumn{8}{@{}l}{\textit{Ablations}} \\
 Fixed-workflow SFT, single-stage & 26.778 & 11.002 & \textbf{0.8401} & \textbf{27.928} & 12.52 & 0.8320 & 95.829 \\
 \system{} two-stage, w/o feedback & 86.237 & 31.678 & 0.7616 & 18.339 & 17.65 & 0.7810 & 78.468 \\
-\midrule
-\system{} single-stage (Ours) & 98.732 & \textbf{37.511} & 0.7618 & 20.929 & 21.72 & 0.8113 & 14.258 \\
-\system{} two-stage (Ours) & \textbf{99.981} & 35.444 & 0.7301 & 17.013 & \textbf{21.83} & 0.7743 & \textbf{0.194} \\
+\specialrule{0.25pt}{2pt}{2pt}
+\multicolumn{8}{@{}l}{\textit{Our methods}} \\
+\system{} single-stage & 98.732 & \textbf{37.511} & 0.7618 & 20.929 & 21.72 & 0.8113 & 14.258 \\
+\system{} two-stage & \textbf{99.981} & 35.444 & 0.7301 & 17.013 & \textbf{21.83} & 0.7743 & \textbf{0.194} \\
 \midrule
 \multicolumn{8}{@{}l}{\textbf{(b) Modern melodies: 10 scores, 91 work units}} \\
 \addlinespace[3pt]
+\multicolumn{8}{@{}l}{\textit{Agent baselines}} \\
 GLM-5.3 ReAct & 97.699 & 36.627 & 0.7118 & 39.961 & 22.84 & \textbf{0.8543} & 5.495 \\
 GLM-5.3 + GEPA & -- & -- & -- & -- & -- & -- & -- \\
+\specialrule{0.25pt}{2pt}{2pt}
+\multicolumn{8}{@{}l}{\textit{Direct supervision baseline}} \\
 Direct SFT & 79.092 & 40.737 & 0.8364 & 43.437 & 25.33 & 0.8240 & 85.714 \\
+\specialrule{0.25pt}{2pt}{2pt}
+\multicolumn{8}{@{}l}{\textit{Ablations}} \\
 Fixed-workflow SFT, single-stage & 19.298 & 9.409 & 0.7171 & 39.084 & 17.87 & 0.7199 & 96.703 \\
 \system{} two-stage, w/o feedback & 73.485 & 38.099 & \textbf{0.8623} & 42.225 & 28.27 & 0.7643 & 85.714 \\
-\midrule
-\system{} single-stage (Ours) & 97.932 & 43.490 & 0.8358 & \textbf{43.445} & \textbf{38.29} & 0.7963 & 18.681 \\
-\system{} two-stage (Ours) & \textbf{98.951} & \textbf{45.261} & 0.8154 & 41.729 & 32.66 & 0.7774 & \textbf{3.297} \\
+\specialrule{0.25pt}{2pt}{2pt}
+\multicolumn{8}{@{}l}{\textit{Our methods}} \\
+\system{} single-stage & 97.932 & 43.490 & 0.8358 & \textbf{43.445} & \textbf{38.29} & 0.7963 & 18.681 \\
+\system{} two-stage & \textbf{98.951} & \textbf{45.261} & 0.8154 & 41.729 & 32.66 & 0.7774 & \textbf{3.297} \\
 \bottomrule
 \end{tabularx}
 \caption{Main results on traditional scores (a) and modern melodies (b). Tech. Sim. and Tone Sim. range from 0 to 1. Other values are percentages.}
@@ -56,98 +68,49 @@ N/A: unavailable; --: pending. Bold marks the best full-coverage result for metr
 \end{minipage}
 \end{table*}
 
-\paragraph{Original-model completion and protocol failures.}
-The original-model agent attempted 59 of 1,031 work units across the 48 scores. Eleven attempts produced protocol-valid outputs (18.64\% of attempted units), while 48 failed. The remaining 972 units were skipped because a predecessor failed. Valid-output coverage was therefore 11/1,031 (1.07\%); skipped units are excluded from the attempted-unit protocol-failure denominator. All four tool-based adapted conditions produced valid outputs for all 1,031 units. We do not report full-test musical metrics for the original model or compare its 11 successful units directly with the adapted model's complete-test scores.
+On traditional scores, both \system variants complete all 1,031 work units. The two-stage system achieves 99.981\% conditional pitch accuracy and a 0.194\% rule violation rate, compared with 99.760\% and 5.044\% for GLM-5.3 ReAct with the handbook (Table~\ref{tab:main-results}). Both variants also achieve higher string--hui and ornament F1 than ReAct on these scores, while ReAct more closely matches the reference tone distribution. Rule violations matter because a pitch-correct plan can still disrupt how a phrase is played or sounds. For example, stopping an open string too soon can cut off its resonance, a slide with the wrong direction can change the intended contour, and a difficult same-finger shift can interrupt continuity. The violation rate therefore captures departures from encoded guqin playing practices that pitch accuracy and reference-action agreement alone can miss.
 
-Of the 48 failed units, 13 failed during Fingering and 35 during Guqinizer. Logs record output truncation in 45 failed units, at least one attempt reaching round eight in 26, and three consecutive pitch-candidate-query rounds in 31. These observations overlap and are not a mutually exclusive attribution of failures. They suggest that sustained tool interaction and termination behavior are substantial obstacles for the original model under the current protocol, alongside the musical decisions required by the task.
+Direct SFT yields 85.277\% pitch accuracy on its valid traditional prefixes, with stronger ornament agreement than either \system variant. On modern melodies, where Direct has full protocol coverage, its pitch accuracy and rule consistency still trail both variants. The comparison spans both supervision and tool access. The original Qwen agent produces valid outputs for 11 of 1,031 traditional units. Appendix~\ref{sec:supplementary-experiments} reports its failure diagnostics, and Appendix~\ref{sec:direct-results} details Direct's coverage and shared-event comparisons.
 
-\paragraph{Technique distributions and the commercial-model baseline.}
-Technique distribution similarity is 0.7618 for single-stage SFT, 0.7616 for two-stage feedback OFF, and 0.7301 for the two-stage full system. Thus, fewer runtime warnings do not imply closer aggregate technique usage. GLM-5.3 with ReAct + Handbook attains 99.760\% pitch accuracy and 2.542 cents MAE, with 102 final warnings across 52 units (5.044\%). Its technique similarity is 0.6323 and ornament F1 is 7.158, below both trained students. Its tone-type distribution similarity is higher, however (Appendix~\ref{sec:detailed-results}). These measures capture different aspects of realization; the cross-model comparison alone does not establish that trajectory training is necessary for idiomatic playing.
+The baselines also expose a distinction between reproducing reference gestures and realizing the melody. On modern melodies, Direct SFT nearly matches the single-stage student's ornament F1 (43.437 vs. 43.445), yet on the 1,315 events resolved for both, its pitch accuracy is 80.760\% versus 98.023\%. This gap persists on a common event set even though the methods differ in which outputs the auditor can resolve.
 
 \subsection{Ablation Studies}\label{sec:ablations}
 
-\paragraph{Pitch correctness and diagnostic feedback.}
-The full system attains 99.981\% pitch accuracy on 15,758 evaluable events, compared with 86.237\% on 15,360 events when diagnostic feedback is disabled (Table~\ref{tab:main-results}). MAE is 2.308 versus 64.993 cents. Since the evaluable sets differ, Table~\ref{tab:warning-ablation} additionally reports accuracy on 14,289 events resolved in both conditions: 99.979\% versus 86.941\%, a gap of 13.038 percentage points. The observed accuracy gap therefore persists on the same input events. The result concerns auditor-supported realizations and does not establish accuracy on unresolved notation.
-
 \begin{table}[t]
 \centering\small
-\setlength{\tabcolsep}{4pt}
-\begin{tabularx}{\linewidth}{@{}Xrr@{}}
+\setlength{\tabcolsep}{3pt}
+\begin{tabularx}{\linewidth}{@{}Xrrr@{}}
 \toprule
-Diagnostic & ON & OFF \\
+Condition & \shortstack{Shared\\events} & \shortstack{Pitch Acc.\\(\%) $\uparrow$} & \shortstack{Violation\\rate (\%) $\downarrow$} \\
 \midrule
-Evaluable pitch events & 15,758 & 15,360 \\
-Aligned tone pairs for MAE & 16,335 & 15,958 \\
-Common evaluable events & 14,289 & 14,289 \\
-Pitch Acc. on common events (\%) & 99.979 & 86.941 \\
-Final runtime warnings & 2 & 3,436 \\
-Work units with warnings & 2 & 809 \\
-Rule violation rate (\%) & 0.194 & 78.468 \\
+\multicolumn{4}{@{}l}{\textit{Trajectory construction}} \\
+Fixed workflow & 12,792 & 26.931 & 95.829 \\
+Expert-guided & 12,792 & 98.781 & 14.258 \\
+\addlinespace[2pt]
+\multicolumn{4}{@{}l}{\textit{Planning pipeline}} \\
+Single-stage & 14,580 & 98.807 & 14.258 \\
+Two-stage & 14,580 & 99.979 & 0.194 \\
+\addlinespace[2pt]
+\multicolumn{4}{@{}l}{\textit{Diagnostic feedback in two-stage planning}} \\
+Feedback OFF & 14,289 & 86.941 & 78.468 \\
+Feedback ON & 14,289 & 99.979 & 0.194 \\
 \bottomrule
 \end{tabularx}
-\caption{Diagnostic-feedback comparison. Counts refer to final plans, rescored under the same runtime with complete histories. Each condition covers 1,031 work units. OFF warnings are measured during evaluation despite being hidden during inference.}
-\label{tab:warning-ablation}
+\caption{Traditional-score comparisons. Pitch accuracy uses the jointly resolvable events within each pair. Violation rates use all 1,031 work units per condition.}
+\label{tab:ablation-summary}
 \end{table}
 
-\paragraph{Residual warnings and error analysis.}
-The full system leaves two final runtime warnings in two work units, compared with 3,436 warnings across 809 work units for OFF. The rule violation rate is 0.194\% versus 78.468\%. One remaining ON warning in \emph{Youlan} is an octave error, realizing E6 for a target E7. These cases warrant inspection of inherited state, compound notation, and ordinary pitch choices. Final-warning counts and pitch-error counts use different eligibility and matching rules and should not be treated as interchangeable metrics.
+\paragraph{What does expert guidance add to a fixed workflow?}
+Both single-stage students can query pitch candidates and edit the plan at inference. Their training differs in what those interactions demonstrate. Fixed-workflow trajectories contain one scripted query followed by an edit derived from the original annotation. Expert-guided trajectories demonstrate how to select, check, and revise an executable plan. On 12,792 shared traditional events, pitch accuracy rises from 26.931\% to 98.781\%, even though the fixed-workflow model has higher ornament F1. The gap persists on the modern set (19.929\% vs. 98.749\% on 1,119 shared events). These comparisons support the expert-guided recipe as a whole. Its trajectories, final targets, and some prompts differ from the scripted recipe.
 
-\paragraph{Fingering agreement and idiomatic realization.}
-The full system's string--hui, left-hand, right-hand, and tone-type F1 scores are 35.444, 57.119, 46.009, and 62.543, respectively. Their modest differences from OFF accompany a much larger pitch-accuracy gap. The full system also has lower ornament F1: 17.013 versus 18.339. The current comparison provides evidence of improved pitch consistency without establishing an advantage in ornament selection.
+\paragraph{What does two-stage planning trade off?}
+The two-stage system improves pitch accuracy on shared traditional events and leaves violations in only 2 of 1,031 units, compared with 147 for single-stage (Table~\ref{tab:ablation-summary}). The single-stage student more closely reproduces reference actions, including string--hui positions and ornaments. One illustration of why pitch accuracy leaves room for different performance choices is tone type. Among recognized tone types on reference-labeled events, harmonics make up 7.51\% of the full system's predictions versus 29.34\% in the reference. That difference matters when interpreting near-perfect pitch accuracy. The two variants use separately trained adapters and different interaction budgets, so the comparison evaluates the complete pipelines.
 
-Tone distributions indicate that pitch accuracy leaves room for different realization strategies. Among recognized tone types on reference-labeled events, harmonics account for 7.51\% of ON predictions, compared with 29.34\% of reference tone types. A system can realize the correct pitch through different strings, positions, or tone types, and can also underuse stylistically appropriate techniques. Both possibilities motivate examining action distributions and consulting performers when assessing idiomatic quality.
+\paragraph{What does diagnostic feedback contribute?}
+Holding the two-stage adapter fixed, enabling diagnostics and their follow-up passes improves accuracy by 13.038 percentage points on 14,289 shared traditional events. The modern set shows the same pattern (98.899\% vs. 73.879\% on 1,271 shared events). Both settings retain pitch queries and structural checks, and the same final rules score their outputs. On the traditional set, final warnings fall from 3,436 to 2. One residual case in \emph{Youlan} realizes E6 for a target E7, illustrating that a bounded revision loop can still leave a pitch error. This comparison estimates the contribution of the feedback mechanism, including the extra revision opportunities it enables. Appendix~\ref{sec:supplementary-experiments} reports full counts and reference-agreement diagnostics.
 
-\paragraph{Our single-stage and two-stage variants.}
-The single-stage student completes all 1,031 work units, with 98.732\% pitch accuracy on 15,935 evaluable events and 7.880 cents MAE. The two-stage full system reaches 99.981\% on 15,758 events and 2.308 cents MAE. On their 14,580 common evaluable events, accuracy is 98.807\% for single-stage and 99.979\% for two-stage, a gap of approximately 1.173 percentage points. Table~\ref{tab:stage-comparison} reports denominators and final warnings for this comparison.
+\subsection{Generalization and Efficiency}
 
-\begin{table}[t]
-\centering\small
-\setlength{\tabcolsep}{4pt}
-\begin{tabularx}{\linewidth}{@{}Xrr@{}}
-\toprule
-Diagnostic & Single-stage & Two-stage \\
-\midrule
-Evaluable pitch events & 15,935 & 15,758 \\
-Common evaluable events & 14,580 & 14,580 \\
-Common-event Pitch Acc. (\%) & 98.807 & 99.979 \\
-Final runtime warnings & 381 & 2 \\
-Work units with warnings & 147 & 2 \\
-Rule violation rate (\%) & 14.258 & 0.194 \\
-\bottomrule
-\end{tabularx}
-\caption{Single-stage and two-stage full-system comparison on the same 48 scores, scored after replaying complete histories. Both achieve 100\% valid-output coverage. Different retry and pass structures preclude interpreting this as a strictly equal-total-budget architecture ablation.}
-\label{tab:stage-comparison}
-\end{table}
-
-The single-stage student has higher reference agreement in every reported action category: string--hui F1 is 37.511 versus 35.444, left-hand F1 is 57.917 versus 57.119, right-hand F1 is 47.697 versus 46.009, tone-type F1 is 65.629 versus 62.543, and ornament F1 is 20.929 versus 17.013 (Table~\ref{tab:main-results}). The two-stage pipeline has fewer final warnings, 2 versus 381, with rule violation rates of 0.194\% versus 14.258\%. These results show a trade-off: the current two-stage pipeline achieves greater pitch and runtime-rule consistency, while single-stage generation more closely reproduces the reference actions and ornaments. Performer assessment is needed to determine how these differences affect execution and musical expression.
-
-\paragraph{Teacher trajectory construction.}
-We compare our single-stage variant with a student trained on fixed-workflow trajectories. Each fixed trajectory contains generic reasoning, one real pitch-candidate query, and one edit constructed from the original expert annotation, without a teacher API rollout. Our teacher trajectories instead supervise the teacher's final committed plans after interaction. Both students are evaluated with diagnostic feedback and a 16-round stage limit on the same 48 scores using complete generated histories. The recipes differ in interaction traces, final targets, and some system/user prompts; this comparison evaluates the complete construction recipes rather than isolating reasoning supervision.
-
-The fixed-workflow student achieves 100\% protocol-valid coverage, but pitch accuracy is 26.778\% on 13,556 evaluable events and MAE is 517.624 cents. The standard single-stage student attains 98.732\% on 15,935 events and 7.880 cents MAE. On their 12,792 common evaluable events, accuracy is 26.931\% versus 98.781\% (Table~\ref{tab:trajectory-ablation}). Thus, the large pitch gap persists on a shared event set rather than arising solely from different parseability.
-
-\begin{table}[t]
-\centering\small
-\setlength{\tabcolsep}{4pt}
-\begin{tabularx}{\linewidth}{@{}Xrr@{}}
-\toprule
-Diagnostic & Fixed & Teacher \\
-\midrule
-Evaluable pitch events & 13,556 & 15,935 \\
-Common evaluable events & 12,792 & 12,792 \\
-Common-event Pitch Acc. (\%) & 26.931 & 98.781 \\
-Final runtime warnings & 11,596 & 381 \\
-Work units with warnings & 988 & 147 \\
-Rule violation rate (\%) & 95.829 & 14.258 \\
-\bottomrule
-\end{tabularx}
-\caption{Single-stage trajectory-construction comparison. Fixed uses a scripted query-and-edit sequence; Teacher uses expert-guided interactive trajectories. Both produce valid outputs for all 1,031 units. Some training prompts also differ between the recipes.}
-\label{tab:trajectory-ablation}
-\end{table}
-
-The fixed-workflow model leaves 11,596 warnings across 988 units, including 9,926 pitch-mismatch warnings. Its string--hui F1 is 11.002 versus 37.511 for the standard single-stage student. However, its ornament F1 is higher (27.928 versus 20.929), as is technique distribution similarity (0.8401 versus 0.7618). Matching reference technique usage therefore does not ensure that those actions realize the input pitches. The results favor expert-guided trajectories for pitch consistency under the evaluated recipes, while leaving the separate roles of reasoning content, iterative feedback, prompt differences, and training length unresolved.
-
-\subsection{Modern Melodies}
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/quality_tradeoff.pdf}
@@ -155,25 +118,27 @@ The fixed-workflow model leaves 11,596 warnings across 988 units, including 9,92
 \label{fig:quality-tradeoff}
 \end{figure}
 
-We evaluate the two-stage system, single-stage student, Direct SFT, fixed-workflow student, diagnostic-feedback-off variant, and GLM-5.3 ReAct + Handbook on the same ten modern melodies (91 work units) using complete generated score histories (Table~\ref{tab:main-results}, lower panel). All six methods produce protocol-valid outputs for every unit. Pitch is audited against the input melody; source-score jianzipu annotations provide reference actions for agreement metrics. The sealed references match all 91 public input IDs, hashes, and runtime inputs, and are used only for offline evaluation. These annotations represent one realization, not an assessment by the performers in our planned study. The independence of these melodies from all training and model-selection procedures remains to be verified, so this analysis is not yet a strictly held-out generalization benchmark.
+All six completed methods cover all 91 modern work units. The two-stage pipeline is more accurate on its resolvable events (98.951\% vs. 97.932\%) and on the 1,248 events both variants resolve (99.920\% vs. 98.157\%). Single-stage resolves 1,402 of the 1,528 target events, compared with 1,334 for two-stage. Consequently, the share of all targets that the auditor can verify as correct favors single-stage (89.856\% vs. 86.387\%). Reporting both measures distinguishes errors on resolved notes from differences in what the auditor can verify. The independence of these melodies from all development procedures remains to be verified.
 
-Figure~\ref{fig:quality-tradeoff} compares conditional pitch accuracy, rule-compliant nonbasic technique usage, and estimated inference cost across methods. A higher usage rate does not by itself establish idiomatic playing. Direct uses substantially fewer tokens but has lower conditional pitch accuracy. Its traditional point is prefix-conditional, not a full-test estimate. Bubble areas use the same retokenized visible-trajectory estimator for every method. Direct's two invalid traditional responses contribute to workload; cost is normalized by 1,005 actual attempts rather than assigning zero-cost calls to 26 skipped units. Its separately recorded server usage remains in Appendix~\ref{sec:direct-results}.
+Figure~\ref{fig:quality-tradeoff} places these results alongside estimated inference cost. On the modern set, the full system costs an estimated \$0.824 per 100 attempted work units, compared with \$1.770 for single-stage and \$7.012 for GLM ReAct with the handbook. The two-stage feedback-off variant costs \$0.370, showing the added workload associated with feedback and follow-up revision alongside the gains in shared-event accuracy. Direct SFT has the lowest estimated cost (\$0.027) and lower pitch accuracy than either trajectory-trained variant. These estimates price retained visible requests and responses at public API rates without cache discounts. Appendix~\ref{sec:inference-cost} specifies the accounting scope, and Appendix~\ref{sec:supplementary-experiments} reports the remaining modern-melody diagnostics.
 
-\paragraph{Inference cost.}\label{sec:inference-cost}
-We distinguish recorded token usage from a reproducible API-equivalent cost estimate. For input tokens $I$, cache-hit input tokens $H$ (a subset of $I$), and output tokens $O$, the token charge is
-\begin{equation}
- C=\bigl[r_{\mathrm{in}}(I-H)+r_{\mathrm{cache}}H+r_{\mathrm{out}}O\bigr]/10^6,
-\end{equation}
-where rates are USD per million tokens; cache creation and storage are additional when applicable. We use Together AI's public service prices checked on November 2, 2026: Qwen3.5-9B input/output rates are \$0.17/\$0.25, and GLM-5.3 input/cached-input/output rates are \$1.40/\$0.26/\$4.40.\footnote{\url{https://www.together.ai/pricing}; GLM rates also match \url{https://docs.z.ai/guides/overview/pricing}. These are provider list prices, not a manufacturer price for self-hosted adapters.}
-Figure~\ref{fig:quality-tradeoff} uses model-specific public tokenizers and chat templates to retokenize the visible requests and responses retained with each final output. Qwen requests are saved verbatim; GLM inputs are reconstructed from saved user prompts and tool receipts with the production system prompt and fixed handbook. Server-side cache-hit counts were not retained, so we use an explicit no-cache-discount scenario ($H=0$), not a claim of measured zero cache hits. These estimates exclude discarded runs, training, external tool execution, and unrecorded hidden reasoning or provider-only framing. Failed calls whose response usage was not saved are also excluded, not assigned zero cost; preflight context rejections are tracked separately. They describe retained visible-trajectory workload at public API rates, not complete historical usage, actual invoices, or local GPU expenses.
+\subsection{Expert Evaluation}\label{sec:expert-evaluation}
+We plan a blinded playing study on matched excerpts. Guqin performers will play anonymized outputs and rate two dimensions on a four-point scale: \emph{performance feasibility} (practical string and fingering choices and continuity) and \emph{idiomatic and overall musical expression} (appropriateness of techniques, phrasing, and audible \emph{yunwei}). Appendix~\ref{sec:expert-protocol} describes the protocol.
 
-Of 1,528 events with a nonempty target pitch, 1,334 are auditor-resolvable for the two-stage system and 1,402 for the single-stage system, corresponding to 87.304\% and 91.754\% coverage. Conditional PitchAcc@50c is 98.951\% and 97.932\%, respectively; the proportion of all 1,528 target events both resolved and correct is 86.387\% and 89.856\%. On the 1,248 events resolvable for both, the corresponding accuracies are 99.920\% and 98.157\%. Full-score runtime replay yields 15 warnings across three work units for two-stage, versus 42 across 17 for single-stage. These are rule-based diagnostics, not independent performer judgments; the stage and retry budgets also differ between methods.
+\begin{table}[t]
+\centering\small
+\begin{tabularx}{\columnwidth}{@{}Xrr@{}}
+\toprule
+Method & \shortstack{Feasibility\\(1--4)} & \shortstack{Expression\\(1--4)} \\
+\midrule
+GLM-5.3 ReAct & -- & -- \\
+Direct SFT & -- & -- \\
+\system{} single-stage & -- & -- \\
+\system{} two-stage & -- & -- \\
+\bottomrule
+\end{tabularx}
+\caption{Planned expert evaluation. Method selection is provisional. Dashes indicate pending ratings.}
+\label{tab:expert-evaluation}
+\end{table}
 
-ReAct + Handbook attains 97.699\% pitch accuracy on 1,347 auditor-resolvable events, with 16.035 cents MAE and 33 warnings across five units. Its string--hui F1, technique similarity, and ornament F1 are 36.627, 0.7118, and 39.961, respectively. As on traditional scores, the single-stage student's reference agreement can exceed that of the two-stage system despite lower conditional pitch accuracy. Disabling diagnostic feedback yields 73.485\% pitch accuracy on 1,403 evaluable events and 472 final warnings across 78 units. On the 1,271 events resolvable for both ON and OFF, accuracy is 98.899\% versus 73.879\%. OFF's technique similarity (0.8623) exceeds the full system's, again showing that aggregate reference usage and pitch consistency capture different properties.
-
-The fixed-workflow student obtains 19.298\% pitch accuracy on 1,197 evaluable events, with 558.105 cents MAE and 1,060 warnings across 88 units. On the 1,119 events resolvable for both single-stage students, the teacher-trajectory student attains 98.749\% versus 19.929\% for fixed workflow. Thus, the large construction-recipe gap also occurs on modern melodies and persists on shared events. Prompt and training-trajectory differences still limit causal attribution to any individual construction step.
-
-Direct SFT completes all modern inputs but attains only 79.092\% pitch accuracy and an 85.714\% rule violation rate, despite ornament F1 (43.437) close to the trajectory-trained single-stage model (43.445). On 1,315 jointly resolvable events, Direct and trajectory-trained single-stage pitch accuracies are 80.760\% and 98.023\%, respectively. Final-artifact agreement therefore does not imply reliable pitch realization. This pipeline comparison changes tool access and inference budget as well as supervision, so it does not isolate their individual effects.
-
-\subsection{Expert Evaluation}
-A blinded performer study is planned with one or two guqin experts who will actually play selected scores. Each will rate two dimensions on a four-point scale: \emph{performance feasibility}, covering string and fingering choices and continuity, and \emph{idiomatic and overall musical expression}, covering the suitability of techniques and audible \emph{yunwei}. Scale anchors and sampling will be fixed before assessment. Examples will be anonymized and presented in randomized order, with input scores available to raters. We will report rater experience and sampling, and inter-rater agreement if two experts assess the same examples. Expert scores and claims of superior playability or expression await this assessment.
+\todo{Report the evaluated excerpts, rater count, and ratings in Table~\ref{tab:expert-evaluation}. Summarize whether the two variants differ in feasibility or expression and how these judgments relate to the automatic metrics.}
