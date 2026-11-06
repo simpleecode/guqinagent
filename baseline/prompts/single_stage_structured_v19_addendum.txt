@@ -1,0 +1,8 @@
+【结构化动作提交：带泛音区间状态的音乐决策】
+只使用 edit_structured_plan；不得调用 edit_plan，也不得拼写最终减字字符串。你填写音乐字段，程序确定性渲染并校验。
+
+1. 每个新起音用 kind="single"，填写 mode、string、right_finger；stopped 另填 left_finger 与 hui，harmonic 另填 hui。先决定按、散、泛，再查询候选；get_pitch_candidates 与 edit_structured_plan 不得同回合调用。
+2. 把输入中公开的 phrase_handoff.exit_state_target 当作本段结束状态提示，而不是可忽略的备注。若其中 harmonic_scope 为 true，先审阅整段是否应保持连续泛音；证据一致时，区间首个 harmonic 音填 harmonic_state="start"，中间填 "inside"，结束音填 "end"。程序会分别渲染泛起、泛音和泛止。不要在应连续泛音的段内为了方便改成 open/stopped。
+3. 当前事件是两个同时发声目标音时用 kind="compound"，members 分别填写两个成员的 mode/string，以及按音或泛音需要的 hui、按音需要的 left_finger。保持成员原定声类，双散、双按和一按一散都按原样提交。
+4. 吟、猱、绰、注、撞、复、上、下、就等没有新右手起音的行用 kind="continuation"；被复合动作覆盖或不显示的行用 kind="hidden"。
+5. 根据 warning 只修相关字段。罕见写法无法表达时，优先音高、音色、可演奏性正确的结构动作；不得退回自由文本。

@@ -1,0 +1,8 @@
+【结构化动作提交：音乐决策与字符串渲染分离】
+本轮优先使用 edit_structured_plan。你只决定音乐字段；程序负责把字段确定性渲染为最终减字，并执行与 edit_plan 相同的预览和 warning 校验。不要在 reasoning 或工具参数中拼写最终减字字符串。
+
+1. 每个新起音用 kind="single"，填写 mode（open/stopped/harmonic）、string、right_finger；stopped 另填 left_finger 与 hui，harmonic 另填 hui。先依据上下文决定按、散、泛，再选候选弦徽。
+2. 当前事件是两个同时发声目标音时用 kind="compound"，在 members 里分别填写两个成员的 mode/string，以及按音或泛音需要的 hui、按音需要的 left_finger。程序保持两个成员原定音色，不会为了格式把双散或双按改成一按一散。
+3. 吟、猱、绰、注、撞、复、上、下、就等没有新右手起音的行用 kind="continuation"，填写 technique、必要时 direction 与 hui；被前一复合动作覆盖或不应重复显示的行用 kind="hidden"。
+4. 先查询 get_pitch_candidates，再在下一回合调用 edit_structured_plan；两者不得同回合调用。提交后根据程序返回的音高和可演奏性 warning，只改需要变化的字段。
+5. 若某个罕见传统写法暂不能由结构字段表达，仍先选择可解析、音高正确、可演奏的 single、compound 或 continuation；不要为了保留缩略写法牺牲音高、音色或协议合法性。

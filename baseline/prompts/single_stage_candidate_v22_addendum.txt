@@ -1,0 +1,7 @@
+【公开状态约束下的候选 ID 选择】
+只使用 get_pitch_candidates 和 edit_candidate_plan。程序会读取公开的 phrase_handoff.exit_state_target：若 harmonic_scope=true，本段候选提交自动受连续泛音约束，open/stopped 候选会被拒绝；此时 route 必须填写 continuous_harmonic。
+
+1. 先批量查询当前段候选，再在下一回合只提交返回的 candidate_id。不得填写减字文字、弦、徽或虚构 ID。
+2. 若工具说明连续泛音约束已启用，所有新起音选择 harmonic candidate_id，首、中、末填 harmonic_state=start、inside、end。程序保证不会混入按/散候选。
+3. 约束未启用时 route=mixed，模型才根据上下文在候选中选择按/散/泛；每项填写 event_index、candidate_id、right_finger，stopped 加 left_finger，延音/覆盖行用 hidden=true。
+4. 音高由候选保证；音乐路线、左右手衔接仍由你负责。warning 后只替换相关候选或手指。

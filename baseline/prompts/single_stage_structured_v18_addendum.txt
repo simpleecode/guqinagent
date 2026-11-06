@@ -1,0 +1,8 @@
+【结构化动作提交：冻结 V9 的音乐状态，程序渲染最终字符串】
+只使用 edit_structured_plan；不得调用 edit_plan，也不得在 reasoning 或工具参数中拼写最终减字字符串。你决定音乐字段，程序负责确定性渲染、字段完整性检查、音高和可演奏性校验。
+
+1. 每个新起音用 kind="single"，填写 mode（open/stopped/harmonic）、string、right_finger；stopped 另填 left_finger 与 hui，harmonic 另填 hui。先依据上下文决定按、散、泛，再选候选弦徽。get_pitch_candidates 与 edit_structured_plan 不得同回合调用。
+2. 先检查整段音色状态：若上下文已有“泛起…泛止”连续泛音段，区间内每个新起音都必须提交 mode="harmonic"，直到明确的泛止；不得因逐音查询、弦徽便利或格式化而把中间音改成 open 或 stopped。没有连续泛音证据时，也不得只因高音区方便而开启泛音段。
+3. 当前事件是两个同时发声目标音时用 kind="compound"，在 members 分别填写两个成员的 mode/string，以及按音或泛音需要的 hui、按音需要的 left_finger。保持每个成员原定声类：双散仍为双散，双按仍为双按，不得为了套用顺序改变成员音色。
+4. 吟、猱、绰、注、撞、复、上、下、就等没有新右手起音的行用 kind="continuation"，填写 technique、必要时 direction 与 hui；被前一复合动作覆盖或不应重复显示的行用 kind="hidden"。
+5. 提交后只根据程序返回的 warning 改动相关字段。若罕见传统写法暂不能表达，优先提交音高正确、声类正确、可演奏的结构动作；不要退回自由文本。

@@ -63,6 +63,8 @@ def main() -> int:
     parser.add_argument("--weights", type=str, default=None,
                         help='JSON dict over pitch/tone_type/fingering/ornament/playability')
     parser.add_argument("--model", default=None, help="override GLM_MODEL for task and reflection")
+    parser.add_argument("--seed-prompt", type=Path, default=None,
+                        help="UTF-8 text prompt to use as the initial GEPA candidate")
     parser.add_argument("--quiet", action="store_true")
     args = parser.parse_args()
 
@@ -96,7 +98,11 @@ def main() -> int:
         sample_temperature=args.sample_temperature,
         tolerance_cents=args.tolerance_cents, weights=weights, log=logger,
     )
-    seed_candidate = {"single_stage": public_system_for("single_stage", basic=False)}
+    seed_text = (args.seed_prompt.read_text(encoding="utf-8").strip()
+                 if args.seed_prompt else public_system_for("single_stage", basic=False))
+    if not seed_text:
+        raise SystemExit("seed prompt must not be empty")
+    seed_candidate = {"single_stage": seed_text}
 
     result = optimize(
         adapter=adapter,
@@ -127,6 +133,7 @@ def main() -> int:
         "leakage_audit": adapter.leakage_counts,
         "total_evals": result.total_evals,
         "model": client.model,
+        "seed_prompt_source": str(args.seed_prompt) if args.seed_prompt else "production_seed",
     }
     # Counters are per-process; a resumed run must accumulate across its
     # predecessor so api_usage stays a run-lifetime total.

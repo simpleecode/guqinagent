@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import fcntl
+try:
+    import fcntl
+except ImportError:  # Windows has no fcntl; single-process runs need no file lock.
+    fcntl = None
 import hashlib
 import json
 import os
@@ -212,6 +215,63 @@ TOOLS = [
         "additionalProperties": False}},
 ]
 
+# Experimental interface: the model chooses musical fields while the runtime
+# renders the final jianzi string.  It is opt-in so the production tool
+# contract remains exactly ``edit_plan(jianzi_rows)``.
+STRUCTURED_EDIT_TOOL = {
+    "name": "edit_structured_plan",
+    "description": "实验性结构化编辑：只提交演奏字段，不提交最终减字字符串。程序会把字段确定性渲染为减字，并执行与 edit_plan 相同的预览、音高和可演奏性校验。single 用于单音；compound 用于同时双音；continuation 用于吟、猱、绰、注等非新起音；hidden 用于不重复显示。",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "rows": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "event_index": {"type": "integer"},
+                        "kind": {"type": "string", "enum": ["single", "compound", "continuation", "hidden"]},
+                        "mode": {"type": "string", "enum": ["open", "stopped", "harmonic"]},
+                        "string": {"type": "integer", "minimum": 1, "maximum": 7},
+                        "hui": {"oneOf": [{"type": "number"}, {"type": "string", "enum": ["徽外", "徽外半"]}]},
+                        "left_finger": {"type": "string", "enum": ["大指", "名指", "中指", "食指"]},
+                        "right_finger": {"type": "string", "enum": ["抹", "挑", "勾", "剔", "擘", "托", "打", "摘"]},
+                        "harmonic_state": {"type": "string", "enum": ["", "start", "inside", "end"]},
+                        "technique": {"type": "string", "enum": ["", "吟", "猱", "绰", "注", "撞", "复", "上", "下", "就"]},
+                        "direction": {"type": "string", "enum": ["", "上", "下"]},
+                        "members": {
+                            "type": "array", "minItems": 2, "maxItems": 2,
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "mode": {"type": "string", "enum": ["open", "stopped", "harmonic"]},
+                                    "string": {"type": "integer", "minimum": 1, "maximum": 7},
+                                    "hui": {"oneOf": [{"type": "number"}, {"type": "string", "enum": ["徽外", "徽外半"]}]},
+                                    "left_finger": {"type": "string", "enum": ["大指", "名指", "中指", "食指"]}
+                                },
+                                "required": ["mode", "string"], "additionalProperties": False
+                            }
+                        }
+                    },
+                    "required": ["event_index", "kind"], "additionalProperties": False
+                }
+            }
+        }, "required": ["rows"], "additionalProperties": False
+    }
+}
+
+CANDIDATE_EDIT_TOOL = {
+    "name": "edit_candidate_plan",
+    "description": "候选选择编辑：先用 get_pitch_candidates 查询，再只提交其中返回的 candidate_id。程序从候选 ID 取回按/散/泛、弦和徽并渲染减字；不得编造候选 ID 或直接填写弦徽字符串。",
+    "input_schema": {"type": "object", "properties": {"route": {"type": "string", "enum": ["mixed", "continuous_harmonic"]}, "rows": {"type": "array", "items": {"type": "object", "properties": {
+        "event_index": {"type": "integer"}, "candidate_id": {"type": "string"},
+        "right_finger": {"type": "string", "enum": ["抹", "挑", "勾", "剔", "擘", "托", "打", "摘"]},
+        "left_finger": {"type": "string", "enum": ["大指", "名指", "中指", "食指"]},
+        "harmonic_state": {"type": "string", "enum": ["", "start", "inside", "end"]},
+        "hidden": {"type": "boolean"}
+    }, "required": ["event_index"], "additionalProperties": False}}}, "required": ["route", "rows"], "additionalProperties": False}
+}
+
 # A warning is an actionable playability failure, rather than an invitation to
 # rationalize a known-bad result. Keep the remedies compact and concrete so
 # the same public rule is visible to every generation stage.
@@ -271,13 +331,22 @@ INHERITANCE_RULES_PROMPT = (
 )
 
 
-def public_tools_for(stage: str, *, basic: bool = False) -> list[dict]:
+def public_tools_for(stage: str, *, basic: bool = False, structured: bool = False, candidate_selection: bool = False) -> list[dict]:
     allowed = {"list_context", "expand_context", "edit_plan"}
     # Guqinizer can also receive a pitch warning after changing a concrete
     # fingering.  It needs the same read-only lookup tool to repair that edit.
     if basic or stage in {"guqinization", "single_stage"}:
         allowed.add("get_pitch_candidates")
-    return [deepcopy(tool) for tool in TOOLS if tool["name"] in allowed]
+    tools = [deepcopy(tool) for tool in TOOLS if tool["name"] in allowed]
+    if structured:
+        # The experiment is meaningful only if the model cannot fall back to
+        # composing an unconstrained final string through edit_plan.
+        tools = [tool for tool in tools if tool["name"] != "edit_plan"]
+        tools.append(deepcopy(STRUCTURED_EDIT_TOOL))
+    if candidate_selection:
+        tools = [tool for tool in tools if tool["name"] != "edit_plan"]
+        tools.append(deepcopy(CANDIDATE_EDIT_TOOL))
+    return tools
 
 
 def public_system_for(stage: str, *, basic: bool = False) -> str:
@@ -1366,7 +1435,8 @@ class _RateLimitedMessages:
             return
         self._global_state_path.parent.mkdir(parents=True, exist_ok=True)
         with self._global_state_path.open("a+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:
                 handle.seek(0)
                 try:
@@ -1387,7 +1457,8 @@ class _RateLimitedMessages:
                 handle.write(f"{time.monotonic():.9f}")
                 handle.flush()
             finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
     def create(self, **options):
         wait = self._min_interval - (time.monotonic() - self._last_call)
@@ -1667,10 +1738,10 @@ def main() -> int:
     rejected_traces: list[dict] = []
     file_mode = "a" if args.resume else "w"
     checkpoint_mode = "a" if args.resume else "w"
-    with (output_paths["public"].open(file_mode, encoding="utf-8", newline="\n") as pub,
-          output_paths["private"].open(file_mode, encoding="utf-8", newline="\n") as priv,
-          output_paths["intermediates"].open(file_mode, encoding="utf-8", newline="\n") as intermediates,
-          output_paths["checkpoint"].open(checkpoint_mode, encoding="utf-8", newline="\n") as checkpoint):
+    with output_paths["public"].open(file_mode, encoding="utf-8", newline="\n") as pub, \
+         output_paths["private"].open(file_mode, encoding="utf-8", newline="\n") as priv, \
+         output_paths["intermediates"].open(file_mode, encoding="utf-8", newline="\n") as intermediates, \
+         output_paths["checkpoint"].open(checkpoint_mode, encoding="utf-8", newline="\n") as checkpoint:
         progress = tqdm(
             enumerate(selected, 1),
             total=len(selected),

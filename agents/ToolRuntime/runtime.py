@@ -52,6 +52,126 @@ from agents.ToolRuntime.warning_checks import (
     validate_jianzi_only,
 )
 
+# Local GEPA compatibility: retain the structured candidate renderer while
+# warning/pitch helpers above now come from the upstream split modules.
+def _structured_hui(value: Any) -> str:
+    if isinstance(value, bool) or value is None:
+        raise ValueError("stopped/harmonic structured action requires hui")
+    if isinstance(value, (int, float)):
+        if not 1 <= float(value) <= 13:
+            raise ValueError("hui must be between 1 and 13")
+        return hui_label(float(value))
+    if value in {"徽外", "徽外半"}:
+        return str(value)
+    raise ValueError("hui must be a number or a supported symbolic hui")
+
+
+def _structured_member(member: dict) -> str:
+    mode, string = member.get("mode"), member.get("string")
+    if isinstance(string, bool) or not isinstance(string, int) or not 1 <= string <= 7:
+        raise ValueError("structured member string must be 1..7")
+    if mode == "open":
+        return f"{string}弦散音"
+    hui = _structured_hui(member.get("hui"))
+    if mode == "stopped":
+        finger = member.get("left_finger")
+        if finger not in {"大指", "名指", "中指", "食指"}:
+            raise ValueError("stopped structured member requires left_finger")
+        return f"{finger}{hui}{string}弦按音"
+    if mode == "harmonic":
+        return f"泛{hui}{string}弦"
+    raise ValueError("structured member mode must be open, stopped, or harmonic")
+
+
+def structured_rows_to_jianzi_rows(rows: list[Any]) -> list[list[Any]]:
+    """Deterministically render the experimental field-only edit payload."""
+    rendered: list[list[Any]] = []
+    seen: set[int] = set()
+    for number, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            raise ValueError(f"rows[{number}] must be an object")
+        index = row.get("event_index")
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError(f"rows[{number}].event_index must be an integer")
+        if index in seen:
+            raise ValueError(f"duplicate structured event_index: {index}")
+        seen.add(index)
+        kind = row.get("kind")
+        if kind == "hidden":
+            text = ""
+        elif kind == "compound":
+            members = row.get("members")
+            if not isinstance(members, list) or len(members) != 2:
+                raise ValueError("compound structured action requires exactly two members")
+            text = "撮（" + "＋".join(_structured_member(member) for member in members) + "）"
+        elif kind == "continuation":
+            technique = row.get("technique")
+            if technique not in {"吟", "猱", "绰", "注", "撞", "复", "上", "下", "就"}:
+                raise ValueError("continuation requires a supported technique")
+            direction = row.get("direction") or ""
+            text = technique + direction
+            if row.get("hui") is not None:
+                text += _structured_hui(row["hui"])
+        elif kind == "single":
+            mode, string = row.get("mode"), row.get("string")
+            if isinstance(string, bool) or not isinstance(string, int) or not 1 <= string <= 7:
+                raise ValueError("single structured action requires string 1..7")
+            right = row.get("right_finger")
+            if right not in {"抹", "挑", "勾", "剔", "擘", "托", "打", "摘"}:
+                raise ValueError("single structured action requires right_finger")
+            if mode == "open":
+                text = f"散{right}{string}弦"
+            elif mode == "stopped":
+                finger = row.get("left_finger")
+                if finger not in {"大指", "名指", "中指", "食指"}:
+                    raise ValueError("stopped structured action requires left_finger")
+                text = f"{finger}{_structured_hui(row.get('hui'))}{right}{string}弦按音"
+            elif mode == "harmonic":
+                state = row.get("harmonic_state") or ""
+                if state not in {"", "start", "inside", "end"}:
+                    raise ValueError("harmonic_state must be start, inside, end, or empty")
+                prefix = "泛起" if state == "start" else "泛"
+                suffix = "泛止" if state == "end" else ""
+                text = f"{prefix}{_structured_hui(row.get('hui'))}{right}{string}弦{suffix}"
+            else:
+                raise ValueError("single structured action mode must be open, stopped, or harmonic")
+            technique = row.get("technique") or ""
+            if technique:
+                text += technique + (row.get("direction") or "")
+        else:
+            raise ValueError("kind must be single, compound, continuation, or hidden")
+        rendered.append([index, text])
+    return rendered
+
+
+def candidate_rows_to_structured(rows: list[Any], catalog: dict[str, dict], route: str) -> list[dict]:
+    """Resolve only previously exposed pitch-candidate IDs into render fields."""
+    if route not in {"mixed", "continuous_harmonic"}:
+        raise ValueError("route must be mixed or continuous_harmonic")
+    result = []
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("event_index"), int):
+            raise ValueError("candidate row requires integer event_index")
+        if row.get("hidden") is True:
+            result.append({"event_index": row["event_index"], "kind": "hidden"})
+            continue
+        candidate = catalog.get(str(row.get("candidate_id") or ""))
+        if candidate is None:
+            raise ValueError("candidate_id was not returned by get_pitch_candidates")
+        if route == "continuous_harmonic" and candidate["mode"] != "harmonic":
+            raise ValueError("continuous_harmonic route only accepts harmonic candidate_id values")
+        mode = candidate["mode"]
+        item = {"event_index": row["event_index"], "kind": "single", "mode": mode,
+                "string": candidate["string"], "right_finger": row.get("right_finger"),
+                "harmonic_state": row.get("harmonic_state") or ""}
+        if mode != "open":
+            item["hui"] = candidate.get("hui_label") or candidate.get("hui")
+        if mode == "stopped":
+            item["left_finger"] = row.get("left_finger")
+        result.append(item)
+    return result
+
+
 
 def related_repeat_phrases(item: dict, historical: dict | None = None) -> list[dict]:
     """Retrieve earlier score phrases sharing >8 consecutive pitched events.
@@ -159,7 +279,7 @@ def render_pitch_candidate_table(target: float, candidates: list[dict],
     mode_names = {"open": "散音", "stopped": "按音", "harmonic": "泛音"}
     lines = [
         f"指定音高｜MIDI {target:g}｜范围｜{'、'.join(mode_names.get(m, m) for m in modes)}",
-        "序号｜方式｜弦徽｜实得MIDI｜可信度",
+        "序号｜候选ID｜方式｜弦徽｜实得MIDI｜可信度",
     ]
     for rank, candidate in enumerate(candidates, 1):
         mode = mode_names.get(candidate.get("mode"), str(candidate.get("mode") or "未知"))
@@ -168,7 +288,7 @@ def render_pitch_candidate_table(target: float, candidates: list[dict],
             position += candidate.get("hui_label") or hui_label(candidate.get("hui"))
         confidence = "精确" if candidate.get("confidence") == "exact" else "近似"
         lines.append(
-            f'{rank}｜{mode}｜{position}｜{float(candidate.get("sounding_midi")):.1f}｜{confidence}'
+            f'{rank}｜{candidate.get("candidate_id")}｜{mode}｜{position}｜{float(candidate.get("sounding_midi")):.1f}｜{confidence}'
         )
     if not candidates:
         lines.append("无符合容差的候选")
@@ -269,6 +389,7 @@ class RealToolRuntime:
         # edit_plan 的累计 patch：多批次提交时，预览与审计始终针对累计状态，
         # 否则后续批次会被误报为“其余音全部待定”。重复序号按序覆盖。
         self.accumulated_patches: list[dict] = []
+        self.candidate_catalog: dict[str, dict] = {}
 
     def _event_to_source(self, value: Any) -> int:
         """Resolve a required public continuous 音序 to its source row."""
@@ -413,6 +534,7 @@ class RealToolRuntime:
                             "max_candidates", 8 if is_batch_query else 12)),
                     )
                     candidate_rows = [candidate.to_dict() for candidate in candidates]
+                    self.candidate_catalog.update({row["candidate_id"]: row for row in candidate_rows})
                     audit_queries.append({
                         "event_indices": list(dict.fromkeys(
                             int(source["event_index"]) for source in sources
@@ -439,7 +561,24 @@ class RealToolRuntime:
                         + "、".join(str(self._source_to_event(index)) for index in dict.fromkeys(skipped_indices))
                     )
                 result = {"text": "\n\n".join(tables)}
-            elif name == "edit_plan":
+            elif name in {"edit_plan", "edit_structured_plan", "edit_candidate_plan"}:
+                if name == "edit_structured_plan":
+                    args = {"jianzi_rows": structured_rows_to_jianzi_rows(
+                        list(args.get("rows") or [])
+                    )}
+                elif name == "edit_candidate_plan":
+                    exit_target = ((self.item.get("input", {}).get("phrase_handoff") or {})
+                                   .get("exit_state_target") or {})
+                    # This is a public runtime state hint, not reference text.
+                    # When it explicitly says the current phrase remains in a
+                    # harmonic scope, accepting a mixed candidate list would
+                    # violate the advertised continuous-state contract.
+                    forced_route = ("continuous_harmonic" if exit_target.get("harmonic_scope")
+                                    is True else str(args.get("route") or ""))
+                    args = {"jianzi_rows": structured_rows_to_jianzi_rows(
+                        candidate_rows_to_structured(list(args.get("rows") or []), self.candidate_catalog,
+                                                     forced_route)
+                    )}
                 if "patches" in args:
                     raise ValueError("edit_plan only accepts jianzi_rows")
                 patches = []

@@ -1,0 +1,7 @@
+【先选整段音色路线，再选择合法候选 ID】
+只使用 get_pitch_candidates 和 edit_candidate_plan。禁止填写减字文本、弦、徽或未查询 candidate_id。
+
+1. 在 edit_candidate_plan 顶层先填写 route。若公开上下文显示本段是连续泛音（例如 harmonic_scope、泛音延续状态、完整高音泛音旋律证据一致），选择 route="continuous_harmonic"；否则选择 route="mixed"。
+2. route="continuous_harmonic" 是硬约束：该次提交的每个新起音只能选择 harmonic 候选 ID；程序会拒绝夹杂 open 或 stopped 的候选。首、中、末 harmonic 分别写 harmonic_state=start、inside、end。
+3. route="mixed" 时从已查询候选中选择最符合上下文的声类；每项填写 event_index、candidate_id、right_finger，stopped 再填 left_finger。延音或被覆盖行用 hidden=true。
+4. 先批量查候选，再下一回合提交选择；收到 warning 后只换相关候选或手指。音高合法不等于音色合适，路线优先于候选排序。

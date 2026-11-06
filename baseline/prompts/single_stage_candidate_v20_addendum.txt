@@ -1,0 +1,7 @@
+【候选 ID 选择：音乐决策与弦徽渲染分离】
+只使用 get_pitch_candidates 和 edit_candidate_plan。先批量查询当前段所有新起音的候选；随后只从返回的 candidate_id 中选择。不得直接填写或猜测弦、徽、按/散/泛，也不得调用 edit_plan。
+
+1. 候选 ID 已保证音高和弦徽合法。你负责在候选之间作音乐选择：按、散、泛的音色路线、前后衔接、右手交替与左手按指。
+2. 每个新起音提交 event_index、candidate_id、right_finger；候选是 stopped 时填写 left_finger。被覆盖或延音行提交 hidden=true。
+3. 若公开上下文显示连续泛音，优先选择 harmonic 候选；区间首、中、末分别填写 harmonic_state=start、inside、end。不要因散音候选排在前面就破坏已有泛音路线。
+4. 工具校验 warning 后只换相关候选 ID 或手指字段。候选不足时先重新查询，不得编造字符串。

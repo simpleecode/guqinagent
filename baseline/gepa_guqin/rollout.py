@@ -107,7 +107,8 @@ def _error_followup(warning_followup_required: bool) -> dict[str, str]:
 def run_single_stage_phrase(example: dict[str, Any], historical: dict[tuple[str, str], Any],
                             system_text: str, backend: GlmBackend, *,
                             max_rounds: int = 8, attempts: int = 2,
-                            sample_temperature: float = 0.25,
+                            sample_temperature: float = 0.25, structured: bool = False,
+                            candidate_selection: bool = False,
                             log: Any = None) -> dict[str, Any]:
     """Run one phrase through the public single-stage loop.
 
@@ -126,7 +127,8 @@ def run_single_stage_phrase(example: dict[str, Any], historical: dict[tuple[str,
     )
     item["baseline_plan"] = blank_plan_from_item(item)
     user_prompt = render_public_prompt(item, STAGE)
-    tools = public_tools_for(STAGE, basic=False)
+    tools = public_tools_for(STAGE, basic=False, structured=structured,
+                             candidate_selection=candidate_selection)
     source_to_event = {
         int(note["index"]): int(note["event_index"])
         for note in item["input"].get("notes_without_jianzi") or []
@@ -200,12 +202,12 @@ def run_single_stage_phrase(example: dict[str, Any], historical: dict[tuple[str,
             for call in calls:
                 name = call["name"]
                 arguments = call.get("arguments") or {}
-                if name == "edit_plan":
-                    submitted = [
+                if name in {"edit_plan", "edit_structured_plan", "edit_candidate_plan"}:
+                    submitted = ([
                         row for row in arguments.get("jianzi_rows") or []
                         if isinstance(row, list) and len(row) == 2
                         and isinstance(row[0], int) and not isinstance(row[0], bool)
-                    ]
+                    ] if name == "edit_plan" else [])
                     if submitted:
                         current = {
                             int(action["source_index"]): action_text(action)
@@ -234,7 +236,7 @@ def run_single_stage_phrase(example: dict[str, Any], historical: dict[tuple[str,
                     "type": "tool_result", "tool_use_id": call["id"],
                     "content": json.dumps(result, ensure_ascii=False),
                 })
-                if name != "edit_plan":
+                if name not in {"edit_plan", "edit_structured_plan", "edit_candidate_plan"}:
                     continue
                 if result.get("ok") and result.get("result", {}).get("valid"):
                     complete, report = validate_jianzi_only(

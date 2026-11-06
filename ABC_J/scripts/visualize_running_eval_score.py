@@ -18,6 +18,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = ROOT.parent
 SSH_RUN = Path("D:/new_cip/ops/.ssh_run.py")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -676,11 +677,45 @@ def main() -> int:
         "--focus-sample",
         help="sample_id to expand by default (for focused trajectory review)",
     )
+    parser.add_argument("--prompt-result", type=Path, help="prompt experiment JSON; render multi-prompt comparison")
+    parser.add_argument(
+        "--prompt-iteration-result", type=Path,
+        help="V9/V27 prompt-iteration checkpoint JSON; render resumable paired comparison",
+    )
+    parser.add_argument(
+        "--teacher-gepa-run-dir", type=Path,
+        help="teacher-standard GEPA run directory; render sampling, feedback, candidates and final selection",
+    )
+    parser.add_argument("--prompt-dataset", type=Path, default=WORKSPACE_ROOT / "_tmp_zip_inspect/pitch_eligible_two_or_half/inferred_trajectories_train.jsonl")
     parser.add_argument(
         "--skip-pull", action="store_true",
         help="render an already downloaded --pulled JSONL without opening an SSH connection",
     )
     args = parser.parse_args()
+    if args.teacher_gepa_run_dir:
+        if str(ROOT) not in sys.path:
+            sys.path.insert(0, str(ROOT))
+        from baseline.scripts.render_teacher_gepa_run import render
+        print(json.dumps({
+            "mode": "teacher_gepa_run",
+            **render(args.teacher_gepa_run_dir, args.output),
+        }, ensure_ascii=False))
+        return 0
+    if args.prompt_iteration_result:
+        if str(WORKSPACE_ROOT) not in sys.path:
+            sys.path.insert(0, str(WORKSPACE_ROOT))
+        from baseline.scripts.render_v9_v27_prompt_iteration_report import render
+        print(json.dumps({
+            "mode": "prompt_iteration_result",
+            **render(args.prompt_iteration_result, args.prompt_dataset, args.output),
+        }, ensure_ascii=False))
+        return 0
+    if args.prompt_result:
+        if str(WORKSPACE_ROOT) not in sys.path:
+            sys.path.insert(0, str(WORKSPACE_ROOT))
+        from scripts.render_prompt_retest_in_eval_style import render
+        print(json.dumps({"mode": "prompt_result", **render(args.prompt_result, args.prompt_dataset, args.output)}, ensure_ascii=False))
+        return 0
     if not args.skip_pull:
         pull(args.remote, args.pulled)
 
