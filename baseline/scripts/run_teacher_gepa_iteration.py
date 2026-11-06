@@ -33,6 +33,7 @@ from gepa import optimize  # noqa: E402
 from ABC_J.scripts.generate_teacher_tool_trajectories import public_system_for  # noqa: E402
 from baseline.gepa_guqin.compat import materialize_actions  # noqa: E402
 from baseline.gepa_guqin.glm_client import GlmAnthropicClient, GlmBackend, GlmReflectionLM  # noqa: E402
+from baseline.gepa_guqin.adapter import USER_PROMPT_CONTEXT_VERSION  # noqa: E402
 from baseline.gepa_guqin.teacher_exact_adapter import TeacherExactGuqinAdapter  # noqa: E402
 from baseline.scripts.prompt_data_sources import training_identity, require_current_split  # noqa: E402
 from baseline.gepa_guqin.handbook import compose_system  # noqa: E402
@@ -232,6 +233,7 @@ def main() -> int:
     identity = training_identity()
     require_current_split(identity)
     protocol_identity = {
+        "user_prompt_context_version": USER_PROMPT_CONTEXT_VERSION,
         "runtime_sha256": hashlib.sha256((REPO / "agents/ToolRuntime/runtime.py").read_bytes()).hexdigest(),
         "scorer_sha256": hashlib.sha256((REPO / "train/scripts/score_agent_predictions.py").read_bytes()).hexdigest(),
         "effective_seed_prompt_sha256": "",

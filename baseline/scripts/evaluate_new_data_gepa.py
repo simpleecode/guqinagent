@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parents[2]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
-from baseline.gepa_guqin.adapter import GuqinAgentAdapter
+from baseline.gepa_guqin.adapter import USER_PROMPT_CONTEXT_VERSION
 from baseline.gepa_guqin.teacher_exact_adapter import TeacherExactGuqinAdapter
 from baseline.gepa_guqin.compat import materialize_actions
 from baseline.gepa_guqin.glm_client import GlmAnthropicClient, GlmBackend
@@ -49,6 +49,9 @@ def main():
         parser.error("--repeats must be positive")
     root = args.run_dir.resolve()
     training_manifest = json.loads((root / "experiment_manifest.json").read_text(encoding="utf-8"))
+    if (not args.prepare_only and training_manifest.get("protocol_identity", {})
+            .get("user_prompt_context_version") != USER_PROMPT_CONTEXT_VERSION):
+        raise SystemExit("Training used an older user-prompt context. Use a run trained with the current context.")
     seed_text, _ = seed_prompt(training_manifest["parameters"]["seed_prompt"])
     best_path = root / "best_candidate.json"
     best = json.loads(best_path.read_text(encoding="utf-8")) if best_path.exists() else None
@@ -68,7 +71,9 @@ def main():
         check = json.loads(confirmation.read_text(encoding="utf-8")) if confirmation.exists() else {}
         if (check.get("status") != "complete" or not check.get("provisional_safety_pass")
                 or check.get("configuration", {}).get("prompt_hashes") != prompt_hashes
-                or check.get("configuration", {}).get("runtime_sha256") != runtime_sha):
+                or check.get("configuration", {}).get("runtime_sha256") != runtime_sha
+                or check.get("configuration", {}).get("user_prompt_context_version")
+                != USER_PROMPT_CONTEXT_VERSION):
             raise SystemExit("Complete and pass independent confirmation before opening final test labels")
     if args.mode == "confirmation":
         source = root / "data/examples_confirmation.jsonl"
@@ -101,6 +106,7 @@ def main():
     config = {"mode": args.mode, "source_sha256": source_sha, "repeats": args.repeats,
               "prompt_hashes": prompt_hashes,
               "runtime_sha256": runtime_sha,
+              "user_prompt_context_version": USER_PROMPT_CONTEXT_VERSION,
               "sample_ids": [e["sample_id"] for e in examples],
               "parameters": training_manifest["parameters"]}
     if args.prepare_only:

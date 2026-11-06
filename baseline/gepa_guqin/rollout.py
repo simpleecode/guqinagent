@@ -109,6 +109,7 @@ def run_single_stage_phrase(example: dict[str, Any], historical: dict[tuple[str,
                             max_rounds: int = 8, attempts: int = 2,
                             sample_temperature: float = 0.25, structured: bool = False,
                             candidate_selection: bool = False,
+                            include_related_history: bool = False,
                             log: Any = None) -> dict[str, Any]:
     """Run one phrase through the public single-stage loop.
 
@@ -130,7 +131,9 @@ def run_single_stage_phrase(example: dict[str, Any], historical: dict[tuple[str,
         item, historical=historical
     )
     item["baseline_plan"] = blank_plan_from_item(item)
-    user_prompt = render_public_prompt(item, STAGE)
+    user_prompt = render_public_prompt(
+        item, STAGE, historical=historical if include_related_history else None,
+    )
     tools = public_tools_for(STAGE, basic=False, structured=structured,
                              candidate_selection=candidate_selection)
     source_to_event = {

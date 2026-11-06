@@ -26,6 +26,7 @@ OUT = RUN / "test50_top3"
 sys.path[:0] = [str(REPO.parent / ".gepa_packages"), str(REPO),
                 str(REPO / "baseline/gepa/src")]
 
+from baseline.gepa_guqin.adapter import USER_PROMPT_CONTEXT_VERSION
 from baseline.gepa_guqin.teacher_exact_adapter import TeacherExactGuqinAdapter
 from baseline.gepa_guqin.compat import materialize_actions
 from baseline.gepa_guqin.glm_client import GlmAnthropicClient, GlmBackend
@@ -156,6 +157,7 @@ def run_arm(run_arm, texts, manifest, examples, *, workers=1):
     arm_path = OUT / f"rows_{run_arm}.json"
     configuration = {
         "mode": "test50_top3_user_authorized",
+        "user_prompt_context_version": USER_PROMPT_CONTEXT_VERSION,
         "sample_count": len(examples),
         "sample_ids": [e["sample_id"] for e in examples],
         "prompt_hashes": {k: hashlib.sha256(compose_system(v).encode()).hexdigest()

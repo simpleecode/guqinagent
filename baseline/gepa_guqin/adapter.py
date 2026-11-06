@@ -29,6 +29,9 @@ from .handbook import compose_system  # noqa: E402
 from .metric import DEFAULT_WEIGHTS, _row_order_key, phrase_report  # noqa: E402
 from .rollout import GlmBackend, ScoreRunState, run_single_stage_phrase  # noqa: E402
 
+
+USER_PROMPT_CONTEXT_VERSION = "candidate-own-related-history-v1"
+
 COMPONENT = "single_stage"
 # Phrases whose reference contains no evaluable events score this neutral
 # constant; it is identical for every candidate, so acceptance comparisons
@@ -158,6 +161,7 @@ class GuqinAgentAdapter:
                                 self.backend, max_rounds=self.max_rounds,
                                 attempts=self.attempts,
                                 sample_temperature=self.sample_temperature,
+                                include_related_history=True,
                                 log=self.log,
                             )
                         except Exception as exc:
