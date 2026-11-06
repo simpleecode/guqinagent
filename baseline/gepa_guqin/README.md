@@ -239,3 +239,33 @@ API 调用。
   Feedback 中不出现当前段参考文本(feedback_leaks 必须为 0)。
 - 门控与生产对齐:音高警告 follow-up、重复提交即收、轮次用尽取最后有效预
   览、attempts 重试(attempt 0 贪心、attempt 1 采样)。
+
+### 最终 GEPA 运行（教师评分路线）
+
+这条路线沿用 GEPA 的反思、Pareto 筛选和候选确认。先固定训练、筛选、确认三组，再对冻结后的候选做封存评估。当前数据按曲谱家族拆分，完整计划只纳入从 `p0001` 开始连续导出的曲目，排除名单记录在 `gepa_full_manifest.json`。当前快照可用 64 首、947 段（反思 602、Pareto 156、确认 189）。封存目录名为 `test50`，对应论文的 48 首古谱、1,031 段。
+
+在仓库根目录用已配置 GEPA 依赖的 Python 执行，GLM 配置放仓库本地 `.env`。先做离线预检：
+
+```bash
+python -m baseline.scripts.create_new_dataset_gepa_split --full-manifest
+DATA=ABC_J/agent_training/two_stage_audited/pitch_eligible_train_test
+RUN=baseline/runs/gepa_final
+python -m baseline.scripts.run_teacher_gepa_iteration \
+  --seed-prompt production --run-dir "$RUN" \
+  --pilot-manifest "$DATA/gepa_full_manifest.json" \
+  --minibatch-size 2 --max-metric-calls 2000 --max-proposals 16 --prepare-only
+python -m baseline.scripts.evaluate_new_data_gepa \
+  --run-dir "$RUN" --mode test50 --repeats 1 --prepare-only
+```
+
+2000 次评分与 16 次提案是运行预算示例，正式开跑前固定预算并登记。评分次数和 API 请求数的口径不同。正式训练用同一命令去掉 `--prepare-only`。待 `best_candidate.json` 产出后，在独立确认集比较种子和候选。确认通过后再评估封存集：
+
+```bash
+python -m baseline.scripts.evaluate_new_data_gepa --run-dir "$RUN" --mode confirmation --repeats 2
+python -m baseline.scripts.evaluate_new_data_gepa --run-dir "$RUN" --mode test50 --repeats 1
+python -m evaluation.run_eval --pred "$RUN/test50/candidate_r1_predictions.jsonl" \
+  --reference train/eval_inputs_v2_text_protocol/test50/evaluation_pairs_test.jsonl \
+  --experiment gepa_final --model glm-5.3+gepa --strict-prefix
+```
+
+交付 `experiment_manifest.json`、`best_candidate.json`、确认结果、封存集原始预测及统一评估的 `summary.json`。旧 N55 多臂结果可单独导出诊断，续跑要求配置指纹一致。封存集结果不得回流改提示词或选候选。

@@ -3,9 +3,7 @@
 
 This does not call an LLM and never exposes sealed labels to the actor.  It
 only converts already-saved ``rows_<arm>.json`` predictions to the public
-prediction JSONL schema, then invokes ``evaluation.run_eval``.  A partial run
-is useful for pitch/fingering diagnostics, but tone-type metrics are correctly
-withheld unless all phrases of a score have been completed.
+prediction JSONL schema, then invokes ``evaluation.run_eval``.  Partial runs are scored on valid contiguous prefixes with stateful replay.
 """
 from __future__ import annotations
 
@@ -16,7 +14,7 @@ from pathlib import Path
 
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-REPO = WORKSPACE / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(REPO)]
 
 from evaluation.run_eval import run  # noqa: E402
@@ -71,6 +69,7 @@ def main() -> int:
         output_root=report_root,
         model=f"{arm} prompt / saved test50 snapshot",
         pitch_tolerance=50.0,
+        strict_prefix=True,
     ))
     print(json.dumps({"saved_predictions": count, **result}, ensure_ascii=False, indent=2))
     return 0

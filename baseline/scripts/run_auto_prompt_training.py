@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-REPO = WORKSPACE / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(WORKSPACE / ".gepa_packages"), str(REPO), str(REPO / "baseline/gepa/src")]
 SCRIPTS = REPO / "baseline/scripts"
 RUNS = REPO / "baseline/runs"

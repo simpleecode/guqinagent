@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-REPO = ROOT / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 DATA_ROOT = REPO / "ABC_J/agent_training/two_stage_audited/pitch_eligible_train_test"
 PROMPT_DIR = REPO / "baseline" / "prompts"
 DEFAULT_OUTPUT_ROOT = REPO / "baseline"

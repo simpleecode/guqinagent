@@ -61,8 +61,8 @@ def prepare_pilot(manifest_path: Path, run_dir: Path, identity: dict):
         for row in historical.values():
             handle.write(json.dumps(row, ensure_ascii=False) + "\n")
     split = {
-        "mode": "family_isolated_multiscore_pilot", "source": str(TRAIN),
-        "warning": ("固定十首整曲试验；feedback/pareto/confirmation按曲谱家族隔离。"
+        "mode": "family_isolated_multiscore", "source": str(TRAIN),
+        "warning": ("按曲谱家族隔离 feedback、pareto 和 confirmation；各曲使用连续导出。"
                     if plan.get("prefix_phrases") == 0 else
                     "初步跨曲谱试验，每首只取固定前缀；不代表全曲或最终test成绩。"),
         "score_key": f"{plan['score_count']}首曲谱",

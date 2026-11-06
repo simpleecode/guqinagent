@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-REPO = ROOT / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 
 from ABC_J.scripts.generate_teacher_tool_trajectories import public_system_for

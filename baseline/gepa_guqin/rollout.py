@@ -118,6 +118,10 @@ def run_single_stage_phrase(example: dict[str, Any], historical: dict[tuple[str,
     ``(score_key, phrase_id)`` to finalized rows for context tools and
     phrase-spanning validation state.
     """
+    if structured and candidate_selection:
+        raise ValueError("Select only one experimental edit tool")
+    edit_tool = ("edit_candidate_plan" if candidate_selection else
+                 "edit_structured_plan" if structured else None)
     item = deepcopy(example["runtime_item"])
     item["public_pitch_warning_source_indices"] = sorted(
         public_pitch_warning_source_indices(item, historical=historical)
@@ -137,7 +141,8 @@ def run_single_stage_phrase(example: dict[str, Any], historical: dict[tuple[str,
 
     last_trace: list[dict[str, Any]] = []
     for attempt in range(max(1, attempts)):
-        runtime = RealToolRuntime(item, historical, basic_fingering=False)
+        runtime = RealToolRuntime(item, historical, basic_fingering=False,
+                                  experimental_edit_tool=edit_tool)
         api_messages: list[dict[str, Any]] = [{"role": "user", "content": user_prompt}]
         trace: list[dict[str, Any]] = []
         warning_followup_required = False

@@ -12,7 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-REPO = ROOT / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 DATA = ROOT / "_tmp_zip_inspect/pitch_eligible_two_or_half/inferred_trajectories_train.jsonl"
 OUT = ROOT / "glm_dataset_pilot_result.json"
 sys.path.insert(0, str(REPO))

@@ -67,6 +67,8 @@ def _structured_hui(value: Any) -> str:
 
 
 def _structured_member(member: dict) -> str:
+    if not isinstance(member, dict):
+        raise ValueError("structured member must be an object")
     mode, string = member.get("mode"), member.get("string")
     if isinstance(string, bool) or not isinstance(string, int) or not 1 <= string <= 7:
         raise ValueError("structured member string must be 1..7")
@@ -275,11 +277,12 @@ def jianpu_symbol_for_target(note: dict, target_midi: float, tonic_midi: float) 
     )
 
 def render_pitch_candidate_table(target: float, candidates: list[dict],
-                                 modes: tuple[str, ...]) -> str:
+                                 modes: tuple[str, ...], *, include_ids: bool = False) -> str:
     mode_names = {"open": "散音", "stopped": "按音", "harmonic": "泛音"}
     lines = [
         f"指定音高｜MIDI {target:g}｜范围｜{'、'.join(mode_names.get(m, m) for m in modes)}",
-        "序号｜候选ID｜方式｜弦徽｜实得MIDI｜可信度",
+        ("序号｜候选ID｜方式｜弦徽｜实得MIDI｜可信度" if include_ids
+         else "序号｜方式｜弦徽｜实得MIDI｜可信度"),
     ]
     for rank, candidate in enumerate(candidates, 1):
         mode = mode_names.get(candidate.get("mode"), str(candidate.get("mode") or "未知"))
@@ -287,8 +290,9 @@ def render_pitch_candidate_table(target: float, candidates: list[dict],
         if candidate.get("mode") not in {"open"} and candidate.get("hui") is not None:
             position += candidate.get("hui_label") or hui_label(candidate.get("hui"))
         confidence = "精确" if candidate.get("confidence") == "exact" else "近似"
+        prefix = f"{rank}｜{candidate['candidate_id']}｜" if include_ids else f"{rank}｜"
         lines.append(
-            f'{rank}｜{candidate.get("candidate_id")}｜{mode}｜{position}｜{float(candidate.get("sounding_midi")):.1f}｜{confidence}'
+            f'{prefix}{mode}｜{position}｜{float(candidate.get("sounding_midi")):.1f}｜{confidence}'
         )
     if not candidates:
         lines.append("无符合容差的候选")
@@ -297,7 +301,7 @@ def render_pitch_candidate_table(target: float, candidates: list[dict],
 
 def render_grouped_candidate_table(target: float, candidates: list[dict],
                                    modes: tuple[str, ...],
-                                   sources: list[dict]) -> str:
+                                   sources: list[dict], *, include_ids: bool = False) -> str:
     """Render one physical candidate list with every score event that reuses it."""
     missing = [source.get("source_index") for source in sources
                if source.get("event_index") is None]
@@ -314,7 +318,7 @@ def render_grouped_candidate_table(target: float, candidates: list[dict],
         str(source.get("jianpu") or "") for source in sources
         if str(source.get("jianpu") or "")
     ))
-    lines = render_pitch_candidate_table(target, candidates, modes).splitlines()
+    lines = render_pitch_candidate_table(target, candidates, modes, include_ids=include_ids).splitlines()
     lines[0] = f"目标音高｜MIDI {target:g}｜来源｜{source_text}"
     if jianpu_values:
         lines[0] += f"｜简谱｜{jianpu_values[0]}"
@@ -358,6 +362,7 @@ class RealToolRuntime:
                  basic_fingering: bool = False,
                  toward_reference: bool = False,
                  warning_feedback: bool = True,
+                 experimental_edit_tool: str | None = None,
                  target_patches: list[dict] | None = None) -> None:
         self.item = item
         self.historical = historical
@@ -389,6 +394,7 @@ class RealToolRuntime:
         # edit_plan 的累计 patch：多批次提交时，预览与审计始终针对累计状态，
         # 否则后续批次会被误报为“其余音全部待定”。重复序号按序覆盖。
         self.accumulated_patches: list[dict] = []
+        self.experimental_edit_tool = experimental_edit_tool
         self.candidate_catalog: dict[str, dict] = {}
 
     def _event_to_source(self, value: Any) -> int:
@@ -534,7 +540,13 @@ class RealToolRuntime:
                             "max_candidates", 8 if is_batch_query else 12)),
                     )
                     candidate_rows = [candidate.to_dict() for candidate in candidates]
-                    self.candidate_catalog.update({row["candidate_id"]: row for row in candidate_rows})
+                    include_ids = self.experimental_edit_tool == "edit_candidate_plan"
+                    if include_ids:
+                        for row in candidate_rows:
+                            # Repeated queries with different filters can reuse the raw ordinal.
+                            # Keep an ID tied to the exact candidate the model saw.
+                            row["candidate_id"] = f"candidate-{len(self.candidate_catalog) + 1}"
+                            self.candidate_catalog[row["candidate_id"]] = row
                     audit_queries.append({
                         "event_indices": list(dict.fromkeys(
                             int(source["event_index"]) for source in sources
@@ -550,10 +562,10 @@ class RealToolRuntime:
                     })
                     if sources:
                         tables.append(render_grouped_candidate_table(
-                            target, candidate_rows, modes, sources))
+                            target, candidate_rows, modes, sources, include_ids=include_ids))
                     else:
                         tables.append(render_pitch_candidate_table(
-                            target, candidate_rows, modes))
+                            target, candidate_rows, modes, include_ids=include_ids))
                 audit_result = {"queries": audit_queries}
                 if skipped_indices:
                     tables.append(
@@ -561,7 +573,7 @@ class RealToolRuntime:
                         + "、".join(str(self._source_to_event(index)) for index in dict.fromkeys(skipped_indices))
                     )
                 result = {"text": "\n\n".join(tables)}
-            elif name in {"edit_plan", "edit_structured_plan", "edit_candidate_plan"}:
+            elif name == (self.experimental_edit_tool or "edit_plan"):
                 if name == "edit_structured_plan":
                     args = {"jianzi_rows": structured_rows_to_jianzi_rows(
                         list(args.get("rows") or [])

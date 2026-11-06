@@ -23,7 +23,7 @@ from typing import Any
 
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-REPO = WORKSPACE / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 DATASET = REPO / "ABC_J/agent_training/two_stage_audited/pitch_eligible_train_test/inferred_trajectories_train.jsonl"
 PROMPTS = REPO / "baseline" / "prompts"
 if str(REPO) not in sys.path:
@@ -232,6 +232,7 @@ def main() -> int:
     identity = training_identity()
     require_current_split(identity)
     protocol_identity = {
+        "runtime_sha256": hashlib.sha256((REPO / "agents/ToolRuntime/runtime.py").read_bytes()).hexdigest(),
         "scorer_sha256": hashlib.sha256((REPO / "train/scripts/score_agent_predictions.py").read_bytes()).hexdigest(),
         "effective_seed_prompt_sha256": "",
         "pilot_manifest_sha256": hashlib.sha256(args.pilot_manifest.read_bytes()).hexdigest() if args.pilot_manifest else None,

@@ -19,7 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parent
 PROMPT_DIR = ROOT / "prompts"
 RESULT_DIR = ROOT / "results"
-REPO = ROOT / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 DATA_ROOT = ROOT / "_tmp_zip_inspect/pitch_eligible_two_or_half"
 PRIOR_IDS = {
     "SMEq1nGR-p0001", "SBFpPuMq-p0001", "SqMgYYGH-p0001",

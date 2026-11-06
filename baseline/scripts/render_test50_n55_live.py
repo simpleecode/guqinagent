@@ -12,7 +12,7 @@ from copy import deepcopy
 from pathlib import Path
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-REPO = WORKSPACE / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(WORKSPACE / ".gepa_packages"), str(REPO), str(REPO / "baseline/gepa/src")]
 
 from baseline.gepa_guqin.compat import materialize_actions

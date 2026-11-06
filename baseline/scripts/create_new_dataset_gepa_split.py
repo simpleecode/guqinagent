@@ -173,6 +173,8 @@ def main() -> int:
                         help="每首取前N句；0=整曲全部乐句（只收完整连续导出的曲子）")
     parser.add_argument("--selection", choices=("random", "bucketed"), default="random",
                         help="pilot 曲目选取方式：random=固定种子随机抽取（默认），bucketed=旧版特征分桶")
+    parser.add_argument("--full-manifest", action="store_true",
+                        help="also freeze a plan using all contiguous score exports in each role")
     parser.add_argument("--check", action="store_true")
     parser.add_argument("--refresh-plan", action="store_true", help="explicitly replace generated plan files before any training")
     args = parser.parse_args()
@@ -276,6 +278,41 @@ def main() -> int:
         "iteration_diagnostic_sample_ids.txt": "\n".join(pilot["feedback"]["sample_ids"]) + "\n",
         "iteration_check_sample_ids.txt": "\n".join(pilot["confirmation"]["sample_ids"]) + "\n",
     }
+    if args.full_manifest:
+        by_score = defaultdict(list)
+        for row in rows:
+            by_score[row["score_key"]].append(row)
+        for score_rows in by_score.values():
+            score_rows.sort(key=order)
+        excluded = sorted(key for key, score_rows in by_score.items()
+                          if not contiguous_from_p0001(score_rows))
+        full_roles = {}
+        for role, source in (("feedback", "iteration_optimize"),
+                             ("pareto", "fixed_validation"),
+                             ("confirmation", "iteration_check")):
+            keys = sorted(set(splits[source]["score_keys"]) - set(excluded))
+            selected = [row for key in keys for row in by_score[key]]
+            if not selected:
+                raise SystemExit(f"No contiguous score exports in {source}")
+            full_roles[role] = {
+                "source_split": source,
+                "score_keys": keys,
+                "families": sorted({family_of(row) for row in selected}),
+                "sample_ids": [row["trajectory_id"] for row in selected],
+                "score_count": len(keys),
+                "rows": len(selected),
+            }
+        full_manifest = {
+            **pilot_manifest,
+            "schema_version": "new-data-gepa-full-1.0",
+            "selection": "all score exports contiguous from p0001, by frozen family split",
+            "prefix_phrases": 0,
+            "score_count": sum(role["score_count"] for role in full_roles.values()),
+            "splits": full_roles,
+            "excluded_noncontiguous_score_keys": excluded,
+            "excluded_noncontiguous_rows": sum(len(by_score[key]) for key in excluded),
+        }
+        outputs["gepa_full_manifest.json"] = json.dumps(full_manifest, ensure_ascii=False, indent=2) + "\n"
     explanation = ["# 新版 GEPA 数据划分（2026-10-29）", "", "原始 JSONL 不改写；名单按曲谱家族隔离。", "",
                    "| 部分 | 曲谱 | 家族 | 短语 | 用途 |", "|---|---:|---:|---:|---|"]
     descriptions = {"iteration_optimize": "读取标注差异、反思改词", "fixed_validation": "D_pareto，只用成绩选候选",

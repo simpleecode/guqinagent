@@ -10,7 +10,7 @@ from pathlib import Path
 
 
 WORKSPACE = Path(__file__).resolve().parents[3]
-REPO = WORKSPACE / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 OUT = REPO / "baseline/runs/N_gepa16_from_original/test50_top3"
 sys.path[:0] = [str(REPO)]
 

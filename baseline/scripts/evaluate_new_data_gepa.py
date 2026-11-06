@@ -60,10 +60,15 @@ def main():
     texts = {"baseline": seed_text}
     if candidate:
         texts["candidate"] = candidate
+    prompt_hashes = {key: hashlib.sha256(compose_system(value).encode()).hexdigest()
+                     for key, value in texts.items()}
+    runtime_sha = hashlib.sha256((REPO / "agents/ToolRuntime/runtime.py").read_bytes()).hexdigest()
     if args.mode == "test50" and not args.prepare_only:
         confirmation = root / "confirmation/paired_result.json"
         check = json.loads(confirmation.read_text(encoding="utf-8")) if confirmation.exists() else {}
-        if check.get("status") != "complete" or not check.get("provisional_safety_pass"):
+        if (check.get("status") != "complete" or not check.get("provisional_safety_pass")
+                or check.get("configuration", {}).get("prompt_hashes") != prompt_hashes
+                or check.get("configuration", {}).get("runtime_sha256") != runtime_sha):
             raise SystemExit("Complete and pass independent confirmation before opening final test labels")
     if args.mode == "confirmation":
         source = root / "data/examples_confirmation.jsonl"
@@ -94,8 +99,8 @@ def main():
     output_dir = root / args.mode
     output_dir.mkdir(parents=True, exist_ok=True)
     config = {"mode": args.mode, "source_sha256": source_sha, "repeats": args.repeats,
-              "prompt_hashes": {key: hashlib.sha256(compose_system(value).encode()).hexdigest()
-                                for key, value in texts.items()},
+              "prompt_hashes": prompt_hashes,
+              "runtime_sha256": runtime_sha,
               "sample_ids": [e["sample_id"] for e in examples],
               "parameters": training_manifest["parameters"]}
     if args.prepare_only:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import html as html_mod
 import json
+import os
 import sys
 import time
 import threading
@@ -19,7 +20,7 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
-REPO = Path(r"D:\guqinagent-gitgub\guqinagent")
+REPO = Path(__file__).resolve().parents[2]
 RUN = REPO / "baseline/runs/N_gepa16_from_original"
 OUT = RUN / "test50_top3"
 sys.path[:0] = [str(REPO.parent / ".gepa_packages"), str(REPO),
@@ -66,6 +67,14 @@ def _pid_alive(pid: int) -> bool:
     import ctypes
     if pid <= 0:
         return False
+    if os.name != "nt":
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True
+        return True
     try:
         handle = ctypes.windll.kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
     except Exception:
@@ -83,13 +92,13 @@ def _pid_alive(pid: int) -> bool:
 
 def acquire_lock(path):
     """进程锁：防止两个监督器同时跑同一臂写同一断点文件。"""
-    import os
     if path.exists():
         data = json.loads(path.read_text(encoding="utf-8"))
         pid = int(data.get("pid", -1))
         if _pid_alive(pid):
             raise SystemExit(f"另一个实例（PID {pid}）正在跑，退出以免覆盖断点。")
-    path.write_text(json.dumps({"pid": os.getpid(), "arm": path.stem}, ensure_ascii=False), encoding="utf-8")
+    with path.open("x", encoding="utf-8") as handle:
+        json.dump({"pid": os.getpid(), "arm": path.stem}, handle, ensure_ascii=False)
     return path
 
 
@@ -145,17 +154,25 @@ def main():
 
 def run_arm(run_arm, texts, manifest, examples, *, workers=1):
     arm_path = OUT / f"rows_{run_arm}.json"
-    result = json.loads(arm_path.read_text(encoding="utf-8")) if arm_path.exists() else {
-        "configuration": {
-            "mode": "test50_top3_user_authorized",
-            "sample_count": len(examples),
-            "sample_ids": [e["sample_id"] for e in examples],
-            "prompt_hashes": {k: hashlib.sha256(compose_system(v).encode()).hexdigest()
-                              for k, v in texts.items()},
-            "parameters": manifest["parameters"]},
-        "rows": [], "status": "running", "arm": run_arm,
-        "note": "用户显式要求开启封存test50对Top3+N0四臂评测；结果不回流训练。",
+    configuration = {
+        "mode": "test50_top3_user_authorized",
+        "sample_count": len(examples),
+        "sample_ids": [e["sample_id"] for e in examples],
+        "prompt_hashes": {k: hashlib.sha256(compose_system(v).encode()).hexdigest()
+                          for k, v in texts.items()},
+        "parameters": manifest["parameters"],
+        "model": os.environ.get("GLM_MODEL", "glm-5.3"),
+        "max_tokens": os.environ.get("GLM_MAX_TOKENS", "8000"),
+        "thinking": os.environ.get("GLM_THINKING", "disabled"),
+        "public_sha256": hashlib.sha256((TEST50 / "test_runtime.jsonl").read_bytes()).hexdigest(),
+        "reference_sha256": hashlib.sha256((TEST50 / "evaluation_pairs_test.jsonl").read_bytes()).hexdigest(),
+        "runtime_sha256": hashlib.sha256((REPO / "agents/ToolRuntime/runtime.py").read_bytes()).hexdigest(),
     }
+    result = json.loads(arm_path.read_text(encoding="utf-8")) if arm_path.exists() else {
+        "configuration": configuration, "rows": [], "status": "running", "arm": run_arm,
+    }
+    if result["configuration"] != configuration or result["arm"] != run_arm:
+        raise SystemExit("Checkpoint protocol differs. Archive the old arm output before starting a fresh run.")
     completed = {(r["sample_id"]): r for r in result["rows"]}
     examples_by_id = {str(example["sample_id"]): example for example in examples}
     historical = {}

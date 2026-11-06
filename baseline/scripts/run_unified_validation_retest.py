@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-REPO = ROOT / "guqinagent"
+REPO = Path(__file__).resolve().parents[2]
 DATASET = ROOT / "_tmp_zip_inspect" / "pitch_eligible_two_or_half"
 OUT = ROOT / "results" / "unified_validation_retest"
 REPORT = ROOT / "reports" / "unified_validation_retest_progress.html"
